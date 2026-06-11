@@ -24,6 +24,7 @@ build.ninja
 
 # Local workflow and agent state
 /.project-surgeon/
+/.review/
 /.agents/
 /.codex/
 
