@@ -1,0 +1,67 @@
+name: Windows Qt Portable Package
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  BUILD_DIR: build-windows
+  QT_VERSION: 6.8.3
+  QT_ARCH: win64_msvc2022_64
+  PACKAGE_NAME: SerialValueMatcherNative-win-x64
+
+jobs:
+  build-test-package:
+    name: Build, test, and package portable Windows app
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4.3.1
+        with:
+          version: ${{ env.QT_VERSION }}
+          target: desktop
+          arch: ${{ env.QT_ARCH }}
+          modules: qtserialport
+          cache: true
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S . -B $env:BUILD_DIR -G "Visual Studio 17 2022" -A x64
+
+      - name: Build Release
+        shell: pwsh
+        run: cmake --build $env:BUILD_DIR --config Release --parallel 1
+
+      - name: Test Release
+        shell: pwsh
+        run: ctest --test-dir $env:BUILD_DIR --output-on-failure -C Release
+
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $qtBinDir = Split-Path -Parent (Get-Command windeployqt.exe).Source
+          & .\scripts\package-windows.ps1 `
+            -BuildDir $env:BUILD_DIR `
+            -Config Release `
+            -QtBinDir $qtBinDir `
+            -SkipBuild
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.PACKAGE_NAME }}
+          path: |
+            artifacts/windows/${{ env.PACKAGE_NAME }}.zip
+            artifacts/windows/${{ env.PACKAGE_NAME }}.zip.sha256.txt
+          if-no-files-found: error
+          retention-days: 14

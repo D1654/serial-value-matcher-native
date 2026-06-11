@@ -1,0 +1,30 @@
+* text=auto
+
+# Keep scripts predictable on their target shells.
+*.sh text eol=lf
+*.ps1 text eol=crlf
+
+# Project text formats.
+*.cpp text
+*.h text
+*.md text
+*.txt text
+*.yml text
+*.yaml text
+*.cmake text
+CMakeLists.txt text
+
+# Binary and generated package formats.
+*.7z binary
+*.dll binary
+*.dmg binary
+*.exe binary
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.msi binary
+*.png binary
+*.tar binary
+*.tar.gz binary
+*.tgz binary
+*.zip binary

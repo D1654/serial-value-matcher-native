@@ -1,0 +1,41 @@
+name: Linux Qt
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            ninja-build \
+            pkg-config \
+            g++ \
+            qt6-base-dev \
+            qt6-base-dev-tools \
+            qt6-serialport-dev \
+            libqt6sql6-sqlite
+
+      - name: Check build environment
+        run: ./scripts/check-env.sh
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build --parallel 1
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure

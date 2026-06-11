@@ -1,0 +1,55 @@
+# Build output
+/build/
+/build-*/
+/cmake-build-*/
+/out/
+/dist/
+/artifacts/
+
+# CMake and Ninja local state
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+install_manifest.txt
+build.ninja
+.ninja_deps
+.ninja_log
+
+# Qt generated files
+*_autogen/
+*.qmlc
+*.jsc
+
+# Local workflow and agent state
+/.project-surgeon/
+/.agents/
+/.codex/
+
+# Runtime data and logs
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.tmp
+*.bak
+
+# Packaged binaries and archives
+*.7z
+*.dmg
+*.exe
+*.msi
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
