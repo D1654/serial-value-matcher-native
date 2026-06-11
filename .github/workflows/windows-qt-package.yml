@@ -19,7 +19,7 @@ env:
 jobs:
   build-test-package:
     name: Build, test, and package portable Windows app
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
       - name: Check out repository

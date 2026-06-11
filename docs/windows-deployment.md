@@ -16,7 +16,7 @@
 - 提交 pull request
 - 在 GitHub Actions 页面手动运行 `workflow_dispatch`
 
-workflow 会在 `windows-latest` runner 上执行：
+workflow 会在 `windows-2022` runner 上执行：
 
 1. 检出仓库。
 2. 安装 Qt 6 x64 MSVC 和 `qtserialport` 模块。

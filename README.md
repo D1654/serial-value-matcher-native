@@ -149,7 +149,7 @@ ctest --test-dir build --output-on-failure
 
 仓库也包含 Windows 便携包 workflow：`.github/workflows/windows-qt-package.yml`。
 
-该 workflow 在 `windows-latest` runner 上安装 Qt 6 x64 MSVC，执行 Release 构建、CTest 和 `scripts/package-windows.ps1`，并上传便携 zip artifact：
+该 workflow 在 `windows-2022` runner 上安装 Qt 6 x64 MSVC，执行 Release 构建、CTest 和 `scripts/package-windows.ps1`，并上传便携 zip artifact：
 
 ```text
 SerialValueMatcherNative-win-x64
