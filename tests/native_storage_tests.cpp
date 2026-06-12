@@ -135,6 +135,12 @@ void scanAndMatchRecordsRoundTrip() {
     execution.observations.push_back(observation);
 
     assert(store.saveScanExecution(execution));
+    const auto latestSession = store.latestScanSession();
+    assert(latestSession.has_value());
+    assert(latestSession->sessionId == "scan-1");
+    const auto recentSessions = store.recentScanSessions(5);
+    assert(recentSessions.size() == 1);
+    assert(recentSessions[0].sessionId == "scan-1");
     const auto loadedSession = store.scanSession("scan-1");
     assert(loadedSession.has_value());
     assert(loadedSession->status == "completed");
@@ -168,6 +174,12 @@ void scanAndMatchRecordsRoundTrip() {
     candidate.evidenceText = "单样本候选";
 
     assert(store.saveMatchRun(run, {candidate}));
+    const auto latestRun = store.latestMatchRun();
+    assert(latestRun.has_value());
+    assert(latestRun->runId == "match-1");
+    const auto recentRuns = store.recentMatchRuns(5);
+    assert(recentRuns.size() == 1);
+    assert(recentRuns[0].sourceScanSessionId == "scan-1");
     const auto loadedRun = store.matchRun("match-1");
     assert(loadedRun.has_value());
     assert(loadedRun->candidateCount == 1);
@@ -227,6 +239,9 @@ void protocolRulesAndVerificationRoundTrip() {
     verificationResult.interpretationText = "位解释：bit0 运行允许=已允许。";
 
     assert(store.saveRuleVerificationRun(verificationRun, {verificationResult}));
+    const auto latestVerificationRun = store.latestRuleVerificationRun();
+    assert(latestVerificationRun.has_value());
+    assert(latestVerificationRun->verificationRunId == "verify-1");
     const auto loadedVerificationRun = store.ruleVerificationRun("verify-1");
     assert(loadedVerificationRun.has_value());
     assert(loadedVerificationRun->verifiedCount == 1);

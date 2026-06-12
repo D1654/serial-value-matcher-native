@@ -875,6 +875,22 @@ bool NativeSessionStore::saveScanExecution(const ScanExecutionRecord& execution)
         && rewriteRecords(kScanObservationsFile, observations);
 }
 
+std::vector<ScanSessionRecord> NativeSessionStore::recentScanSessions(int limit) const {
+    std::vector<ScanSessionRecord> sessions;
+    for (const Record& record : loadRecords(kScanSessionsFile)) {
+        sessions.push_back(scanSessionFromRecord(record));
+    }
+    return recentLastFirst(std::move(sessions), limit);
+}
+
+std::optional<ScanSessionRecord> NativeSessionStore::latestScanSession() const {
+    const auto sessions = recentScanSessions(1);
+    if (sessions.empty()) {
+        return std::nullopt;
+    }
+    return sessions.front();
+}
+
 std::optional<ScanSessionRecord> NativeSessionStore::scanSession(std::string_view sessionId) const {
     std::optional<ScanSessionRecord> found;
     for (const Record& record : loadRecords(kScanSessionsFile)) {
@@ -961,6 +977,22 @@ bool NativeSessionStore::saveMatchRun(MatchRunRecord run, std::vector<MatchCandi
 
     return rewriteRecords(kMatchRunsFile, runs)
         && rewriteRecords(kMatchCandidatesFile, candidateRecords);
+}
+
+std::vector<MatchRunRecord> NativeSessionStore::recentMatchRuns(int limit) const {
+    std::vector<MatchRunRecord> runs;
+    for (const Record& record : loadRecords(kMatchRunsFile)) {
+        runs.push_back(matchRunFromRecord(record));
+    }
+    return recentLastFirst(std::move(runs), limit);
+}
+
+std::optional<MatchRunRecord> NativeSessionStore::latestMatchRun() const {
+    const auto runs = recentMatchRuns(1);
+    if (runs.empty()) {
+        return std::nullopt;
+    }
+    return runs.front();
 }
 
 std::optional<MatchRunRecord> NativeSessionStore::matchRun(std::string_view runId) const {
@@ -1089,6 +1121,14 @@ bool NativeSessionStore::saveRuleVerificationRun(
 
     return rewriteRecords(kRuleVerificationRunsFile, runs)
         && rewriteRecords(kRuleVerificationResultsFile, resultRecords);
+}
+
+std::optional<RuleVerificationRunRecord> NativeSessionStore::latestRuleVerificationRun() const {
+    std::optional<RuleVerificationRunRecord> latest;
+    for (const Record& record : loadRecords(kRuleVerificationRunsFile)) {
+        latest = verificationRunFromRecord(record);
+    }
+    return latest;
 }
 
 std::optional<RuleVerificationRunRecord> NativeSessionStore::ruleVerificationRun(std::string_view verificationRunId) const {

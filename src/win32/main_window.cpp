@@ -3,27 +3,37 @@
 #if defined(_WIN32)
 
 #include "win32/resource.h"
+#include "win32/ui_text.h"
 #include "win32/utf8_win32.h"
 #include "win32/win32_serial_enumerator.h"
 #include "win32/win32_serial_types.h"
 
 #include "core/modbus_core.h"
+#include "core/report_core.h"
 
 #include <algorithm>
 #include <chrono>
 #include <commctrl.h>
+#include <commdlg.h>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <cwctype>
+#include <fstream>
 #include <sstream>
 #include <utility>
 
 namespace svm::win32 {
 namespace {
 
+using T = TextId;
+
 constexpr wchar_t kWindowClassName[] = L"SvmNativeMainWindow";
 constexpr std::size_t kMaxLogChars = 200000;
+
+const wchar_t* tx(T id) {
+    return uiText(id);
+}
 
 std::wstring bytesToHex(const std::vector<std::uint8_t>& bytes) {
     std::wostringstream output;
@@ -62,7 +72,7 @@ std::vector<std::uint8_t> parseHexPayload(std::wstring_view text, std::wstring* 
         const int value = hexValue(ch);
         if (value < 0) {
             if (errorText != nullptr) {
-                *errorText = L"HEX 输入包含非十六进制字符。";
+                *errorText = tx(T::HexInvalidChar);
             }
             return {};
         }
@@ -74,7 +84,7 @@ std::vector<std::uint8_t> parseHexPayload(std::wstring_view text, std::wstring* 
     }
     if ((nibbles.size() % 2) != 0) {
         if (errorText != nullptr) {
-            *errorText = L"HEX 输入的半字节数量为奇数，请补齐。";
+            *errorText = tx(T::HexOddNibble);
         }
         return {};
     }
@@ -238,6 +248,121 @@ int textToInt(HWND control, int fallback) {
     return end != text.c_str() ? static_cast<int>(value) : fallback;
 }
 
+double textToDouble(HWND control, double fallback, bool* ok = nullptr) {
+    if (ok != nullptr) {
+        *ok = false;
+    }
+    const int length = GetWindowTextLengthW(control);
+    if (length <= 0) {
+        return fallback;
+    }
+    std::wstring text(static_cast<std::size_t>(length) + 1, L'\0');
+    GetWindowTextW(control, text.data(), length + 1);
+    text.resize(static_cast<std::size_t>(length));
+    wchar_t* end = nullptr;
+    const double value = std::wcstod(text.c_str(), &end);
+    if (end == text.c_str()) {
+        return fallback;
+    }
+    while (end != nullptr && *end != L'\0' && std::iswspace(*end)) {
+        ++end;
+    }
+    if (end != nullptr && *end == L'\0') {
+        if (ok != nullptr) {
+            *ok = true;
+        }
+        return value;
+    }
+    return fallback;
+}
+
+std::string timestampIdText() {
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t time = std::chrono::system_clock::to_time_t(now);
+    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000;
+    std::tm utc = {};
+    gmtime_s(&utc, &time);
+    char buffer[32] = {};
+    std::strftime(buffer, sizeof(buffer), "%Y%m%d%H%M%S", &utc);
+    char suffix[8] = {};
+    std::snprintf(suffix, sizeof(suffix), "%03lld", static_cast<long long>(millis));
+    return std::string(buffer) + suffix;
+}
+
+std::string formatNumber(double value) {
+    std::ostringstream output;
+    output.precision(12);
+    output << value;
+    return output.str();
+}
+
+core::analysis::RegisterSample sampleFromObservation(const native_storage::ScanObservationRecord& observation) {
+    core::analysis::RegisterSample sample;
+    sample.observationId = observation.id;
+    sample.sessionId = observation.sessionId;
+    sample.slaveId = observation.slaveId;
+    sample.functionCode = observation.functionCode;
+    sample.address = observation.address;
+    sample.value = static_cast<std::uint16_t>(observation.value);
+    sample.blockIndex = observation.blockIndex;
+    sample.attemptIndex = observation.attemptIndex;
+    return sample;
+}
+
+native_storage::MatchCandidateRecord candidateRecordFromCore(
+    const core::analysis::ValueMatchCandidate& candidate,
+    const std::string& runId,
+    int rankIndex,
+    const std::string& observedAtUtc) {
+    native_storage::MatchCandidateRecord record;
+    record.runId = runId;
+    record.rankIndex = rankIndex;
+    record.candidateType = core::analysis::numericCandidateTypeName(candidate.type);
+    record.wordOrder = core::analysis::wordOrderName(candidate.wordOrder);
+    record.byteOrder = core::analysis::byteOrderName(candidate.byteOrder);
+    record.sourceSessionId = candidate.sessionId;
+    record.slaveId = candidate.slaveId;
+    record.functionCode = candidate.functionCode;
+    record.startAddress = candidate.startAddress;
+    record.registerCount = candidate.registerCount;
+    record.observationIds = candidate.observationIds;
+    record.addresses = candidate.addresses;
+    record.blockIndexes = candidate.blockIndexes;
+    record.attemptIndexes = candidate.attemptIndexes;
+    record.rawRegisters.reserve(candidate.rawRegisters.size());
+    for (std::uint16_t value : candidate.rawRegisters) {
+        record.rawRegisters.push_back(static_cast<int>(value));
+    }
+    record.decodedValue = candidate.decodedValue;
+    record.scaleMultiplier = candidate.scale.multiplier;
+    record.scaleOffset = candidate.scale.offset;
+    record.engineeringValue = candidate.engineeringValue;
+    record.delta = candidate.delta;
+    record.absoluteError = candidate.absoluteError;
+    record.effectiveTolerance = candidate.effectiveTolerance;
+    record.score = candidate.score;
+    record.observedAtUtc = observedAtUtc;
+    record.evidenceText = candidate.evidenceText;
+    return record;
+}
+
+std::wstring candidateDisplayText(const native_storage::MatchCandidateRecord& candidate) {
+    std::wostringstream output;
+    output << L"#" << (candidate.rankIndex + 1)
+           << L" " << utf8ToWide(candidate.candidateType)
+           << L" @" << candidate.startAddress
+           << L"=" << utf8ToWide(formatNumber(candidate.engineeringValue))
+           << L" score " << utf8ToWide(formatNumber(candidate.score));
+    return output.str();
+}
+
+std::wstring ruleDisplayName(const native_storage::MatchCandidateRecord& candidate, const std::wstring& targetName) {
+    if (!targetName.empty()) {
+        return targetName;
+    }
+    return utf8ToWide(candidate.candidateType) + L"@" + std::to_wstring(candidate.startAddress);
+}
+
 } // namespace
 
 bool NativeMainWindow::create(HINSTANCE instance) {
@@ -257,7 +382,7 @@ bool NativeMainWindow::create(HINSTANCE instance) {
     window_ = CreateWindowExW(
         0,
         kWindowClassName,
-        L"串口值匹配器 Win32 Native",
+        tx(T::WindowTitle),
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
@@ -285,8 +410,18 @@ int NativeMainWindow::runMessageLoop() {
 }
 
 bool NativeMainWindow::runSelfTest() {
-    const std::wstring chineseText = L"串口值匹配器";
-    if (utf8ToWide("串口值匹配器") != chineseText || wideToUtf8(chineseText) != "串口值匹配器") {
+    const std::wstring expectedChinese = {
+        static_cast<wchar_t>(0x4E32),
+        static_cast<wchar_t>(0x53E3),
+        static_cast<wchar_t>(0x503C),
+        static_cast<wchar_t>(0x5339),
+        static_cast<wchar_t>(0x914D),
+        static_cast<wchar_t>(0x5668),
+    };
+    constexpr char kExpectedUtf8[] = "\xE4\xB8\xB2\xE5\x8F\xA3\xE5\x80\xBC\xE5\x8C\xB9\xE9\x85\x8D\xE5\x99\xA8";
+    if (std::wstring(tx(T::SelfTestText)) != expectedChinese
+        || utf8ToWide(kExpectedUtf8) != expectedChinese
+        || wideToUtf8(expectedChinese) != kExpectedUtf8) {
         return false;
     }
 
@@ -328,7 +463,7 @@ bool NativeMainWindow::runSelfTest() {
     profile.updatedAtUtc = timestampText();
 
     native_storage::SendHistoryEntry history;
-    history.content = "AT+测试";
+    history.content = "AT+\xE6\xB5\x8B\xE8\xAF\x95";
     history.payloadMode = 0;
     history.lineEnding = 0;
     history.sentAtUtc = timestampText();
@@ -368,6 +503,13 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         refreshPorts();
         applyLatestSerialProfile();
         refreshSendHistory();
+        if (const auto run = store_.latestMatchRun(); run.has_value()) {
+            latestMatchRunId_ = run->runId;
+            refreshCandidateCombo(run->runId);
+        }
+        if (const auto verificationRun = store_.latestRuleVerificationRun(); verificationRun.has_value()) {
+            latestVerificationRunId_ = verificationRun->verificationRunId;
+        }
         SetTimer(window_, IDT_SERIAL_POLL, 50, nullptr);
         return 0;
     case WM_SIZE:
@@ -390,15 +532,15 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         case IDC_CLEAR_BUTTON:
             SetWindowTextW(receiveLog_, L"");
             hiddenLogLineCount_ = 0;
-            setStatus(L"接收区已清空，native 存储记录不会删除。");
+            setStatus(tx(T::ClearLogStatus));
             return 0;
         case IDC_SAVE_PROFILE_BUTTON:
             saveCurrentSerialProfile();
             return 0;
         case IDC_PAUSE_SCROLL_BUTTON:
             scrollPaused_ = !scrollPaused_;
-            SetWindowTextW(pauseScrollButton_, scrollPaused_ ? L"恢复滚动" : L"暂停滚动");
-            setStatus(scrollPaused_ ? L"已暂停滚动：仍继续接收和写入 native 存储。" : L"已恢复滚动。");
+            SetWindowTextW(pauseScrollButton_, scrollPaused_ ? tx(T::ResumeScrollButton) : tx(T::PauseScrollButton));
+            setStatus(scrollPaused_ ? tx(T::PauseScrollStatus) : tx(T::ResumeScrollStatus));
             return 0;
         case IDC_HISTORY_COMBO:
             if (HIWORD(wParam) == CBN_SELCHANGE) {
@@ -438,20 +580,20 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
                 BM_SETCHECK,
                 SendMessageW(autoReconnectCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED ? BST_UNCHECKED : BST_CHECKED,
                 0);
-            setStatus(SendMessageW(autoReconnectCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED ? L"已开启自动重连。" : L"已关闭自动重连。");
+            setStatus(SendMessageW(autoReconnectCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED ? tx(T::AutoReconnectEnabled) : tx(T::AutoReconnectDisabled));
             return 0;
         case IDM_TOOLS_SEND:
             sendPayload();
             return 0;
         case IDM_TOOLS_PAUSE_SCROLL:
             scrollPaused_ = !scrollPaused_;
-            SetWindowTextW(pauseScrollButton_, scrollPaused_ ? L"恢复滚动" : L"暂停滚动");
-            setStatus(scrollPaused_ ? L"已暂停滚动：仍继续接收和写入 native 存储。" : L"已恢复滚动。");
+            SetWindowTextW(pauseScrollButton_, scrollPaused_ ? tx(T::ResumeScrollButton) : tx(T::PauseScrollButton));
+            setStatus(scrollPaused_ ? tx(T::PauseScrollStatus) : tx(T::ResumeScrollStatus));
             return 0;
         case IDM_TOOLS_CLEAR_LOG:
             SetWindowTextW(receiveLog_, L"");
             hiddenLogLineCount_ = 0;
-            setStatus(L"接收区已清空，native 存储记录不会删除。");
+            setStatus(tx(T::ClearLogStatus));
             return 0;
         case IDM_ANALYSIS_MODBUS_SCAN:
             runModbusScan();
@@ -489,6 +631,11 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         KillTimer(window_, IDT_SERIAL_POLL);
         KillTimer(window_, IDT_RECONNECT);
         disconnectSerial();
+        if (ownsUiFont_ && uiFont_ != nullptr) {
+            DeleteObject(uiFont_);
+            uiFont_ = nullptr;
+            ownsUiFont_ = false;
+        }
         PostQuitMessage(0);
         return 0;
     default:
@@ -505,73 +652,98 @@ void NativeMainWindow::createMenus() {
     HMENU analysisMenu = CreatePopupMenu();
     HMENU helpMenu = CreatePopupMenu();
 
-    AppendMenuW(fileMenu, MF_STRING, IDM_FILE_SAVE_PROFILE, L"保存串口配置(&S)");
+    AppendMenuW(fileMenu, MF_STRING, IDM_FILE_SAVE_PROFILE, tx(T::FileSaveProfileMenu));
     AppendMenuW(fileMenu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(fileMenu, MF_STRING, IDM_FILE_EXIT, L"退出(&X)");
+    AppendMenuW(fileMenu, MF_STRING, IDM_FILE_EXIT, tx(T::FileExitMenu));
 
-    AppendMenuW(serialMenu, MF_STRING, IDM_SERIAL_REFRESH, L"刷新端口(&R)");
-    AppendMenuW(serialMenu, MF_STRING, IDM_SERIAL_CONNECT, L"连接(&C)");
-    AppendMenuW(serialMenu, MF_STRING, IDM_SERIAL_DISCONNECT, L"断开(&D)");
-    AppendMenuW(serialMenu, MF_STRING, IDM_SERIAL_AUTO_RECONNECT, L"切换自动重连(&A)");
+    AppendMenuW(serialMenu, MF_STRING, IDM_SERIAL_REFRESH, tx(T::SerialRefreshMenu));
+    AppendMenuW(serialMenu, MF_STRING, IDM_SERIAL_CONNECT, tx(T::SerialConnectMenu));
+    AppendMenuW(serialMenu, MF_STRING, IDM_SERIAL_DISCONNECT, tx(T::SerialDisconnectMenu));
+    AppendMenuW(serialMenu, MF_STRING, IDM_SERIAL_AUTO_RECONNECT, tx(T::SerialAutoReconnectMenu));
 
-    AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_SEND, L"发送(&E)");
-    AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_PAUSE_SCROLL, L"暂停/恢复滚动(&P)");
-    AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_CLEAR_LOG, L"清空接收区(&L)");
+    AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_SEND, tx(T::ToolsSendMenu));
+    AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_PAUSE_SCROLL, tx(T::ToolsPauseScrollMenu));
+    AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_CLEAR_LOG, tx(T::ToolsClearLogMenu));
 
-    AppendMenuW(analysisMenu, MF_STRING, IDM_ANALYSIS_MODBUS_SCAN, L"Modbus 扫描(&M)");
-    AppendMenuW(analysisMenu, MF_STRING, IDM_ANALYSIS_WORKSPACE, L"分析工作区(&W)");
-    AppendMenuW(analysisMenu, MF_STRING, IDM_ANALYSIS_RULE_VERIFY, L"规则验证(&V)");
-    AppendMenuW(analysisMenu, MF_STRING, IDM_ANALYSIS_EXPORT_REPORT, L"导出验证报告(&O)");
+    AppendMenuW(analysisMenu, MF_STRING, IDM_ANALYSIS_MODBUS_SCAN, tx(T::AnalysisModbusScanMenu));
+    AppendMenuW(analysisMenu, MF_STRING, IDM_ANALYSIS_WORKSPACE, tx(T::AnalysisWorkspaceMenu));
+    AppendMenuW(analysisMenu, MF_STRING, IDM_ANALYSIS_RULE_VERIFY, tx(T::AnalysisRuleVerifyMenu));
+    AppendMenuW(analysisMenu, MF_STRING, IDM_ANALYSIS_EXPORT_REPORT, tx(T::AnalysisExportReportMenu));
 
-    AppendMenuW(helpMenu, MF_STRING, IDM_HELP_ABOUT, L"关于(&A)");
+    AppendMenuW(helpMenu, MF_STRING, IDM_HELP_ABOUT, tx(T::HelpAboutMenu));
 
-    AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu), L"文件(&F)");
-    AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(serialMenu), L"串口(&S)");
-    AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(toolsMenu), L"工具(&T)");
-    AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(analysisMenu), L"分析(&A)");
-    AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(helpMenu), L"帮助(&H)");
+    AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu), tx(T::FileMenu));
+    AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(serialMenu), tx(T::SerialMenu));
+    AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(toolsMenu), tx(T::ToolsMenu));
+    AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(analysisMenu), tx(T::AnalysisMenu));
+    AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(helpMenu), tx(T::HelpMenu));
     SetMenu(window_, menu_);
 }
 
 void NativeMainWindow::createControls() {
-    uiFont_ = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+    uiFont_ = CreateFontW(
+        -14,
+        0,
+        0,
+        0,
+        FW_NORMAL,
+        FALSE,
+        FALSE,
+        FALSE,
+        DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY,
+        DEFAULT_PITCH | FF_DONTCARE,
+        L"Microsoft YaHei UI");
+    ownsUiFont_ = uiFont_ != nullptr;
+    if (uiFont_ == nullptr) {
+        uiFont_ = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+    }
 
-    portLabel_ = CreateWindowExW(0, L"STATIC", L"串口", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    portLabel_ = CreateWindowExW(0, L"STATIC", tx(T::PortLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     portCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_PORT_COMBO), instance_, nullptr);
-    refreshButton_ = CreateWindowExW(0, L"BUTTON", L"刷新", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_REFRESH_BUTTON), instance_, nullptr);
-    saveProfileButton_ = CreateWindowExW(0, L"BUTTON", L"保存配置", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SAVE_PROFILE_BUTTON), instance_, nullptr);
-    baudLabel_ = CreateWindowExW(0, L"STATIC", L"波特率", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    refreshButton_ = CreateWindowExW(0, L"BUTTON", tx(T::RefreshButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_REFRESH_BUTTON), instance_, nullptr);
+    saveProfileButton_ = CreateWindowExW(0, L"BUTTON", tx(T::SaveProfileButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SAVE_PROFILE_BUTTON), instance_, nullptr);
+    baudLabel_ = CreateWindowExW(0, L"STATIC", tx(T::BaudLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     baudCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWN, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_BAUD_EDIT), instance_, nullptr);
-    dataBitsLabel_ = CreateWindowExW(0, L"STATIC", L"数据位", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    dataBitsLabel_ = CreateWindowExW(0, L"STATIC", tx(T::DataBitsLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     dataBitsCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_DATA_BITS_COMBO), instance_, nullptr);
-    parityLabel_ = CreateWindowExW(0, L"STATIC", L"校验", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    parityLabel_ = CreateWindowExW(0, L"STATIC", tx(T::ParityLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     parityCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_PARITY_COMBO), instance_, nullptr);
-    stopBitsLabel_ = CreateWindowExW(0, L"STATIC", L"停止位", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    stopBitsLabel_ = CreateWindowExW(0, L"STATIC", tx(T::StopBitsLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     stopBitsCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_STOP_BITS_COMBO), instance_, nullptr);
-    flowControlLabel_ = CreateWindowExW(0, L"STATIC", L"流控", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    flowControlLabel_ = CreateWindowExW(0, L"STATIC", tx(T::FlowControlLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     flowControlCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_FLOW_CONTROL_COMBO), instance_, nullptr);
     dtrCheck_ = CreateWindowExW(0, L"BUTTON", L"DTR", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_DTR_CHECK), instance_, nullptr);
     rtsCheck_ = CreateWindowExW(0, L"BUTTON", L"RTS", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_RTS_CHECK), instance_, nullptr);
-    autoReconnectCheck_ = CreateWindowExW(0, L"BUTTON", L"自动重连", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_AUTO_RECONNECT_CHECK), instance_, nullptr);
-    connectButton_ = CreateWindowExW(0, L"BUTTON", L"连接", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_CONNECT_BUTTON), instance_, nullptr);
-    disconnectButton_ = CreateWindowExW(0, L"BUTTON", L"断开", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_DISCONNECT_BUTTON), instance_, nullptr);
+    autoReconnectCheck_ = CreateWindowExW(0, L"BUTTON", tx(T::AutoReconnectCheck), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_AUTO_RECONNECT_CHECK), instance_, nullptr);
+    connectButton_ = CreateWindowExW(0, L"BUTTON", tx(T::ConnectButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_CONNECT_BUTTON), instance_, nullptr);
+    disconnectButton_ = CreateWindowExW(0, L"BUTTON", tx(T::DisconnectButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_DISCONNECT_BUTTON), instance_, nullptr);
     sendModeCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SEND_MODE_COMBO), instance_, nullptr);
     lineEndingCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LINE_ENDING_COMBO), instance_, nullptr);
     historyCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_HISTORY_COMBO), instance_, nullptr);
     sendEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SEND_EDIT), instance_, nullptr);
-    sendButton_ = CreateWindowExW(0, L"BUTTON", L"发送", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SEND_BUTTON), instance_, nullptr);
-    pauseScrollButton_ = CreateWindowExW(0, L"BUTTON", L"暂停滚动", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_PAUSE_SCROLL_BUTTON), instance_, nullptr);
-    clearButton_ = CreateWindowExW(0, L"BUTTON", L"清空", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_CLEAR_BUTTON), instance_, nullptr);
-    modbusButton_ = CreateWindowExW(0, L"BUTTON", L"Modbus 扫描", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_MODBUS_BUTTON), instance_, nullptr);
-    analysisButton_ = CreateWindowExW(0, L"BUTTON", L"分析工作区", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_ANALYSIS_BUTTON), instance_, nullptr);
-    ruleVerifyButton_ = CreateWindowExW(0, L"BUTTON", L"规则验证", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_RULE_VERIFY_BUTTON), instance_, nullptr);
-    exportReportButton_ = CreateWindowExW(0, L"BUTTON", L"导出报告", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_EXPORT_REPORT_BUTTON), instance_, nullptr);
+    sendButton_ = CreateWindowExW(0, L"BUTTON", tx(T::SendButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SEND_BUTTON), instance_, nullptr);
+    pauseScrollButton_ = CreateWindowExW(0, L"BUTTON", tx(T::PauseScrollButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_PAUSE_SCROLL_BUTTON), instance_, nullptr);
+    clearButton_ = CreateWindowExW(0, L"BUTTON", tx(T::ClearButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_CLEAR_BUTTON), instance_, nullptr);
+    modbusButton_ = CreateWindowExW(0, L"BUTTON", tx(T::ModbusScanButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_MODBUS_BUTTON), instance_, nullptr);
+    analysisButton_ = CreateWindowExW(0, L"BUTTON", tx(T::AnalysisButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_ANALYSIS_BUTTON), instance_, nullptr);
+    ruleVerifyButton_ = CreateWindowExW(0, L"BUTTON", tx(T::RuleVerifyButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_RULE_VERIFY_BUTTON), instance_, nullptr);
+    exportReportButton_ = CreateWindowExW(0, L"BUTTON", tx(T::ExportReportButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_EXPORT_REPORT_BUTTON), instance_, nullptr);
     scanSlaveEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"1", WS_CHILD | WS_VISIBLE | ES_NUMBER, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SCAN_SLAVE_EDIT), instance_, nullptr);
     scanFunctionCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SCAN_FUNCTION_COMBO), instance_, nullptr);
     scanStartEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"0", WS_CHILD | WS_VISIBLE | ES_NUMBER, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SCAN_START_EDIT), instance_, nullptr);
     scanEndEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"15", WS_CHILD | WS_VISIBLE | ES_NUMBER, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SCAN_END_EDIT), instance_, nullptr);
+    targetStatic_ = CreateWindowExW(0, L"STATIC", tx(T::TargetLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    targetLabelEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", tx(T::TargetNameDefault), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TARGET_LABEL_EDIT), instance_, nullptr);
+    targetValueEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", tx(T::TargetValueDefault), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TARGET_VALUE_EDIT), instance_, nullptr);
+    targetUnitEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", tx(T::TargetUnitDefault), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TARGET_UNIT_EDIT), instance_, nullptr);
+    toleranceStatic_ = CreateWindowExW(0, L"STATIC", tx(T::ToleranceLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    toleranceEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", tx(T::ToleranceDefault), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TOLERANCE_EDIT), instance_, nullptr);
+    candidateCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_CANDIDATE_COMBO), instance_, nullptr);
     receiveLog_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_RECEIVE_LOG), instance_, nullptr);
-    statusText_ = CreateWindowExW(0, L"STATIC", L"未连接", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_STATUS_TEXT), instance_, nullptr);
+    statusText_ = CreateWindowExW(0, L"STATIC", tx(T::InitialStatus), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_STATUS_TEXT), instance_, nullptr);
 
     populateSerialOptionControls();
     setDefaultFonts();
@@ -590,11 +762,11 @@ void NativeMainWindow::populateSerialOptionControls() {
     }
     selectComboData(dataBitsCombo_, 8);
 
-    addComboItem(parityCombo_, L"无校验", static_cast<LPARAM>(SerialParity::None));
-    addComboItem(parityCombo_, L"奇校验", static_cast<LPARAM>(SerialParity::Odd));
-    addComboItem(parityCombo_, L"偶校验", static_cast<LPARAM>(SerialParity::Even));
-    addComboItem(parityCombo_, L"标记校验", static_cast<LPARAM>(SerialParity::Mark));
-    addComboItem(parityCombo_, L"空格校验", static_cast<LPARAM>(SerialParity::Space));
+    addComboItem(parityCombo_, tx(T::NoParity), static_cast<LPARAM>(SerialParity::None));
+    addComboItem(parityCombo_, tx(T::OddParity), static_cast<LPARAM>(SerialParity::Odd));
+    addComboItem(parityCombo_, tx(T::EvenParity), static_cast<LPARAM>(SerialParity::Even));
+    addComboItem(parityCombo_, tx(T::MarkParity), static_cast<LPARAM>(SerialParity::Mark));
+    addComboItem(parityCombo_, tx(T::SpaceParity), static_cast<LPARAM>(SerialParity::Space));
     selectComboData(parityCombo_, static_cast<LPARAM>(SerialParity::None));
 
     addComboItem(stopBitsCombo_, L"1", static_cast<LPARAM>(SerialStopBits::One));
@@ -602,24 +774,27 @@ void NativeMainWindow::populateSerialOptionControls() {
     addComboItem(stopBitsCombo_, L"2", static_cast<LPARAM>(SerialStopBits::Two));
     selectComboData(stopBitsCombo_, static_cast<LPARAM>(SerialStopBits::One));
 
-    addComboItem(flowControlCombo_, L"无流控", static_cast<LPARAM>(SerialFlowControl::None));
+    addComboItem(flowControlCombo_, tx(T::NoFlowControl), static_cast<LPARAM>(SerialFlowControl::None));
     addComboItem(flowControlCombo_, L"RTS/CTS", static_cast<LPARAM>(SerialFlowControl::HardwareRtsCts));
     addComboItem(flowControlCombo_, L"XON/XOFF", static_cast<LPARAM>(SerialFlowControl::SoftwareXonXoff));
     selectComboData(flowControlCombo_, static_cast<LPARAM>(SerialFlowControl::None));
 
-    addComboItem(sendModeCombo_, L"文本", 0);
+    addComboItem(sendModeCombo_, tx(T::TextMode), 0);
     addComboItem(sendModeCombo_, L"HEX", 1);
     selectComboData(sendModeCombo_, 0);
 
-    addComboItem(lineEndingCombo_, L"无行尾", 0);
+    addComboItem(lineEndingCombo_, tx(T::NoLineEnding), 0);
     addComboItem(lineEndingCombo_, L"CR", 1);
     addComboItem(lineEndingCombo_, L"LF", 2);
     addComboItem(lineEndingCombo_, L"CRLF", 3);
     selectComboData(lineEndingCombo_, 0);
 
-    addComboItem(scanFunctionCombo_, L"FC03 保持寄存器", 3);
-    addComboItem(scanFunctionCombo_, L"FC04 输入寄存器", 4);
+    addComboItem(scanFunctionCombo_, tx(T::Fc03Holding), 3);
+    addComboItem(scanFunctionCombo_, tx(T::Fc04Input), 4);
     selectComboData(scanFunctionCombo_, 3);
+
+    addComboItem(candidateCombo_, tx(T::CandidatePlaceholder), 0);
+    selectComboData(candidateCombo_, 0);
 }
 
 void NativeMainWindow::layoutControls(int width, int height) {
@@ -700,14 +875,31 @@ void NativeMainWindow::layoutControls(int width, int height) {
     MoveWindow(scanStartEdit_, x, workflowY, 70, row, TRUE);
     x += 70 + gap;
     MoveWindow(scanEndEdit_, x, workflowY, 70, row, TRUE);
-    x += 70 + gap * 2;
-    MoveWindow(analysisButton_, x, workflowY, 104, row, TRUE);
-    x += 104 + gap;
-    MoveWindow(ruleVerifyButton_, x, workflowY, 90, row, TRUE);
-    x += 90 + gap;
-    MoveWindow(exportReportButton_, x, workflowY, 90, row, TRUE);
 
-    const int logY = workflowY + row + 12;
+    const int analysisY = workflowY + row + 8;
+    x = margin;
+    MoveWindow(targetStatic_, x, analysisY + 6, 42, 22, TRUE);
+    x += 42;
+    MoveWindow(targetLabelEdit_, x, analysisY, 96, row, TRUE);
+    x += 96 + gap;
+    MoveWindow(targetValueEdit_, x, analysisY, 86, row, TRUE);
+    x += 86 + gap;
+    MoveWindow(targetUnitEdit_, x, analysisY, 58, row, TRUE);
+    x += 58 + gap;
+    MoveWindow(toleranceStatic_, x, analysisY + 6, 42, 22, TRUE);
+    x += 42;
+    MoveWindow(toleranceEdit_, x, analysisY, 74, row, TRUE);
+    x += 74 + gap;
+    const int actionWidth = 104 + 90 + 90 + gap * 4;
+    MoveWindow(candidateCombo_, x, analysisY, std::max(150, width - x - margin - actionWidth), 220, TRUE);
+    x = width - margin - actionWidth;
+    MoveWindow(analysisButton_, x, analysisY, 104, row, TRUE);
+    x += 104 + gap;
+    MoveWindow(ruleVerifyButton_, x, analysisY, 90, row, TRUE);
+    x += 90 + gap;
+    MoveWindow(exportReportButton_, x, analysisY, 90, row, TRUE);
+
+    const int logY = analysisY + row + 12;
     const int statusHeight = 26;
     MoveWindow(receiveLog_, margin, logY, width - margin * 2, height - logY - statusHeight - margin, TRUE);
     MoveWindow(statusText_, margin, height - statusHeight - 4, width - margin * 2, statusHeight, TRUE);
@@ -729,15 +921,15 @@ void NativeMainWindow::refreshPorts() {
     if (!ports.empty()) {
         const LRESULT preserved = SendMessageW(portCombo_, CB_FINDSTRINGEXACT, static_cast<WPARAM>(-1), reinterpret_cast<LPARAM>(current.c_str()));
         SendMessageW(portCombo_, CB_SETCURSEL, preserved >= 0 ? static_cast<WPARAM>(preserved) : 0, 0);
-        setStatus(L"已刷新串口列表，共 " + std::to_wstring(ports.size()) + L" 个。");
+        setStatus(uiString(T::RefreshedPortsPrefix) + std::to_wstring(ports.size()) + uiString(T::PortsUnitSuffix));
     } else {
-        setStatus(L"未发现串口设备。");
+        setStatus(tx(T::NoPortsStatus));
     }
 }
 
 void NativeMainWindow::refreshSendHistory() {
     SendMessageW(historyCombo_, CB_RESETCONTENT, 0, 0);
-    SendMessageW(historyCombo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"发送历史"));
+    SendMessageW(historyCombo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(tx(T::SendHistory)));
     if (store_.isOpen()) {
         const auto history = store_.recentSendHistory(30);
         for (const native_storage::SendHistoryEntry& item : history) {
@@ -780,12 +972,12 @@ void NativeMainWindow::applyLatestSerialProfile() {
     selectComboData(flowControlCombo_, static_cast<LPARAM>(flowControlFromKey(profile->flowControl)));
     SendMessageW(dtrCheck_, BM_SETCHECK, profile->dataTerminalReady ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageW(rtsCheck_, BM_SETCHECK, profile->requestToSend ? BST_CHECKED : BST_UNCHECKED, 0);
-    setStatus(L"已恢复默认串口配置：" + portName + L"。");
+    setStatus(uiString(T::RestoredProfilePrefix) + portName + uiString(T::ChinesePeriod));
 }
 
 void NativeMainWindow::saveCurrentSerialProfile() {
     if (!store_.isOpen()) {
-        setStatus(L"native 存储未打开，无法保存配置。");
+        setStatus(tx(T::StorageSaveProfileClosed));
         return;
     }
     const SerialOpenOptions options = currentOpenOptions();
@@ -804,7 +996,7 @@ void NativeMainWindow::saveCurrentSerialProfile() {
         setStatus(utf8ToWide(store_.lastErrorText()));
         return;
     }
-    setStatus(L"已保存默认串口配置：" + utf8ToWide(options.portName) + L"，" + std::to_wstring(options.baudRate) + L"。");
+    setStatus(uiString(T::SavedProfilePrefix) + utf8ToWide(options.portName) + L"\uFF0C" + std::to_wstring(options.baudRate) + uiString(T::ChinesePeriod));
 }
 
 void NativeMainWindow::toggleConnection() {
@@ -817,7 +1009,7 @@ void NativeMainWindow::toggleConnection() {
 
 void NativeMainWindow::connectSerial() {
     if (serialPort_.isOpen()) {
-        setStatus(L"串口已经连接。");
+        setStatus(tx(T::AlreadyConnected));
         return;
     }
 
@@ -836,10 +1028,10 @@ void NativeMainWindow::connectSerial() {
     lastOpenOptions_ = options;
     waitingReconnect_ = false;
     KillTimer(window_, IDT_RECONNECT);
-    appendLog(L"[系统] 已连接 " + utf8ToWide(serialPort_.endpoint()));
-    SetWindowTextW(connectButton_, L"断开");
+    appendLog(uiString(T::SystemConnectedPrefix) + utf8ToWide(serialPort_.endpoint()));
+    SetWindowTextW(connectButton_, tx(T::DisconnectButton));
     saveCurrentSerialProfile();
-    setStatus(L"已连接。");
+    setStatus(tx(T::ConnectedStatus));
 }
 
 void NativeMainWindow::disconnectSerial() {
@@ -848,14 +1040,14 @@ void NativeMainWindow::disconnectSerial() {
     }
     const std::wstring endpoint = utf8ToWide(serialPort_.endpoint());
     serialPort_.close();
-    appendLog(L"[系统] 已断开 " + endpoint);
-    SetWindowTextW(connectButton_, L"连接");
-    setStatus(L"已断开。");
+    appendLog(uiString(T::SystemDisconnectedPrefix) + endpoint);
+    SetWindowTextW(connectButton_, tx(T::ConnectButton));
+    setStatus(tx(T::DisconnectedStatus));
 }
 
 void NativeMainWindow::sendPayload() {
     if (!serialPort_.isOpen()) {
-        setStatus(L"串口未连接，无法发送。");
+        setStatus(tx(T::SerialNotConnectedSend));
         return;
     }
 
@@ -866,7 +1058,7 @@ void NativeMainWindow::sendPayload() {
         return;
     }
     if (payload.empty()) {
-        setStatus(L"发送内容为空。");
+        setStatus(tx(T::EmptyPayload));
         return;
     }
 
@@ -888,7 +1080,7 @@ void NativeMainWindow::sendPayload() {
         refreshSendHistory();
     }
     appendLog(L"[TX] " + bytesToHex(payload));
-    setStatus(L"已发送 " + std::to_wstring(result.byteCount) + L" 字节。");
+    setStatus(uiString(T::SentPrefix) + std::to_wstring(result.byteCount) + uiString(T::BytesSuffix));
 }
 
 void NativeMainWindow::pollSerial() {
@@ -921,14 +1113,14 @@ void NativeMainWindow::handleSerialFailure(const std::string& message) {
     }
     const std::string endpoint = serialPort_.endpoint();
     serialPort_.close();
-    SetWindowTextW(connectButton_, L"连接");
-    appendLog(L"[系统] 串口异常断开：" + utf8ToWide(message));
+    SetWindowTextW(connectButton_, tx(T::ConnectButton));
+    appendLog(uiString(T::SystemSerialFailedPrefix) + utf8ToWide(message));
     const bool autoReconnect = SendMessageW(autoReconnectCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED;
     if (autoReconnect && lastOpenOptions_.has_value()) {
         reconnectPortName_ = endpoint;
         waitingReconnect_ = true;
         SetTimer(window_, IDT_RECONNECT, 2000, nullptr);
-        setStatus(L"串口异常断开，已进入自动重连等待：" + utf8ToWide(endpoint));
+        setStatus(uiString(T::ReconnectWaitingPrefix) + utf8ToWide(endpoint));
     } else {
         setStatus(utf8ToWide(message));
     }
@@ -945,14 +1137,14 @@ void NativeMainWindow::tryAutoReconnect() {
         return normalizedComPortName(port.portName) == normalizedComPortName(reconnectPortName_);
     });
     if (!present) {
-        setStatus(L"等待自动重连：端口 " + utf8ToWide(reconnectPortName_) + L" 尚未恢复。");
+        setStatus(uiString(T::WaitingReconnectPrefix) + utf8ToWide(reconnectPortName_) + uiString(T::PortNotReadySuffix));
         return;
     }
 
     SerialOpenOptions options = *lastOpenOptions_;
     options.portName = reconnectPortName_;
     if (!serialPort_.open(options)) {
-        setStatus(L"自动重连失败：" + utf8ToWide(serialPort_.lastErrorText()));
+        setStatus(uiString(T::AutoReconnectFailedPrefix) + utf8ToWide(serialPort_.lastErrorText()));
         waitingReconnect_ = false;
         KillTimer(window_, IDT_RECONNECT);
         return;
@@ -960,19 +1152,19 @@ void NativeMainWindow::tryAutoReconnect() {
 
     waitingReconnect_ = false;
     KillTimer(window_, IDT_RECONNECT);
-    SetWindowTextW(connectButton_, L"断开");
-    appendLog(L"[系统] 自动重连成功 " + utf8ToWide(serialPort_.endpoint()));
-    setStatus(L"自动重连成功。");
+    SetWindowTextW(connectButton_, tx(T::DisconnectButton));
+    appendLog(uiString(T::SystemReconnectOkPrefix) + utf8ToWide(serialPort_.endpoint()));
+    setStatus(tx(T::AutoReconnectOk));
 }
 
 void NativeMainWindow::appendLog(const std::wstring& line) {
     if (scrollPaused_) {
         ++hiddenLogLineCount_;
-        setStatus(L"滚动已暂停，已隐藏 " + std::to_wstring(hiddenLogLineCount_) + L" 条新日志；数据仍在接收和保存。");
+        setStatus(uiString(T::ScrollPausedPrefix) + std::to_wstring(hiddenLogLineCount_) + uiString(T::HiddenLinesSuffix));
         return;
     }
     if (GetWindowTextLengthW(receiveLog_) > static_cast<int>(kMaxLogChars)) {
-        SetWindowTextW(receiveLog_, L"[系统] 接收日志已达到上限，已清空以保护长期运行内存。\r\n");
+        SetWindowTextW(receiveLog_, tx(T::LogLimitReset));
     }
     const std::wstring text = line + L"\r\n";
     SendMessageW(receiveLog_, EM_SETSEL, static_cast<WPARAM>(-1), static_cast<LPARAM>(-1));
@@ -1026,11 +1218,11 @@ SerialOpenOptions NativeMainWindow::currentOpenOptions() const {
 
 void NativeMainWindow::runModbusScan() {
     if (!serialPort_.isOpen()) {
-        setStatus(L"请先连接串口，再执行 Modbus 扫描。");
+        setStatus(tx(T::ConnectBeforeModbus));
         return;
     }
     if (!store_.isOpen()) {
-        setStatus(L"native 存储未打开，无法保存 Modbus 扫描结果。");
+        setStatus(tx(T::StorageModbusClosed));
         return;
     }
 
@@ -1047,11 +1239,11 @@ void NativeMainWindow::runModbusScan() {
     const auto planResult = core::modbus::buildScanPlan(options);
     if (!planResult.ok) {
         setStatus(utf8ToWide(planResult.errorMessage));
-        MessageBoxW(window_, utf8ToWide(planResult.errorMessage).c_str(), L"Modbus 扫描参数无效", MB_ICONWARNING | MB_OK);
+        MessageBoxW(window_, utf8ToWide(planResult.errorMessage).c_str(), tx(T::ModbusInvalidTitle), MB_ICONWARNING | MB_OK);
         return;
     }
 
-    const std::string scanSessionId = "scan-" + timestampText();
+    const std::string scanSessionId = "scan-" + timestampIdText();
     native_storage::ScanExecutionRecord execution;
     execution.session.sessionId = scanSessionId;
     execution.session.slaveId = planResult.plan.slaveId;
@@ -1063,8 +1255,8 @@ void NativeMainWindow::runModbusScan() {
     execution.session.status = "running";
     execution.session.startedAtUtc = timestampText();
 
-    appendLog(L"[系统] 开始 Modbus 扫描 " + utf8ToWide(scanSessionId));
-    setStatus(L"正在执行 Modbus 扫描，请等待当前请求完成。");
+    appendLog(uiString(T::SystemModbusStartPrefix) + utf8ToWide(scanSessionId));
+    setStatus(tx(T::ModbusRunning));
 
     for (const core::modbus::ScanBlock& block : planResult.plan.blocks) {
         native_storage::ScanAttemptRecord attempt;
@@ -1116,7 +1308,7 @@ void NativeMainWindow::runModbusScan() {
         if (response.empty()) {
             attempt.status = "timeout";
             if (attempt.errorMessage.empty()) {
-                attempt.errorMessage = "等待 Modbus 响应超时。";
+                attempt.errorMessage = wideToUtf8(tx(T::ModbusTimeout));
             }
             ++execution.session.failedBlockCount;
             execution.attempts.push_back(std::move(attempt));
@@ -1167,55 +1359,439 @@ void NativeMainWindow::runModbusScan() {
         return;
     }
 
-    const std::wstring summary = L"Modbus 扫描已保存：成功块 "
+    const std::wstring summary = uiString(T::ModbusSummaryPrefix)
         + std::to_wstring(execution.session.successBlockCount)
-        + L"，失败块 "
+        + uiString(T::ModbusFailedBlocks)
         + std::to_wstring(execution.session.failedBlockCount)
-        + L"，观测 "
+        + uiString(T::ModbusObservations)
         + std::to_wstring(execution.observations.size())
-        + L"。";
-    appendLog(L"[系统] " + summary);
+        + uiString(T::ChinesePeriod);
+    appendLog(std::wstring(L"[") + L"\u7CFB\u7EDF] " + summary);
     setStatus(summary);
 }
 
 void NativeMainWindow::showAnalysisWorkspace() {
     if (!store_.isOpen()) {
-        showDeferredFeature(L"分析工作区", L"native 存储未打开，无法读取扫描和候选数据。");
+        setStatus(tx(T::AnalysisNoStore));
         return;
     }
-    const std::wstring message =
-        L"Win32 native 分析工作区入口已接入。\n\n"
-        L"当前可用：Modbus 扫描结果会保存到 native 存储；后续候选生成、稳定性分析和规则编辑会继续接入这里。\n\n"
-        L"请先用“Modbus 扫描”积累扫描数据。此入口不会静默失败，缺失能力会在后续版本继续补齐。";
-    MessageBoxW(window_, message.c_str(), L"分析工作区", MB_ICONINFORMATION | MB_OK);
-    setStatus(L"已打开分析工作区说明：候选生成和稳定性分析仍需继续补齐。");
+    const auto session = store_.latestScanSession();
+    if (!session.has_value()) {
+        setStatus(tx(T::AnalysisNoScan));
+        return;
+    }
+
+    const auto observations = store_.scanObservations(session->sessionId);
+    if (observations.empty()) {
+        setStatus(tx(T::AnalysisNoObservations));
+        return;
+    }
+
+    bool targetOk = false;
+    const double targetValue = textToDouble(targetValueEdit_, 0.0, &targetOk);
+    if (!targetOk) {
+        setStatus(tx(T::AnalysisInvalidTarget));
+        return;
+    }
+    bool toleranceOk = false;
+    const double tolerance = std::max(0.0, textToDouble(toleranceEdit_, 0.0, &toleranceOk));
+
+    std::vector<core::analysis::RegisterSample> samples;
+    samples.reserve(observations.size());
+    for (const native_storage::ScanObservationRecord& observation : observations) {
+        samples.push_back(sampleFromObservation(observation));
+    }
+
+    core::analysis::TargetValue target;
+    target.label = wideToUtf8(controlText(targetLabelEdit_));
+    target.value = targetValue;
+    target.unit = wideToUtf8(controlText(targetUnitEdit_));
+
+    core::analysis::CandidateGenerationOptions options;
+    options.scaleTransforms = {{1.0, 0.0}, {0.1, 0.0}, {0.01, 0.0}, {0.001, 0.0}, {10.0, 0.0}};
+    options.tolerance.absolute = toleranceOk ? tolerance : 0.0;
+    options.maxCandidates = 30;
+
+    const auto result = core::analysis::generateValueCandidates(samples, target, options);
+    if (!result.success) {
+        setStatus(utf8ToWide(result.errorMessage));
+        return;
+    }
+    if (result.candidates.empty()) {
+        setStatus(tx(T::AnalysisNoCandidates));
+        return;
+    }
+
+    const std::string runId = "match-" + timestampIdText();
+    native_storage::MatchRunRecord run;
+    run.runId = runId;
+    run.sourceScanSessionId = session->sessionId;
+    run.targetLabel = target.label;
+    run.targetValue = target.value;
+    run.targetUnit = target.unit;
+    run.sampledAtUtc = timestampText();
+    run.toleranceAbsolute = options.tolerance.absolute;
+    run.toleranceRelativeRatio = options.tolerance.relativeRatio;
+    run.createdAtUtc = timestampText();
+
+    std::vector<native_storage::MatchCandidateRecord> candidateRecords;
+    candidateRecords.reserve(result.candidates.size());
+    for (std::size_t index = 0; index < result.candidates.size(); ++index) {
+        candidateRecords.push_back(candidateRecordFromCore(
+            result.candidates[index],
+            runId,
+            static_cast<int>(index),
+            timestampText()));
+    }
+
+    if (!store_.saveMatchRun(run, candidateRecords)) {
+        setStatus(utf8ToWide(store_.lastErrorText()));
+        return;
+    }
+    latestMatchRunId_ = runId;
+    refreshCandidateCombo(runId);
+
+    const std::wstring summary = uiString(T::AnalysisSavedPrefix)
+        + utf8ToWide(session->sessionId)
+        + uiString(T::AnalysisSavedMid)
+        + std::to_wstring(result.candidates.size())
+        + uiString(T::AnalysisSavedRun)
+        + utf8ToWide(runId)
+        + uiString(T::ChinesePeriod);
+    appendLog(std::wstring(L"[\u7CFB\u7EDF] ") + summary);
+    setStatus(summary);
 }
 
 void NativeMainWindow::showRuleVerification() {
-    showDeferredFeature(
-        L"规则验证",
-        L"规则验证菜单已恢复，但完整验证 UI 还需要先补齐 native 候选分析和规则编辑。\n\n"
-        L"当前 native 包不会再隐藏该缺口；Qt baseline 仍是完整规则验证路径。");
+    if (!store_.isOpen()) {
+        setStatus(tx(T::RuleNoStore));
+        return;
+    }
+
+    if (const auto candidate = selectedCandidate(); candidate.has_value()) {
+        if (!saveRuleFromCandidate(*candidate)) {
+            return;
+        }
+    } else if (store_.recentProtocolFieldRules(1).empty()) {
+        setStatus(tx(T::RuleNoCandidates));
+        return;
+    }
+
+    const auto session = store_.latestScanSession();
+    if (!session.has_value()) {
+        setStatus(tx(T::RuleVerifyNoScan));
+        return;
+    }
+    runRuleVerification(*session);
 }
 
 void NativeMainWindow::exportReport() {
-    showDeferredFeature(
-        L"导出验证报告",
-        L"报告渲染核心已是 Qt-free，但 Win32 native 还缺最近规则验证运行选择和文件保存 UI。\n\n"
-        L"因此本入口暂不导出空报告，避免误导测试结果。");
+    if (!store_.isOpen()) {
+        setStatus(tx(T::RuleNoStore));
+        return;
+    }
+
+    std::optional<native_storage::RuleVerificationRunRecord> run;
+    if (!latestVerificationRunId_.empty()) {
+        run = store_.ruleVerificationRun(latestVerificationRunId_);
+    }
+    if (!run.has_value()) {
+        run = store_.latestRuleVerificationRun();
+    }
+    if (!run.has_value()) {
+        setStatus(tx(T::ExportNoRun));
+        return;
+    }
+
+    const auto resultRecords = store_.ruleVerificationResults(run->verificationRunId);
+    core::report::RuleVerificationRun reportRun;
+    reportRun.verificationRunId = run->verificationRunId;
+    reportRun.sourceScanSessionId = run->sourceScanSessionId;
+    reportRun.ruleCount = run->ruleCount;
+    reportRun.verifiedCount = run->verifiedCount;
+    reportRun.missingCount = run->missingCount;
+    reportRun.unsupportedCount = run->unsupportedCount;
+    reportRun.createdAtText = run->createdAtUtc;
+
+    std::vector<core::report::RuleVerificationResult> reportResults;
+    reportResults.reserve(resultRecords.size());
+    for (const native_storage::RuleVerificationResultRecord& record : resultRecords) {
+        core::report::RuleVerificationResult result;
+        result.fieldName = record.fieldName;
+        result.unit = record.unit;
+        result.verified = record.verified;
+        result.statusText = record.statusText;
+        result.slaveId = record.slaveId;
+        result.functionCode = record.functionCode;
+        result.startAddress = record.startAddress;
+        result.registerCount = record.registerCount;
+        result.observationIds = record.observationIds;
+        result.rawRegisters = record.rawRegisters;
+        result.engineeringValue = record.engineeringValue;
+        result.interpretationText = record.interpretationText;
+        result.evidenceText = record.evidenceText;
+        reportResults.push_back(std::move(result));
+    }
+
+    wchar_t fileName[MAX_PATH] = {};
+    const std::wstring defaultName = uiString(T::ExportDefaultPrefix)
+        + utf8ToWide(run->verificationRunId)
+        + L".md";
+    wcsncpy_s(fileName, defaultName.c_str(), _TRUNCATE);
+
+    OPENFILENAMEW dialog = {};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = window_;
+    dialog.lpstrFilter = tx(T::ExportFilter);
+    dialog.lpstrFile = fileName;
+    dialog.nMaxFile = MAX_PATH;
+    dialog.lpstrDefExt = L"md";
+    dialog.lpstrTitle = tx(T::ExportDialogTitle);
+    dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+    if (!GetSaveFileNameW(&dialog)) {
+        return;
+    }
+
+    const std::string markdown = core::report::renderRuleVerificationMarkdownReport(reportRun, reportResults);
+    std::ofstream output(std::filesystem::path(fileName), std::ios::binary | std::ios::trunc);
+    if (!output) {
+        setStatus(uiString(T::ExportFailedPrefix) + std::wstring(fileName));
+        return;
+    }
+    output.write(markdown.data(), static_cast<std::streamsize>(markdown.size()));
+    if (!output) {
+        setStatus(uiString(T::ExportFailedPrefix) + std::wstring(fileName));
+        return;
+    }
+    setStatus(uiString(T::ExportOkPrefix) + std::wstring(fileName) + uiString(T::ChinesePeriod));
 }
 
 void NativeMainWindow::showAbout() {
     MessageBoxW(
         window_,
-        L"串口值匹配器 Win32 Native\n\n作者：w\n面向中文用户的 Windows 原生串口调试、Modbus 扫描和值候选分析工具。\n\n当前目标：不依赖 C#/.NET/Qt 运行库，并逐步补齐 Qt baseline 功能。",
-        L"关于串口值匹配器",
+        tx(T::AboutText),
+        tx(T::AboutTitle),
         MB_ICONINFORMATION | MB_OK);
 }
 
 void NativeMainWindow::showDeferredFeature(const std::wstring& title, const std::wstring& message) {
     MessageBoxW(window_, message.c_str(), title.c_str(), MB_ICONINFORMATION | MB_OK);
-    setStatus(title + L"：该 native 功能入口已恢复，但完整交互仍在补齐。");
+    setStatus(title + L"\uFF1A" + message);
+}
+
+void NativeMainWindow::refreshCandidateCombo(const std::string& runId) {
+    SendMessageW(candidateCombo_, CB_RESETCONTENT, 0, 0);
+    addComboItem(candidateCombo_, tx(T::CandidatePlaceholder), 0);
+    if (!store_.isOpen() || runId.empty()) {
+        SendMessageW(candidateCombo_, CB_SETCURSEL, 0, 0);
+        return;
+    }
+
+    const auto candidates = store_.matchCandidates(runId);
+    for (const native_storage::MatchCandidateRecord& candidate : candidates) {
+        const std::wstring display = candidateDisplayText(candidate);
+        const LRESULT index = SendMessageW(candidateCombo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(display.c_str()));
+        if (index >= 0) {
+            SendMessageW(candidateCombo_, CB_SETITEMDATA, static_cast<WPARAM>(index), static_cast<LPARAM>(candidate.id));
+        }
+    }
+    SendMessageW(candidateCombo_, CB_SETCURSEL, candidates.empty() ? 0 : 1, 0);
+}
+
+std::optional<native_storage::MatchCandidateRecord> NativeMainWindow::selectedCandidate() const {
+    if (!store_.isOpen()) {
+        return std::nullopt;
+    }
+    std::string runId = latestMatchRunId_;
+    if (runId.empty()) {
+        const auto run = store_.latestMatchRun();
+        if (!run.has_value()) {
+            return std::nullopt;
+        }
+        runId = run->runId;
+    }
+
+    const LRESULT index = SendMessageW(candidateCombo_, CB_GETCURSEL, 0, 0);
+    const LRESULT itemData = index >= 0 ? SendMessageW(candidateCombo_, CB_GETITEMDATA, static_cast<WPARAM>(index), 0) : 0;
+    const std::int64_t selectedId = itemData == CB_ERR ? 0 : static_cast<std::int64_t>(itemData);
+    const auto candidates = store_.matchCandidates(runId);
+    if (selectedId > 0) {
+        for (const native_storage::MatchCandidateRecord& candidate : candidates) {
+            if (candidate.id == selectedId) {
+                return candidate;
+            }
+        }
+    }
+    if (!candidates.empty()) {
+        return candidates.front();
+    }
+    return std::nullopt;
+}
+
+bool NativeMainWindow::saveRuleFromCandidate(const native_storage::MatchCandidateRecord& candidate) {
+    if (!store_.isOpen()) {
+        setStatus(tx(T::RuleNoStore));
+        return false;
+    }
+    if (candidate.id <= 0) {
+        setStatus(tx(T::RuleNoCandidates));
+        return false;
+    }
+
+    native_storage::ProtocolFieldRuleRecord rule;
+    rule.ruleId = "rule-" + std::to_string(candidate.id);
+    rule.fieldName = wideToUtf8(ruleDisplayName(candidate, controlText(targetLabelEdit_)));
+    rule.sourceStabilityRunId = candidate.runId;
+    rule.sourceStableCandidateId = candidate.id;
+    rule.candidateType = candidate.candidateType;
+    rule.wordOrder = candidate.wordOrder;
+    rule.byteOrder = candidate.byteOrder;
+    rule.slaveId = candidate.slaveId;
+    rule.functionCode = candidate.functionCode;
+    rule.startAddress = candidate.startAddress;
+    rule.registerCount = candidate.registerCount;
+    rule.scaleMultiplier = candidate.scaleMultiplier;
+    rule.scaleOffset = candidate.scaleOffset;
+    rule.unit = wideToUtf8(controlText(targetUnitEdit_));
+    rule.confidenceLevel = wideToUtf8(candidate.score >= 85.0 ? L"\u9AD8" : (candidate.score >= 65.0 ? L"\u4E2D" : L"\u4F4E"));
+    rule.stabilityScore = candidate.score;
+    rule.evidenceSummary = candidate.evidenceText;
+    rule.createdAtUtc = timestampText();
+    if (!store_.saveProtocolFieldRule(rule)) {
+        setStatus(utf8ToWide(store_.lastErrorText()));
+        return false;
+    }
+
+    setStatus(uiString(T::RuleSavedPrefix) + utf8ToWide(rule.fieldName) + L" (" + utf8ToWide(rule.ruleId) + L")" + uiString(T::ChinesePeriod));
+    return true;
+}
+
+bool NativeMainWindow::runRuleVerification(const native_storage::ScanSessionRecord& session) {
+    if (!store_.isOpen()) {
+        setStatus(tx(T::RuleNoStore));
+        return false;
+    }
+
+    const auto rules = store_.recentProtocolFieldRules(200);
+    if (rules.empty()) {
+        setStatus(tx(T::RuleVerifyNoRules));
+        return false;
+    }
+    const auto observations = store_.scanObservations(session.sessionId);
+    if (observations.empty()) {
+        setStatus(tx(T::RuleVerifyNoObservations));
+        return false;
+    }
+
+    auto findObservation = [&observations](const native_storage::ProtocolFieldRuleRecord& rule, int address) -> std::optional<native_storage::ScanObservationRecord> {
+        for (auto iterator = observations.rbegin(); iterator != observations.rend(); ++iterator) {
+            if (iterator->slaveId == rule.slaveId
+                && iterator->functionCode == rule.functionCode
+                && iterator->address == address) {
+                return *iterator;
+            }
+        }
+        return std::nullopt;
+    };
+
+    native_storage::RuleVerificationRunRecord run;
+    run.verificationRunId = "verify-" + timestampIdText();
+    run.sourceScanSessionId = session.sessionId;
+    run.ruleCount = static_cast<int>(rules.size());
+    run.createdAtUtc = timestampText();
+
+    std::vector<native_storage::RuleVerificationResultRecord> results;
+    results.reserve(rules.size());
+    for (const native_storage::ProtocolFieldRuleRecord& rule : rules) {
+        native_storage::RuleVerificationResultRecord result;
+        result.verificationRunId = run.verificationRunId;
+        result.ruleId = rule.ruleId;
+        result.fieldName = rule.fieldName;
+        result.unit = rule.unit;
+        result.candidateType = rule.candidateType;
+        result.sourceScanSessionId = session.sessionId;
+        result.slaveId = rule.slaveId;
+        result.functionCode = rule.functionCode;
+        result.startAddress = rule.startAddress;
+        result.registerCount = rule.registerCount;
+
+        std::vector<std::uint16_t> registers;
+        registers.reserve(static_cast<std::size_t>(std::max(0, rule.registerCount)));
+        bool missing = false;
+        int missingAddress = rule.startAddress;
+        for (int offset = 0; offset < rule.registerCount; ++offset) {
+            const int address = rule.startAddress + offset;
+            const auto observation = findObservation(rule, address);
+            if (!observation.has_value()) {
+                missing = true;
+                missingAddress = address;
+                break;
+            }
+            result.observationIds.push_back(observation->id);
+            result.rawRegisters.push_back(observation->value);
+            result.observedAtUtc = observation->observedAtUtc;
+            registers.push_back(static_cast<std::uint16_t>(observation->value));
+        }
+
+        if (missing || registers.empty()) {
+            result.verified = false;
+            result.statusText = wideToUtf8(std::wstring(L"\u7F3A\u5C11\u5730\u5740 ")
+                + std::to_wstring(missingAddress)
+                + L" \u7684\u89C2\u6D4B\uFF0C\u65E0\u6CD5\u9A8C\u8BC1\u3002");
+            result.evidenceText = result.statusText;
+            ++run.missingCount;
+            results.push_back(std::move(result));
+            continue;
+        }
+
+        const auto decoded = core::analysis::decodeNumericValue(rule.candidateType, rule.wordOrder, rule.byteOrder, registers);
+        if (!decoded.has_value()) {
+            result.verified = false;
+            result.statusText = wideToUtf8(L"\u89E3\u7801\u5931\u8D25\uFF1A\u89C4\u5219\u7C7B\u578B\u4E0E\u5BC4\u5B58\u5668\u6570\u91CF\u4E0D\u5339\u914D\u3002");
+            result.evidenceText = result.statusText;
+            ++run.unsupportedCount;
+            results.push_back(std::move(result));
+            continue;
+        }
+
+        result.verified = true;
+        result.statusText = wideToUtf8(L"\u5DF2\u9A8C\u8BC1");
+        result.decodedValue = *decoded;
+        result.engineeringValue = *decoded * rule.scaleMultiplier + rule.scaleOffset;
+        if (rule.candidateType == "BitFlags" && !registers.empty()) {
+            result.interpretationText = core::analysis::bitFlagInterpretationText(rule.interpretationMap, registers.front());
+        } else if (rule.candidateType == "EnumMap") {
+            result.interpretationText = core::analysis::enumMapInterpretationText(rule.interpretationMap, static_cast<int>(*decoded));
+        }
+        result.evidenceText = wideToUtf8(std::wstring(L"\u5B57\u6BB5\u9A8C\u8BC1\u6210\u529F\uFF1A")
+            + utf8ToWide(rule.fieldName)
+            + L"\uFF0C\u6765\u81EA\u626B\u63CF "
+            + utf8ToWide(session.sessionId)
+            + L"\u3002");
+        ++run.verifiedCount;
+        results.push_back(std::move(result));
+    }
+
+    if (!store_.saveRuleVerificationRun(run, results)) {
+        setStatus(utf8ToWide(store_.lastErrorText()));
+        return false;
+    }
+    latestVerificationRunId_ = run.verificationRunId;
+
+    const std::wstring summary = uiString(T::RuleVerifySavedPrefix)
+        + utf8ToWide(run.verificationRunId)
+        + uiString(T::RulesTotalPrefix)
+        + std::to_wstring(run.ruleCount)
+        + uiString(T::RulesVerifiedPrefix)
+        + std::to_wstring(run.verifiedCount)
+        + uiString(T::RulesMissingPrefix)
+        + std::to_wstring(run.missingCount)
+        + uiString(T::RulesUnsupportedPrefix)
+        + std::to_wstring(run.unsupportedCount)
+        + uiString(T::ChinesePeriod);
+    appendLog(std::wstring(L"[\u7CFB\u7EDF] ") + summary);
+    setStatus(summary);
+    return true;
 }
 
 std::filesystem::path NativeMainWindow::defaultStoreDirectory() const {

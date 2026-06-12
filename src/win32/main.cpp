@@ -11,6 +11,7 @@
 #include <commctrl.h>
 
 #include "win32/main_window.h"
+#include "win32/ui_text.h"
 
 namespace {
 
@@ -45,7 +46,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int commandShow) {
 
     svm::win32::NativeMainWindow window;
     if (!window.create(instance)) {
-        MessageBoxW(nullptr, L"无法创建 Win32 主窗口。", L"串口值匹配器", MB_ICONERROR | MB_OK);
+        MessageBoxW(
+            nullptr,
+            svm::win32::uiText(svm::win32::TextId::CreateWindowError),
+            svm::win32::uiText(svm::win32::TextId::SelfTestText),
+            MB_ICONERROR | MB_OK);
         return 1;
     }
 

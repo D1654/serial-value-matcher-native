@@ -72,6 +72,7 @@ if(SVM_BUILD_WIN32_APP)
         WIN32
         src/win32/main.cpp
         src/win32/main_window.cpp
+        src/win32/ui_text.cpp
         src/win32/utf8_win32.cpp
         src/win32/app.rc
     )
@@ -84,6 +85,7 @@ if(SVM_BUILD_WIN32_APP)
             user32
             gdi32
             comctl32
+            comdlg32
             shell32
     )
 

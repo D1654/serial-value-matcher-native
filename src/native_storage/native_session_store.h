@@ -215,11 +215,15 @@ public:
     std::optional<SerialProfile> latestSerialProfile() const;
 
     bool saveScanExecution(const ScanExecutionRecord& execution);
+    std::vector<ScanSessionRecord> recentScanSessions(int limit = 50) const;
+    std::optional<ScanSessionRecord> latestScanSession() const;
     std::optional<ScanSessionRecord> scanSession(std::string_view sessionId) const;
     std::vector<ScanAttemptRecord> scanAttempts(std::string_view sessionId) const;
     std::vector<ScanObservationRecord> scanObservations(std::string_view sessionId) const;
 
     bool saveMatchRun(MatchRunRecord run, std::vector<MatchCandidateRecord> candidates);
+    std::vector<MatchRunRecord> recentMatchRuns(int limit = 50) const;
+    std::optional<MatchRunRecord> latestMatchRun() const;
     std::optional<MatchRunRecord> matchRun(std::string_view runId) const;
     std::vector<MatchCandidateRecord> matchCandidates(std::string_view runId) const;
 
@@ -231,6 +235,7 @@ public:
     bool saveRuleVerificationRun(
         RuleVerificationRunRecord run,
         std::vector<RuleVerificationResultRecord> results);
+    std::optional<RuleVerificationRunRecord> latestRuleVerificationRun() const;
     std::optional<RuleVerificationRunRecord> ruleVerificationRun(std::string_view verificationRunId) const;
     std::vector<RuleVerificationResultRecord> ruleVerificationResults(std::string_view verificationRunId) const;
 
