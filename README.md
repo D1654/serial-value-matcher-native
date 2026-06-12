@@ -116,7 +116,7 @@
 
 ## 当前测试基线
 
-当前默认 CTest 基线：**31/31 passed**，其中包含 29 个 QtTest 目标和 2 个 Qt-free native core 测试目标。
+当前默认 CTest 基线：**32/32 passed**，其中包含 29 个 QtTest 目标、2 个 Qt-free native core 测试目标和 1 个 Win32 串口后端硬件无关测试目标。
 
 覆盖范围包括：
 
@@ -244,4 +244,5 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -BuildDir
 - `docs/architecture.md`：架构说明。
 - `docs/windows-deployment.md`：Windows 打包与验收说明。
 - `docs/windows-native-slimming.md`：Windows 架构级瘦身路线、体积基线和 native 小包门禁。
+- `docs/windows-serial-validation.md`：Win32 native 串口后端的真机验收清单。
 - `docs/task-*.md`：阶段性任务记录。

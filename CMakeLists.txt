@@ -31,6 +31,25 @@ add_library(svm_slim_core
 
 target_include_directories(svm_slim_core PUBLIC src)
 
+add_library(svm_win32_serial
+    src/win32/win32_serial_types.cpp
+)
+
+if(WIN32)
+    target_sources(svm_win32_serial
+        PRIVATE
+            src/win32/win32_serial_port.cpp
+            src/win32/win32_serial_enumerator.cpp
+    )
+    target_compile_definitions(svm_win32_serial
+        PRIVATE
+            WIN32_LEAN_AND_MEAN
+            NOMINMAX
+    )
+endif()
+
+target_include_directories(svm_win32_serial PUBLIC src)
+
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets SerialPort Sql Test)
 
 qt_standard_project_setup()
@@ -135,6 +154,17 @@ set_target_properties(native_analysis_report_tests PROPERTIES
 )
 target_link_libraries(native_analysis_report_tests PRIVATE svm_slim_core)
 add_test(NAME native_analysis_report_tests COMMAND native_analysis_report_tests)
+
+add_executable(native_win32_serial_tests
+    tests/native_win32_serial_tests.cpp
+)
+set_target_properties(native_win32_serial_tests PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+target_link_libraries(native_win32_serial_tests PRIVATE svm_win32_serial)
+add_test(NAME native_win32_serial_tests COMMAND native_win32_serial_tests)
 
 function(add_svm_qt_test target source)
     qt_add_executable(${target}

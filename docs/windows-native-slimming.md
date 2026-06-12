@@ -41,6 +41,7 @@ Win32 原生包必须满足以下门禁后才能成为主 Windows 发布包：
 
 - `svm-native`：当前 Qt Widgets 稳定基线，继续用于功能回归、用户试用和风险兜底。
 - 未来 Win32 native target：轻量 Windows 原生目标，逐步接入 Qt-free 核心、Win32 串口后端和小包发布链路。
+- `svm_win32_serial`：已新增的 Qt-free Win32 串口后端库。Linux 下构建硬件无关参数/错误核心；Windows 下额外编译 `CreateFileW`/`ReadFile`/`WriteFile`/`SetCommState`/`QueryDosDeviceW` 实现。
 
 默认构建仍保留 Qt 版本：
 
@@ -75,3 +76,14 @@ SerialValueMatcherNative-win-x64.package-summary.txt
 - 保留中文界面、中文状态提示和中文错误诊断；
 - 通过串口打开、发送、接收、断开、异常恢复的 Windows 验收；
 - 通过 Modbus/候选分析的核心回归测试或明确标注预览范围。
+
+## Win32 串口后端
+
+Change #4 已开始替换 `Qt6SerialPort.dll` 路线。当前新增的后端包括：
+
+- `src/win32/win32_serial_types.*`：不包含 Windows/Qt 头文件的参数、端口名、错误文案核心；
+- `src/win32/win32_serial_port.*`：Windows 专用 RAII 串口句柄，负责打开、配置、读、写、等待接收、关闭；
+- `src/win32/win32_serial_enumerator.*`：Windows 专用 `COMx` 枚举；
+- `tests/native_win32_serial_tests.cpp`：硬件无关测试，覆盖参数校验、端口名规范化和 Win32 错误中文诊断。
+
+真机验收步骤见 `docs/windows-serial-validation.md`。该后端目前仍是并行能力，尚未替换 Qt baseline UI 的串口入口；替换将在 Win32 native UI shell 和最终 parity/switch 任务中完成。
