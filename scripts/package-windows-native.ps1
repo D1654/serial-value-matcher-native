@@ -55,9 +55,9 @@ if (-not $exePath) {
 Write-Host "可执行文件：$exePath"
 
 Write-Host "运行 native self-test..."
-& $exePath --self-test
-if ($LASTEXITCODE -ne 0) {
-    throw "native self-test 失败，退出码：$LASTEXITCODE"
+$selfTest = Start-Process -FilePath $exePath -ArgumentList "--self-test" -Wait -PassThru
+if ($selfTest.ExitCode -ne 0) {
+    throw "native self-test 失败，退出码：$($selfTest.ExitCode)"
 }
 
 New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
