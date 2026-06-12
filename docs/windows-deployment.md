@@ -190,14 +190,12 @@ Win32 native 包成为主发布包前必须满足：
 
 最近一次 native preview 包已通过体积门禁：
 
-| 指标 | 数值 |
+| 指标 | 说明 |
 |------|------|
 | Artifact | `SerialValueMatcherNative-win32-native-x64` |
-| Artifact ID | `7589432078` |
-| Zip bytes | `220,675` |
-| 解压后 bytes | `447,970` |
-| 主程序 | `svm-native-win32.exe`, `418,304` bytes |
-| 文件数 | `6` |
+| 体积摘要 | artifact 内 `SerialValueMatcherNative-win32-native-x64.package-summary.txt` |
+| 主程序 | `svm-native-win32.exe` |
+| 文件数 | 最新数量以 package summary 为准 |
 | 禁止运行时 | none |
 
 ## 打包验收清单

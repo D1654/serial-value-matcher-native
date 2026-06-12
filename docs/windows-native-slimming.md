@@ -30,16 +30,14 @@
 
 最近一次 Win32 native preview 包：
 
-| 指标 | 数值 |
+| 指标 | 说明 |
 |------|------|
 | Artifact | `SerialValueMatcherNative-win32-native-x64` |
-| Artifact ID | `7589432078` |
-| Zip bytes | `220,675` |
-| 解压后 bytes | `447,970` |
-| 文件数 | `6` |
-| 主程序 `svm-native-win32.exe` | `418,304` bytes |
+| 体积摘要 | 每次 artifact 内的 `SerialValueMatcherNative-win32-native-x64.package-summary.txt` |
+| 主程序 | `svm-native-win32.exe` |
+| 文件数 | 当前路线保持少量文件，最新数量以 package summary 为准 |
 | 禁止运行时 | no `Qt6*.dll`, no `qsqlite.dll`, no `sqldrivers` |
-| 门禁 | first-stage gate passed |
+| 门禁 | first-stage gate 必须通过 |
 
 该结果已经达到“几百 KB 级别”的体积目标，但功能仍是 preview。主发布切换决策见 `docs/windows-native-parity.md`。
 

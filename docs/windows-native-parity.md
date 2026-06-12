@@ -11,10 +11,9 @@
 | Linux Qt workflow | success, run `27410685490` |
 | Windows Qt Portable Package workflow | success, run `27410685444` |
 | Windows Native Size-Gated Package workflow | success, run `27410685405` |
-| Native artifact | `SerialValueMatcherNative-win32-native-x64`, artifact ID `7589432078` |
-| Native zip | `220,675` bytes |
-| Native 解压后 | `447,970` bytes |
-| Native 主程序 | `svm-native-win32.exe`, `418,304` bytes |
+| Native artifact | `SerialValueMatcherNative-win32-native-x64` |
+| Native 体积 | 以 artifact 内 `SerialValueMatcherNative-win32-native-x64.package-summary.txt` 为准 |
+| Native 主程序 | `svm-native-win32.exe` |
 | Native 文件数 | `6` |
 | 禁止运行时 | `Qt6*.dll`: none, `qsqlite.dll`: none, `sqldrivers`: none |
 | 门禁 | first-stage gate passed |
