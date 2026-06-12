@@ -1,6 +1,6 @@
 # Windows 原生打包说明
 
-本文记录串口值匹配器（SerialValueMatcher Native）的 Windows 打包流程。当前稳定发布路径是 Qt baseline 便携包，目标是产出不依赖 C#/.NET Desktop Runtime 的 Windows 原生便携软件，解压后可直接运行 `svm-native.exe`。
+本文记录串口值匹配器（SerialValueMatcher Native）的 Windows 打包流程。当前稳定主发布路径仍是 Qt baseline 便携包，解压后可直接运行 `svm-native.exe`。Win32 native 小包已经通过 CI 和体积门禁，但目前作为 preview artifact 发布，用于验证极小体积和基础串口终端工作流。
 
 项目正在执行架构级瘦身：保留 Qt baseline 作为可运行基线，同时新增 Win32 native 小包路线。瘦身目标和体积门禁见 `docs/windows-native-slimming.md`。
 
@@ -61,7 +61,7 @@ SerialValueMatcherNative-win32-native-x64.zip.sha256.txt
 SerialValueMatcherNative-win32-native-x64.package-summary.txt
 ```
 
-该包是瘦身迁移验证包，当前仍不替代 Qt baseline 主发布包。
+该包是瘦身迁移验证包，当前仍不替代 Qt baseline 主发布包。发布切换原因和缺口见 `docs/windows-native-parity.md`。
 
 仓库还提供手动/定期触发的 Windows 非硬件压力测试 workflow：
 
@@ -186,6 +186,19 @@ Win32 native 包成为主发布包前必须满足：
 - 冲刺阶段：zip `<= 2 MB`，解压后 `<= 3 MB`。
 - 包内不得包含 `Qt6*.dll`。
 - 仍需保持中文界面、中文错误诊断、解压即运行、不依赖 C#/.NET Desktop Runtime。
+- 必须补齐 `docs/windows-native-parity.md` 中标记为“主发布前必须”的能力。
+
+最近一次 native preview 包已通过体积门禁：
+
+| 指标 | 数值 |
+|------|------|
+| Artifact | `SerialValueMatcherNative-win32-native-x64` |
+| Artifact ID | `7589432078` |
+| Zip bytes | `220,675` |
+| 解压后 bytes | `447,970` |
+| 主程序 | `svm-native-win32.exe`, `418,304` bytes |
+| 文件数 | `6` |
+| 禁止运行时 | none |
 
 ## 打包验收清单
 

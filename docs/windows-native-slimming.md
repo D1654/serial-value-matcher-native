@@ -26,6 +26,23 @@
 
 结论：当前包大不是业务代码大，而是 Qt 动态运行时路线天然携带较重依赖。仅裁剪 `windeployqt` 输出可以降低一部分体积，但无法达到传统串口工具常见的几百 KB/少数 MB 级别。
 
+## 当前 native preview 结果
+
+最近一次 Win32 native preview 包：
+
+| 指标 | 数值 |
+|------|------|
+| Artifact | `SerialValueMatcherNative-win32-native-x64` |
+| Artifact ID | `7589432078` |
+| Zip bytes | `220,675` |
+| 解压后 bytes | `447,970` |
+| 文件数 | `6` |
+| 主程序 `svm-native-win32.exe` | `418,304` bytes |
+| 禁止运行时 | no `Qt6*.dll`, no `qsqlite.dll`, no `sqldrivers` |
+| 门禁 | first-stage gate passed |
+
+该结果已经达到“几百 KB 级别”的体积目标，但功能仍是 preview。主发布切换决策见 `docs/windows-native-parity.md`。
+
 ## 目标门禁
 
 Win32 原生包必须满足以下门禁后才能成为主 Windows 发布包：

@@ -52,6 +52,7 @@ Win32 Native Slim Target
 - `NumericDecoder` 统一候选生成与协议规则验证的数值解码；候选生成使用有界 Top-N，规则验证预索引每个 `(slaveId, functionCode, address)` 的最新观测样本。
 - Linux CI 与本地最终验证使用同一条基本链路：`scripts/check-env.sh`、CMake configure、`cmake --build --parallel 1`、CTest。
 - Change #4 新增 Win32 native 并行路线：`svm_win32_serial`、`svm_native_storage` 和 `svm-native-win32` 均不依赖 Qt；默认 Qt baseline 仍用于完整功能回归。
+- Win32 native 当前是 preview 发布路线：体积门禁已通过，但完整主发布切换需补齐 `docs/windows-native-parity.md` 中的 Modbus/分析/规则/报告等 UI 能力。
 
 ## 2026-06-01 Task 02 进展
 

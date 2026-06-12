@@ -186,7 +186,7 @@ SerialValueMatcherNative-win-x64.package-summary.txt
 
 该 zip 是 Windows 原生便携运行包，不是安装器；目标是解压后直接启动 `svm-native.exe`。
 Windows workflow 的关键第三方 action 固定到审核过的提交 SHA，避免移动 tag 在发布链路中漂移。
-当前 artifact 是 Qt baseline 包，允许携带 Qt 运行库；架构级瘦身路线会新增 Win32 native artifact，并要求包内不出现 `Qt6*.dll`。
+当前主发布 artifact 仍是 Qt baseline 包，允许携带 Qt 运行库。Win32 native preview artifact 已建立并通过体积门禁：`SerialValueMatcherNative-win32-native-x64.zip` 为 `220,675` bytes，解压后 `447,970` bytes，包内不包含 `Qt6*.dll`、`qsqlite.dll` 或 `sqldrivers`。
 
 ## 开发环境要求
 
@@ -247,7 +247,7 @@ cmake --build build-win32-native --config Release --target svm-native-win32
 .\build-win32-native\Release\svm-native-win32.exe --self-test
 ```
 
-该目标用于瘦身迁移验证，当前尚未替代 Qt baseline 发布包。
+该目标用于瘦身迁移验证，当前尚未替代 Qt baseline 发布包。原因见 `docs/windows-native-parity.md`：native shell 已覆盖基础串口终端工作流，但尚未覆盖完整 Modbus/候选分析/规则验证/报告导出 UI。
 
 native 包命令：
 
@@ -265,6 +265,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package-windows-native.ps1 -B
 - `docs/architecture.md`：架构说明。
 - `docs/windows-deployment.md`：Windows 打包与验收说明。
 - `docs/windows-native-slimming.md`：Windows 架构级瘦身路线、体积基线和 native 小包门禁。
+- `docs/windows-native-parity.md`：Win32 native 与 Qt baseline 的功能对照和发布切换决策。
 - `docs/windows-serial-validation.md`：Win32 native 串口后端的真机验收清单。
 - `docs/windows-native-ui-validation.md`：Win32 native UI shell 的自测和手工验收清单。
 - `docs/task-*.md`：阶段性任务记录。
