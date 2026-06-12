@@ -236,6 +236,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -BuildDir
 
 打包脚本还会生成体积摘要，记录 zip bytes、解压后 bytes、文件数、最大文件和 Qt DLL 列表。Win32 native 小包的具体门禁见 `docs/windows-native-slimming.md`。
 
+Win32 native shell 已作为默认关闭的并行目标接入：
+
+```powershell
+cmake -S . -B build-win32-native -G "Visual Studio 17 2022" -A x64 -DSVM_BUILD_QT_APP=OFF -DSVM_BUILD_QT_TESTS=OFF -DSVM_BUILD_WIN32_APP=ON
+cmake --build build-win32-native --config Release --target svm-native-win32
+.\build-win32-native\Release\svm-native-win32.exe --self-test
+```
+
+该目标用于瘦身迁移验证，当前尚未替代 Qt baseline 发布包。
+
 实际发布包仍需在 Windows Qt 构建机上完成最终验收。
 
 ## 相关文档
@@ -245,4 +255,5 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -BuildDir
 - `docs/windows-deployment.md`：Windows 打包与验收说明。
 - `docs/windows-native-slimming.md`：Windows 架构级瘦身路线、体积基线和 native 小包门禁。
 - `docs/windows-serial-validation.md`：Win32 native 串口后端的真机验收清单。
+- `docs/windows-native-ui-validation.md`：Win32 native UI shell 的自测和手工验收清单。
 - `docs/task-*.md`：阶段性任务记录。

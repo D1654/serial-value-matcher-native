@@ -43,6 +43,7 @@ Win32 原生包必须满足以下门禁后才能成为主 Windows 发布包：
 - 未来 Win32 native target：轻量 Windows 原生目标，逐步接入 Qt-free 核心、Win32 串口后端和小包发布链路。
 - `svm_win32_serial`：已新增的 Qt-free Win32 串口后端库。Linux 下构建硬件无关参数/错误核心；Windows 下额外编译 `CreateFileW`/`ReadFile`/`WriteFile`/`SetCommState`/`QueryDosDeviceW` 实现。
 - `svm_native_storage`：已新增的 Qt-free 文件存储库。第一阶段不引入 SQLite amalgamation，避免把 native 小包重新推向 MB 级依赖膨胀；后续如需复杂查询再单独评估 SQLite 静态链接。
+- `svm-native-win32`：已新增的 Win32 native UI shell，默认关闭，覆盖刷新串口、连接、断开、文本/HEX 发送、接收日志和 raw I/O 存储。
 
 默认构建仍保留 Qt 版本：
 
@@ -56,10 +57,19 @@ CMake 边界：
 
 ```text
 SVM_BUILD_QT_APP=ON
+SVM_BUILD_QT_TESTS=ON
 SVM_BUILD_WIN32_APP=OFF
 ```
 
-`SVM_BUILD_WIN32_APP` 当前是保留开关，后续任务会把它接到真正的 Win32 原生目标。
+Windows native-only 构建边界：
+
+```text
+SVM_BUILD_QT_APP=OFF
+SVM_BUILD_QT_TESTS=OFF
+SVM_BUILD_WIN32_APP=ON
+```
+
+该配置只应在 Windows 上启用，目标是生成 `svm-native-win32.exe` 并通过 `--self-test` 做非交互验证。
 
 ## 发布规则
 
@@ -99,3 +109,15 @@ Change #4 第一阶段选择标准库文件存储，而不是 SQLite：
 - Qt baseline 仍继续使用现有 SQLite/Qt SQL `SessionStore`，迁移期间两条路径并存。
 
 该选择牺牲了 SQL 查询能力，换取更小体积和更少运行时依赖。若 Win32 native UI 后续需要复杂筛选、跨表查询或大数据量索引，再以独立任务评估 SQLite amalgamation 的体积收益比。
+
+## Win32 Native UI Shell
+
+`svm-native-win32` 是第一阶段小包 UI：
+
+- 使用 Win32 API 和 common controls，不使用 Qt Widgets；
+- 启动参数 `--self-test` 可在 CI 中不弹窗执行；
+- 主界面保持中文，提供串口刷新、连接/断开、文本/HEX 发送、接收日志和状态栏；
+- 接收日志有上限，达到上限后自动清空并提示，避免长期运行无限增长；
+- raw I/O 会写入 `NativeSessionStore`，为后续 Modbus/候选分析接入保留数据入口。
+
+手工验收步骤见 `docs/windows-native-ui-validation.md`。

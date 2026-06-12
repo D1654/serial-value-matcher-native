@@ -22,6 +22,17 @@ Qt Widgets App / MainWindow
   │   └─ ProtocolRuleVerifier
   └─ Report
       └─ RuleVerificationReport / TextFileWriter
+
+Win32 Native Slim Target
+  ├─ svm-native-win32 / NativeMainWindow
+  │   ├─ Win32SerialEnumerator / Win32SerialPort
+  │   ├─ NativeSessionStore
+  │   └─ UTF-8 / UTF-16 bridge
+  ├─ svm_slim_core
+  │   ├─ protocol_core / modbus_core
+  │   ├─ analysis_core
+  │   └─ report_core
+  └─ No Qt runtime DLLs in native-only configuration
 ```
 
 ## 核心原则
@@ -40,6 +51,7 @@ Qt Widgets App / MainWindow
 - 扫描读取、规则读取和规则验证读取会通过 `clearReadError()` / `setReadError()` 区分“没有数据”和“数据库读取失败”；`scanObservationsByIds()` 使用生成占位符和 `bindValue()`，不把 ID 列表直接拼入 SQL 值。
 - `NumericDecoder` 统一候选生成与协议规则验证的数值解码；候选生成使用有界 Top-N，规则验证预索引每个 `(slaveId, functionCode, address)` 的最新观测样本。
 - Linux CI 与本地最终验证使用同一条基本链路：`scripts/check-env.sh`、CMake configure、`cmake --build --parallel 1`、CTest。
+- Change #4 新增 Win32 native 并行路线：`svm_win32_serial`、`svm_native_storage` 和 `svm-native-win32` 均不依赖 Qt；默认 Qt baseline 仍用于完整功能回归。
 
 ## 2026-06-01 Task 02 进展
 
