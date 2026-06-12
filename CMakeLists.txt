@@ -23,6 +23,10 @@ if(SVM_BUILD_WIN32_APP AND NOT WIN32)
     message(FATAL_ERROR "SVM_BUILD_WIN32_APP can only be enabled on Windows.")
 endif()
 
+if(MSVC AND SVM_BUILD_WIN32_APP)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 add_library(svm_slim_core
     src/core/protocol_core.cpp
     src/core/modbus_core.cpp
