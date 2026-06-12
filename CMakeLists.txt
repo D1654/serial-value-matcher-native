@@ -25,6 +25,8 @@ endif()
 add_library(svm_slim_core
     src/core/protocol_core.cpp
     src/core/modbus_core.cpp
+    src/core/analysis_core.cpp
+    src/core/report_core.cpp
 )
 
 target_include_directories(svm_slim_core PUBLIC src)
@@ -122,6 +124,17 @@ set_target_properties(native_protocol_modbus_tests PROPERTIES
 )
 target_link_libraries(native_protocol_modbus_tests PRIVATE svm_slim_core)
 add_test(NAME native_protocol_modbus_tests COMMAND native_protocol_modbus_tests)
+
+add_executable(native_analysis_report_tests
+    tests/native_analysis_report_tests.cpp
+)
+set_target_properties(native_analysis_report_tests PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+target_link_libraries(native_analysis_report_tests PRIVATE svm_slim_core)
+add_test(NAME native_analysis_report_tests COMMAND native_analysis_report_tests)
 
 function(add_svm_qt_test target source)
     qt_add_executable(${target}
