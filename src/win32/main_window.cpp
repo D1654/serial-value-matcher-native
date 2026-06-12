@@ -8,6 +8,7 @@
 #include "win32/win32_serial_enumerator.h"
 #include "win32/win32_serial_types.h"
 
+#include "core/analysis_core.h"
 #include "core/modbus_core.h"
 #include "core/report_core.h"
 
@@ -27,6 +28,10 @@ namespace svm::win32 {
 namespace {
 
 using T = TextId;
+
+namespace analysis_core = ::svm::core::analysis;
+namespace modbus_core = ::svm::core::modbus;
+namespace report_core = ::svm::core::report;
 
 constexpr wchar_t kWindowClassName[] = L"SvmNativeMainWindow";
 constexpr std::size_t kMaxLogChars = 200000;
@@ -296,8 +301,8 @@ std::string formatNumber(double value) {
     return output.str();
 }
 
-core::analysis::RegisterSample sampleFromObservation(const native_storage::ScanObservationRecord& observation) {
-    core::analysis::RegisterSample sample;
+analysis_core::RegisterSample sampleFromObservation(const native_storage::ScanObservationRecord& observation) {
+    analysis_core::RegisterSample sample;
     sample.observationId = observation.id;
     sample.sessionId = observation.sessionId;
     sample.slaveId = observation.slaveId;
@@ -310,16 +315,16 @@ core::analysis::RegisterSample sampleFromObservation(const native_storage::ScanO
 }
 
 native_storage::MatchCandidateRecord candidateRecordFromCore(
-    const core::analysis::ValueMatchCandidate& candidate,
+    const analysis_core::ValueMatchCandidate& candidate,
     const std::string& runId,
     int rankIndex,
     const std::string& observedAtUtc) {
     native_storage::MatchCandidateRecord record;
     record.runId = runId;
     record.rankIndex = rankIndex;
-    record.candidateType = core::analysis::numericCandidateTypeName(candidate.type);
-    record.wordOrder = core::analysis::wordOrderName(candidate.wordOrder);
-    record.byteOrder = core::analysis::byteOrderName(candidate.byteOrder);
+    record.candidateType = analysis_core::numericCandidateTypeName(candidate.type);
+    record.wordOrder = analysis_core::wordOrderName(candidate.wordOrder);
+    record.byteOrder = analysis_core::byteOrderName(candidate.byteOrder);
     record.sourceSessionId = candidate.sessionId;
     record.slaveId = candidate.slaveId;
     record.functionCode = candidate.functionCode;
@@ -1226,17 +1231,17 @@ void NativeMainWindow::runModbusScan() {
         return;
     }
 
-    core::modbus::ScanPlanOptions options;
+    modbus_core::ScanPlanOptions options;
     options.slaveId = textToInt(scanSlaveEdit_, 1);
-    options.functionCode = static_cast<core::Byte>(selectedComboData(scanFunctionCombo_, 3));
+    options.functionCode = static_cast<::svm::core::Byte>(selectedComboData(scanFunctionCombo_, 3));
     options.range.startAddress = textToInt(scanStartEdit_, 0);
     options.range.endAddress = textToInt(scanEndEdit_, 15);
     options.blockSize = 16;
     options.requestIntervalMs = 30;
     options.retryCount = 0;
-    options.safetyLevel = core::modbus::ScanSafetyLevel::Custom;
+    options.safetyLevel = modbus_core::ScanSafetyLevel::Custom;
 
-    const auto planResult = core::modbus::buildScanPlan(options);
+    const auto planResult = modbus_core::buildScanPlan(options);
     if (!planResult.ok) {
         setStatus(utf8ToWide(planResult.errorMessage));
         MessageBoxW(window_, utf8ToWide(planResult.errorMessage).c_str(), tx(T::ModbusInvalidTitle), MB_ICONWARNING | MB_OK);
@@ -1258,7 +1263,7 @@ void NativeMainWindow::runModbusScan() {
     appendLog(uiString(T::SystemModbusStartPrefix) + utf8ToWide(scanSessionId));
     setStatus(tx(T::ModbusRunning));
 
-    for (const core::modbus::ScanBlock& block : planResult.plan.blocks) {
+    for (const modbus_core::ScanBlock& block : planResult.plan.blocks) {
         native_storage::ScanAttemptRecord attempt;
         attempt.sessionId = scanSessionId;
         attempt.blockIndex = block.index;
@@ -1315,7 +1320,7 @@ void NativeMainWindow::runModbusScan() {
             continue;
         }
 
-        const auto parsed = core::modbus::parseReadResponse(
+        const auto parsed = modbus_core::parseReadResponse(
             response,
             planResult.plan.slaveId,
             planResult.plan.functionCode,
@@ -1334,7 +1339,7 @@ void NativeMainWindow::runModbusScan() {
 
         attempt.status = "success";
         ++execution.session.successBlockCount;
-        for (const core::modbus::RegisterObservation& observation : parsed.observations) {
+        for (const modbus_core::RegisterObservation& observation : parsed.observations) {
             native_storage::ScanObservationRecord record;
             record.sessionId = scanSessionId;
             record.blockIndex = block.index;
@@ -1396,23 +1401,23 @@ void NativeMainWindow::showAnalysisWorkspace() {
     bool toleranceOk = false;
     const double tolerance = std::max(0.0, textToDouble(toleranceEdit_, 0.0, &toleranceOk));
 
-    std::vector<core::analysis::RegisterSample> samples;
+    std::vector<analysis_core::RegisterSample> samples;
     samples.reserve(observations.size());
     for (const native_storage::ScanObservationRecord& observation : observations) {
         samples.push_back(sampleFromObservation(observation));
     }
 
-    core::analysis::TargetValue target;
+    analysis_core::TargetValue target;
     target.label = wideToUtf8(controlText(targetLabelEdit_));
     target.value = targetValue;
     target.unit = wideToUtf8(controlText(targetUnitEdit_));
 
-    core::analysis::CandidateGenerationOptions options;
+    analysis_core::CandidateGenerationOptions options;
     options.scaleTransforms = {{1.0, 0.0}, {0.1, 0.0}, {0.01, 0.0}, {0.001, 0.0}, {10.0, 0.0}};
     options.tolerance.absolute = toleranceOk ? tolerance : 0.0;
     options.maxCandidates = 30;
 
-    const auto result = core::analysis::generateValueCandidates(samples, target, options);
+    const auto result = analysis_core::generateValueCandidates(samples, target, options);
     if (!result.success) {
         setStatus(utf8ToWide(result.errorMessage));
         return;
@@ -1504,7 +1509,7 @@ void NativeMainWindow::exportReport() {
     }
 
     const auto resultRecords = store_.ruleVerificationResults(run->verificationRunId);
-    core::report::RuleVerificationRun reportRun;
+    report_core::RuleVerificationRun reportRun;
     reportRun.verificationRunId = run->verificationRunId;
     reportRun.sourceScanSessionId = run->sourceScanSessionId;
     reportRun.ruleCount = run->ruleCount;
@@ -1513,10 +1518,10 @@ void NativeMainWindow::exportReport() {
     reportRun.unsupportedCount = run->unsupportedCount;
     reportRun.createdAtText = run->createdAtUtc;
 
-    std::vector<core::report::RuleVerificationResult> reportResults;
+    std::vector<report_core::RuleVerificationResult> reportResults;
     reportResults.reserve(resultRecords.size());
     for (const native_storage::RuleVerificationResultRecord& record : resultRecords) {
-        core::report::RuleVerificationResult result;
+        report_core::RuleVerificationResult result;
         result.fieldName = record.fieldName;
         result.unit = record.unit;
         result.verified = record.verified;
@@ -1552,7 +1557,7 @@ void NativeMainWindow::exportReport() {
         return;
     }
 
-    const std::string markdown = core::report::renderRuleVerificationMarkdownReport(reportRun, reportResults);
+    const std::string markdown = report_core::renderRuleVerificationMarkdownReport(reportRun, reportResults);
     std::ofstream output(std::filesystem::path(fileName), std::ios::binary | std::ios::trunc);
     if (!output) {
         setStatus(uiString(T::ExportFailedPrefix) + std::wstring(fileName));
@@ -1744,7 +1749,7 @@ bool NativeMainWindow::runRuleVerification(const native_storage::ScanSessionReco
             continue;
         }
 
-        const auto decoded = core::analysis::decodeNumericValue(rule.candidateType, rule.wordOrder, rule.byteOrder, registers);
+        const auto decoded = analysis_core::decodeNumericValue(rule.candidateType, rule.wordOrder, rule.byteOrder, registers);
         if (!decoded.has_value()) {
             result.verified = false;
             result.statusText = wideToUtf8(L"\u89E3\u7801\u5931\u8D25\uFF1A\u89C4\u5219\u7C7B\u578B\u4E0E\u5BC4\u5B58\u5668\u6570\u91CF\u4E0D\u5339\u914D\u3002");
@@ -1759,9 +1764,9 @@ bool NativeMainWindow::runRuleVerification(const native_storage::ScanSessionReco
         result.decodedValue = *decoded;
         result.engineeringValue = *decoded * rule.scaleMultiplier + rule.scaleOffset;
         if (rule.candidateType == "BitFlags" && !registers.empty()) {
-            result.interpretationText = core::analysis::bitFlagInterpretationText(rule.interpretationMap, registers.front());
+            result.interpretationText = analysis_core::bitFlagInterpretationText(rule.interpretationMap, registers.front());
         } else if (rule.candidateType == "EnumMap") {
-            result.interpretationText = core::analysis::enumMapInterpretationText(rule.interpretationMap, static_cast<int>(*decoded));
+            result.interpretationText = analysis_core::enumMapInterpretationText(rule.interpretationMap, static_cast<int>(*decoded));
         }
         result.evidenceText = wideToUtf8(std::wstring(L"\u5B57\u6BB5\u9A8C\u8BC1\u6210\u529F\uFF1A")
             + utf8ToWide(rule.fieldName)
