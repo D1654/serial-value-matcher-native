@@ -129,12 +129,14 @@ Change #4 第一阶段选择标准库文件存储，而不是 SQLite：
 
 ## Win32 Native UI Shell
 
-`svm-native-win32` 是第一阶段小包 UI：
+`svm-native-win32` 是小包 UI 路线：
 
 - 使用 Win32 API 和 common controls，不使用 Qt Widgets；
 - 启动参数 `--self-test` 可在 CI 中不弹窗执行；
-- 主界面保持中文，提供串口刷新、连接/断开、文本/HEX 发送、接收日志和状态栏；
-- 接收日志有上限，达到上限后自动清空并提示，避免长期运行无限增长；
-- raw I/O 会写入 `NativeSessionStore`，为后续 Modbus/候选分析接入保留数据入口。
+- MSVC 构建强制 `/utf-8`，避免中文源码字面量在 Windows native 包中乱码；
+- 主界面保持中文，提供菜单栏、串口刷新、连接/断开、完整串口参数、文本/HEX/行尾发送、发送历史、Profile、接收日志和状态栏；
+- 支持暂停滚动、日志上限和基础自动重连，降低长期运行时的 UI 与资源风险；
+- raw I/O、发送历史、Profile 和基础 Modbus 扫描结果会写入 `NativeSessionStore`；
+- 候选分析、规则验证和报告导出已有入口和明确中文缺口说明，但完整交互仍需继续追齐 Qt baseline。
 
 手工验收步骤见 `docs/windows-native-ui-validation.md`。
