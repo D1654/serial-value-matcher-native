@@ -79,7 +79,17 @@ $unicodeProbeTerms = @(
     "流程：连接设备",
     "分析生成",
     "规则验证",
-    "导出报告"
+    "导出报告",
+    "视图",
+    "默认色系",
+    "柔和色系",
+    "高对比色系",
+    "十六进制",
+    "十进制",
+    "二进制",
+    "日志：HEX+文本",
+    "UTF-8",
+    "GBK"
 )
 $missingUnicodeTerms = New-Object System.Collections.Generic.List[string]
 if ($null -eq $nativeExe) {

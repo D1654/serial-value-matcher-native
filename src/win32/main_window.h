@@ -13,6 +13,7 @@
 #include "native_storage/native_session_store.h"
 #include "win32/win32_serial_port.h"
 
+#include <cstdint>
 #include <deque>
 #include <filesystem>
 #include <optional>
@@ -20,6 +21,15 @@
 #include <vector>
 
 namespace svm::win32 {
+
+enum class NativeLogKind {
+    System,
+    Tx,
+    Rx,
+    ModbusTx,
+    ModbusRx,
+    Error,
+};
 
 class NativeMainWindow final {
 public:
@@ -61,11 +71,20 @@ private:
     bool saveRuleFromCandidate(const native_storage::MatchCandidateRecord& candidate);
     bool runRuleVerification(const native_storage::ScanSessionRecord& session);
     void appendLog(const std::wstring& line);
+    void appendLog(NativeLogKind kind, const std::wstring& line);
+    void appendPayloadLog(NativeLogKind kind, const std::vector<std::uint8_t>& payload);
+    void clearLog();
     void setStatus(const std::wstring& text);
     std::wstring controlText(HWND control) const;
     void setControlText(HWND control, const std::wstring& text);
     std::vector<std::uint8_t> payloadFromInput(std::wstring* errorText) const;
+    std::wstring formatPayloadForLog(const std::vector<std::uint8_t>& payload) const;
+    unsigned int selectedTextCodePage() const;
+    std::string selectedPortName() const;
     SerialOpenOptions currentOpenOptions() const;
+    void applySerialLineControl(WORD controlId);
+    void updateRtsControlState();
+    void applyLogTheme(int themeIndex);
     std::filesystem::path defaultStoreDirectory() const;
     void saveRawEvent(std::string direction, const std::vector<std::uint8_t>& payload);
 
@@ -97,7 +116,9 @@ private:
     HWND connectButton_ = nullptr;
     HWND disconnectButton_ = nullptr;
     HWND sendModeCombo_ = nullptr;
+    HWND textEncodingCombo_ = nullptr;
     HWND lineEndingCombo_ = nullptr;
+    HWND logFormatCombo_ = nullptr;
     HWND historyCombo_ = nullptr;
     HWND sendEdit_ = nullptr;
     HWND sendButton_ = nullptr;
@@ -130,9 +151,13 @@ private:
     HWND receiveLog_ = nullptr;
     HWND statusText_ = nullptr;
     HFONT uiFont_ = nullptr;
+    HMODULE richEditModule_ = nullptr;
     bool ownsUiFont_ = false;
+    bool receiveLogUsesRichEdit_ = false;
+    int logThemeIndex_ = 0;
     Win32SerialPort serialPort_;
     native_storage::NativeSessionStore store_;
+    std::vector<SerialPortDescriptor> availablePorts_;
     std::string sessionId_ = "win32-native-session";
     std::optional<SerialOpenOptions> lastOpenOptions_;
     std::string reconnectPortName_;

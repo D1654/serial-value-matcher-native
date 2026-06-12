@@ -9,9 +9,12 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <devguid.h>
+#include <setupapi.h>
 
 #include <algorithm>
 #include <cwchar>
+#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -82,12 +85,74 @@ std::string queryDeviceTarget(const std::wstring& deviceName) {
     return wideToUtf8(std::wstring_view(buffer.data(), std::wcslen(buffer.data())));
 }
 
-} // namespace
+std::wstring queryDeviceProperty(HDEVINFO deviceInfoSet, SP_DEVINFO_DATA& deviceInfoData, DWORD property) {
+    DWORD requiredBytes = 0;
+    if (SetupDiGetDeviceRegistryPropertyW(deviceInfoSet, &deviceInfoData, property, nullptr, nullptr, 0, &requiredBytes)
+        || GetLastError() != ERROR_INSUFFICIENT_BUFFER
+        || requiredBytes == 0) {
+        return {};
+    }
 
-std::vector<SerialPortDescriptor> Win32SerialEnumerator::availablePorts() {
-    std::vector<SerialPortDescriptor> ports;
-    for (const std::wstring& deviceName : queryDeviceNames()) {
-        const std::string portName = wideToUtf8(deviceName);
+    std::vector<BYTE> buffer(requiredBytes + sizeof(wchar_t));
+    if (!SetupDiGetDeviceRegistryPropertyW(
+            deviceInfoSet,
+            &deviceInfoData,
+            property,
+            nullptr,
+            buffer.data(),
+            static_cast<DWORD>(buffer.size()),
+            nullptr)) {
+        return {};
+    }
+    const auto* text = reinterpret_cast<const wchar_t*>(buffer.data());
+    return std::wstring(text);
+}
+
+std::wstring queryDevicePortName(HDEVINFO deviceInfoSet, SP_DEVINFO_DATA& deviceInfoData) {
+    HKEY key = SetupDiOpenDevRegKey(
+        deviceInfoSet,
+        &deviceInfoData,
+        DICS_FLAG_GLOBAL,
+        0,
+        DIREG_DEV,
+        KEY_READ);
+    if (key == INVALID_HANDLE_VALUE) {
+        return {};
+    }
+
+    wchar_t buffer[128] = {};
+    DWORD type = 0;
+    DWORD bytes = sizeof(buffer);
+    const LSTATUS status = RegQueryValueExW(key, L"PortName", nullptr, &type, reinterpret_cast<LPBYTE>(buffer), &bytes);
+    RegCloseKey(key);
+    if (status != ERROR_SUCCESS || type != REG_SZ || buffer[0] == L'\0') {
+        return {};
+    }
+    return buffer;
+}
+
+std::string friendlyDescription(HDEVINFO deviceInfoSet, SP_DEVINFO_DATA& deviceInfoData) {
+    std::wstring friendly = queryDeviceProperty(deviceInfoSet, deviceInfoData, SPDRP_FRIENDLYNAME);
+    if (friendly.empty()) {
+        friendly = queryDeviceProperty(deviceInfoSet, deviceInfoData, SPDRP_DEVICEDESC);
+    }
+    return wideToUtf8(friendly);
+}
+
+void appendSetupApiPorts(std::map<std::string, SerialPortDescriptor>& portsByName) {
+    HDEVINFO deviceInfoSet = SetupDiGetClassDevsW(&GUID_DEVCLASS_PORTS, nullptr, nullptr, DIGCF_PRESENT);
+    if (deviceInfoSet == INVALID_HANDLE_VALUE) {
+        return;
+    }
+
+    for (DWORD index = 0;; ++index) {
+        SP_DEVINFO_DATA deviceInfoData = {};
+        deviceInfoData.cbSize = sizeof(deviceInfoData);
+        if (!SetupDiEnumDeviceInfo(deviceInfoSet, index, &deviceInfoData)) {
+            break;
+        }
+
+        const std::string portName = wideToUtf8(queryDevicePortName(deviceInfoSet, deviceInfoData));
         if (!isLikelyComPortName(portName)) {
             continue;
         }
@@ -95,11 +160,49 @@ std::vector<SerialPortDescriptor> Win32SerialEnumerator::availablePorts() {
         SerialPortDescriptor descriptor;
         descriptor.portName = normalizedComPortName(portName);
         descriptor.devicePath = makeWin32DevicePath(descriptor.portName);
-        const std::string target = queryDeviceTarget(deviceName);
-        descriptor.description = target.empty() ? "Win32 串口设备" : "Win32 串口设备：" + target;
-        ports.push_back(std::move(descriptor));
+        descriptor.description = friendlyDescription(deviceInfoSet, deviceInfoData);
+        if (descriptor.description.empty()) {
+            descriptor.description = "Win32 串口设备";
+        }
+        portsByName[descriptor.portName] = std::move(descriptor);
     }
 
+    SetupDiDestroyDeviceInfoList(deviceInfoSet);
+}
+
+void appendDosDevicePorts(std::map<std::string, SerialPortDescriptor>& portsByName) {
+    for (const std::wstring& deviceName : queryDeviceNames()) {
+        const std::string portName = wideToUtf8(deviceName);
+        if (!isLikelyComPortName(portName)) {
+            continue;
+        }
+
+        const std::string normalized = normalizedComPortName(portName);
+        if (portsByName.find(normalized) != portsByName.end()) {
+            continue;
+        }
+
+        SerialPortDescriptor descriptor;
+        descriptor.portName = normalized;
+        descriptor.devicePath = makeWin32DevicePath(descriptor.portName);
+        const std::string target = queryDeviceTarget(deviceName);
+        descriptor.description = target.empty() ? "Win32 串口设备" : "Win32 串口设备：" + target;
+        portsByName[descriptor.portName] = std::move(descriptor);
+    }
+}
+
+} // namespace
+
+std::vector<SerialPortDescriptor> Win32SerialEnumerator::availablePorts() {
+    std::map<std::string, SerialPortDescriptor> portsByName;
+    appendSetupApiPorts(portsByName);
+    appendDosDevicePorts(portsByName);
+
+    std::vector<SerialPortDescriptor> ports;
+    ports.reserve(portsByName.size());
+    for (auto& item : portsByName) {
+        ports.push_back(std::move(item.second));
+    }
     std::sort(ports.begin(), ports.end(), [](const SerialPortDescriptor& left, const SerialPortDescriptor& right) {
         const int leftNumber = comPortNumber(left.portName);
         const int rightNumber = comPortNumber(right.portName);

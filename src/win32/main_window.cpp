@@ -16,12 +16,14 @@
 #include <chrono>
 #include <commctrl.h>
 #include <commdlg.h>
+#include <richedit.h>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <cwctype>
 #include <fstream>
 #include <sstream>
+#include <string_view>
 #include <utility>
 
 namespace svm::win32 {
@@ -35,9 +37,70 @@ namespace report_core = ::svm::core::report;
 
 constexpr wchar_t kWindowClassName[] = L"SvmNativeMainWindow";
 constexpr std::size_t kMaxLogChars = 200000;
+constexpr UINT kCodePageGbk = 936;
+constexpr UINT kCodePageAscii = 20127;
 
 const wchar_t* tx(T id) {
     return uiText(id);
+}
+
+struct NativeLogPalette {
+    COLORREF background = RGB(255, 255, 255);
+    COLORREF normal = RGB(32, 32, 32);
+    COLORREF system = RGB(84, 84, 84);
+    COLORREF tx = RGB(0, 91, 170);
+    COLORREF rx = RGB(0, 128, 72);
+    COLORREF modbusTx = RGB(138, 82, 0);
+    COLORREF modbusRx = RGB(108, 72, 145);
+    COLORREF error = RGB(176, 38, 38);
+};
+
+NativeLogPalette logPalette(int themeIndex) {
+    switch (themeIndex) {
+    case 1:
+        return {
+            RGB(250, 250, 248),
+            RGB(32, 32, 32),
+            RGB(88, 88, 88),
+            RGB(35, 95, 154),
+            RGB(35, 120, 84),
+            RGB(130, 86, 36),
+            RGB(106, 84, 150),
+            RGB(170, 48, 48),
+        };
+    case 2:
+        return {
+            RGB(12, 12, 12),
+            RGB(232, 232, 232),
+            RGB(210, 210, 210),
+            RGB(70, 190, 255),
+            RGB(95, 230, 130),
+            RGB(255, 210, 72),
+            RGB(215, 145, 255),
+            RGB(255, 88, 88),
+        };
+    default:
+        return {};
+    }
+}
+
+COLORREF logColorForKind(NativeLogKind kind, int themeIndex) {
+    const NativeLogPalette palette = logPalette(themeIndex);
+    switch (kind) {
+    case NativeLogKind::System:
+        return palette.system;
+    case NativeLogKind::Tx:
+        return palette.tx;
+    case NativeLogKind::Rx:
+        return palette.rx;
+    case NativeLogKind::ModbusTx:
+        return palette.modbusTx;
+    case NativeLogKind::ModbusRx:
+        return palette.modbusRx;
+    case NativeLogKind::Error:
+        return palette.error;
+    }
+    return palette.normal;
 }
 
 std::wstring bytesToHex(const std::vector<std::uint8_t>& bytes) {
@@ -100,6 +163,240 @@ std::vector<std::uint8_t> parseHexPayload(std::wstring_view text, std::wstring* 
         bytes.push_back(static_cast<std::uint8_t>((nibbles[index] << 4) | nibbles[index + 1]));
     }
     return bytes;
+}
+
+std::vector<std::wstring> splitByteTokens(std::wstring_view text) {
+    std::vector<std::wstring> tokens;
+    std::wstring current;
+    for (wchar_t ch : text) {
+        if (std::iswspace(ch) || ch == L',' || ch == L';' || ch == L'\uFF0C' || ch == L'\u3001') {
+            if (!current.empty()) {
+                tokens.push_back(std::move(current));
+                current.clear();
+            }
+            continue;
+        }
+        current.push_back(ch);
+    }
+    if (!current.empty()) {
+        tokens.push_back(std::move(current));
+    }
+    return tokens;
+}
+
+std::vector<std::uint8_t> parseDecimalPayload(std::wstring_view text, std::wstring* errorText) {
+    const std::vector<std::wstring> tokens = splitByteTokens(text);
+    std::vector<std::uint8_t> bytes;
+    bytes.reserve(tokens.size());
+    for (const std::wstring& token : tokens) {
+        wchar_t* end = nullptr;
+        const long value = std::wcstol(token.c_str(), &end, 10);
+        if (end == token.c_str() || *end != L'\0' || value < 0 || value > 255) {
+            if (errorText != nullptr) {
+                *errorText = tx(T::SendModeInvalidDecimal);
+            }
+            return {};
+        }
+        bytes.push_back(static_cast<std::uint8_t>(value));
+    }
+    return bytes;
+}
+
+std::vector<std::uint8_t> parseBinaryPayload(std::wstring_view text, std::wstring* errorText) {
+    std::wstring bits;
+    for (wchar_t ch : text) {
+        if (std::iswspace(ch) || ch == L',' || ch == L';' || ch == L'\uFF0C' || ch == L'\u3001') {
+            continue;
+        }
+        if (ch != L'0' && ch != L'1') {
+            if (errorText != nullptr) {
+                *errorText = tx(T::SendModeInvalidBinary);
+            }
+            return {};
+        }
+        bits.push_back(ch);
+    }
+
+    if (bits.empty()) {
+        return {};
+    }
+    if ((bits.size() % 8) != 0) {
+        if (errorText != nullptr) {
+            *errorText = tx(T::SendModeInvalidBinary);
+        }
+        return {};
+    }
+
+    std::vector<std::uint8_t> bytes;
+    bytes.reserve(bits.size() / 8);
+    for (std::size_t index = 0; index < bits.size(); index += 8) {
+        std::uint8_t value = 0;
+        for (std::size_t bit = 0; bit < 8; ++bit) {
+            value = static_cast<std::uint8_t>((value << 1U) | (bits[index + bit] == L'1' ? 1U : 0U));
+        }
+        bytes.push_back(value);
+    }
+    return bytes;
+}
+
+std::vector<std::uint8_t> encodeTextPayload(std::wstring_view text, UINT codePage, std::wstring* errorText) {
+    if (text.empty()) {
+        return {};
+    }
+
+    if (codePage == kCodePageAscii) {
+        std::vector<std::uint8_t> bytes;
+        bytes.reserve(text.size());
+        for (wchar_t ch : text) {
+            if (ch > 0x7F) {
+                if (errorText != nullptr) {
+                    *errorText = tx(T::TextEncodingFailed);
+                }
+                return {};
+            }
+            bytes.push_back(static_cast<std::uint8_t>(ch));
+        }
+        return bytes;
+    }
+
+    BOOL usedDefaultChar = FALSE;
+    BOOL* usedDefaultCharPtr = codePage == CP_UTF8 ? nullptr : &usedDefaultChar;
+    const int required = WideCharToMultiByte(
+        codePage,
+        0,
+        text.data(),
+        static_cast<int>(text.size()),
+        nullptr,
+        0,
+        nullptr,
+        usedDefaultCharPtr);
+    if (required <= 0) {
+        if (errorText != nullptr) {
+            *errorText = tx(T::TextEncodingFailed);
+        }
+        return {};
+    }
+
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(required));
+    usedDefaultChar = FALSE;
+    if (WideCharToMultiByte(
+            codePage,
+            0,
+            text.data(),
+            static_cast<int>(text.size()),
+            reinterpret_cast<char*>(bytes.data()),
+            required,
+            nullptr,
+            usedDefaultCharPtr) <= 0
+        || usedDefaultChar) {
+        if (errorText != nullptr) {
+            *errorText = tx(T::TextEncodingFailed);
+        }
+        return {};
+    }
+    return bytes;
+}
+
+std::wstring bytesToDecimal(const std::vector<std::uint8_t>& bytes) {
+    std::wostringstream output;
+    for (std::size_t index = 0; index < bytes.size(); ++index) {
+        if (index != 0) {
+            output << L' ';
+        }
+        output << static_cast<int>(bytes[index]);
+    }
+    return output.str();
+}
+
+std::wstring bytesToBinary(const std::vector<std::uint8_t>& bytes) {
+    std::wostringstream output;
+    for (std::size_t index = 0; index < bytes.size(); ++index) {
+        if (index != 0) {
+            output << L' ';
+        }
+        for (int bit = 7; bit >= 0; --bit) {
+            output << (((bytes[index] >> bit) & 1U) != 0 ? L'1' : L'0');
+        }
+    }
+    return output.str();
+}
+
+std::wstring decodeBytesToText(const std::vector<std::uint8_t>& bytes, UINT codePage) {
+    if (bytes.empty()) {
+        return {};
+    }
+
+    if (codePage == kCodePageAscii) {
+        std::wstring text;
+        text.reserve(bytes.size());
+        for (std::uint8_t byte : bytes) {
+            text.push_back(byte <= 0x7F ? static_cast<wchar_t>(byte) : L'.');
+        }
+        return text;
+    }
+
+    const DWORD flags = codePage == CP_UTF8 ? MB_ERR_INVALID_CHARS : 0;
+    const int required = MultiByteToWideChar(
+        codePage,
+        flags,
+        reinterpret_cast<const char*>(bytes.data()),
+        static_cast<int>(bytes.size()),
+        nullptr,
+        0);
+    if (required <= 0) {
+        std::wstring text;
+        text.reserve(bytes.size());
+        for (std::uint8_t byte : bytes) {
+            text.push_back(byte >= 0x20 && byte <= 0x7E ? static_cast<wchar_t>(byte) : L'.');
+        }
+        return text;
+    }
+
+    std::wstring text(static_cast<std::size_t>(required), L'\0');
+    MultiByteToWideChar(
+        codePage,
+        flags,
+        reinterpret_cast<const char*>(bytes.data()),
+        static_cast<int>(bytes.size()),
+        text.data(),
+        required);
+    return text;
+}
+
+std::wstring sanitizeLogText(std::wstring_view text) {
+    std::wstring sanitized;
+    sanitized.reserve(text.size());
+    for (wchar_t ch : text) {
+        switch (ch) {
+        case L'\r':
+            sanitized.append(L"\\r");
+            break;
+        case L'\n':
+            sanitized.append(L"\\n");
+            break;
+        case L'\t':
+            sanitized.append(L"\\t");
+            break;
+        default:
+            sanitized.push_back(ch < 0x20 ? L'.' : ch);
+            break;
+        }
+    }
+    return sanitized;
+}
+
+std::wstring localClockText() {
+    SYSTEMTIME now = {};
+    GetLocalTime(&now);
+    wchar_t buffer[32] = {};
+    swprintf_s(
+        buffer,
+        L"%02u:%02u:%02u.%03u",
+        static_cast<unsigned int>(now.wHour),
+        static_cast<unsigned int>(now.wMinute),
+        static_cast<unsigned int>(now.wSecond),
+        static_cast<unsigned int>(now.wMilliseconds));
+    return buffer;
 }
 
 std::string timestampText() {
@@ -361,6 +658,15 @@ std::wstring candidateDisplayText(const native_storage::MatchCandidateRecord& ca
     return output.str();
 }
 
+std::wstring portDisplayText(const SerialPortDescriptor& port) {
+    const std::wstring portName = utf8ToWide(port.portName);
+    const std::wstring description = sanitizeLogText(utf8ToWide(port.description));
+    if (description.empty() || description == portName) {
+        return portName;
+    }
+    return portName + L" - " + description;
+}
+
 std::wstring ruleDisplayName(const native_storage::MatchCandidateRecord& candidate, const std::wstring& targetName) {
     if (!targetName.empty()) {
         return targetName;
@@ -541,9 +847,29 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             sendPayload();
             return 0;
         case IDC_CLEAR_BUTTON:
-            SetWindowTextW(receiveLog_, L"");
-            hiddenLogLineCount_ = 0;
-            setStatus(tx(T::ClearLogStatus));
+            clearLog();
+            return 0;
+        case IDC_DTR_CHECK:
+        case IDC_RTS_CHECK:
+            if (HIWORD(wParam) == BN_CLICKED) {
+                applySerialLineControl(static_cast<WORD>(LOWORD(wParam)));
+            }
+            return 0;
+        case IDC_FLOW_CONTROL_COMBO:
+            if (HIWORD(wParam) == CBN_SELCHANGE) {
+                updateRtsControlState();
+                if ((!serialPort_.isOpen()
+                        && selectedComboData(flowControlCombo_, static_cast<LPARAM>(SerialFlowControl::None))
+                            == static_cast<LPARAM>(SerialFlowControl::HardwareRtsCts))
+                    || (serialPort_.isOpen() && serialPort_.usesHardwareRtsCts())) {
+                    setStatus(tx(T::RtsHardwareManaged));
+                }
+            }
+            return 0;
+        case IDC_LOG_FORMAT_COMBO:
+            if (HIWORD(wParam) == CBN_SELCHANGE) {
+                setStatus(tx(T::LogFormatChanged));
+            }
             return 0;
         case IDC_SAVE_PROFILE_BUTTON:
             saveCurrentSerialProfile();
@@ -602,9 +928,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             setStatus(scrollPaused_ ? tx(T::PauseScrollStatus) : tx(T::ResumeScrollStatus));
             return 0;
         case IDM_TOOLS_CLEAR_LOG:
-            SetWindowTextW(receiveLog_, L"");
-            hiddenLogLineCount_ = 0;
-            setStatus(tx(T::ClearLogStatus));
+            clearLog();
             return 0;
         case IDM_ANALYSIS_MODBUS_SCAN:
             runModbusScan();
@@ -617,6 +941,18 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             return 0;
         case IDM_ANALYSIS_EXPORT_REPORT:
             exportReport();
+            return 0;
+        case IDM_VIEW_THEME_DEFAULT:
+            applyLogTheme(0);
+            setStatus(tx(T::ThemeDefaultStatus));
+            return 0;
+        case IDM_VIEW_THEME_SOFT:
+            applyLogTheme(1);
+            setStatus(tx(T::ThemeSoftStatus));
+            return 0;
+        case IDM_VIEW_THEME_HIGH_CONTRAST:
+            applyLogTheme(2);
+            setStatus(tx(T::ThemeHighContrastStatus));
             return 0;
         case IDM_HELP_ABOUT:
             showAbout();
@@ -647,6 +983,10 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             uiFont_ = nullptr;
             ownsUiFont_ = false;
         }
+        if (richEditModule_ != nullptr) {
+            FreeLibrary(richEditModule_);
+            richEditModule_ = nullptr;
+        }
         PostQuitMessage(0);
         return 0;
     default:
@@ -661,6 +1001,7 @@ void NativeMainWindow::createMenus() {
     HMENU serialMenu = CreatePopupMenu();
     HMENU toolsMenu = CreatePopupMenu();
     HMENU analysisMenu = CreatePopupMenu();
+    HMENU viewMenu = CreatePopupMenu();
     HMENU helpMenu = CreatePopupMenu();
 
     AppendMenuW(fileMenu, MF_STRING, IDM_FILE_SAVE_PROFILE, tx(T::FileSaveProfileMenu));
@@ -681,12 +1022,17 @@ void NativeMainWindow::createMenus() {
     AppendMenuW(analysisMenu, MF_STRING, IDM_ANALYSIS_RULE_VERIFY, tx(T::AnalysisRuleVerifyMenu));
     AppendMenuW(analysisMenu, MF_STRING, IDM_ANALYSIS_EXPORT_REPORT, tx(T::AnalysisExportReportMenu));
 
+    AppendMenuW(viewMenu, MF_STRING, IDM_VIEW_THEME_DEFAULT, tx(T::ThemeDefaultMenu));
+    AppendMenuW(viewMenu, MF_STRING, IDM_VIEW_THEME_SOFT, tx(T::ThemeSoftMenu));
+    AppendMenuW(viewMenu, MF_STRING, IDM_VIEW_THEME_HIGH_CONTRAST, tx(T::ThemeHighContrastMenu));
+
     AppendMenuW(helpMenu, MF_STRING, IDM_HELP_ABOUT, tx(T::HelpAboutMenu));
 
     AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu), tx(T::FileMenu));
     AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(serialMenu), tx(T::SerialMenu));
     AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(toolsMenu), tx(T::ToolsMenu));
     AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(analysisMenu), tx(T::AnalysisMenu));
+    AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(viewMenu), tx(T::ViewMenu));
     AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(helpMenu), tx(T::HelpMenu));
     SetMenu(window_, menu_);
 }
@@ -711,6 +1057,9 @@ void NativeMainWindow::createControls() {
     if (uiFont_ == nullptr) {
         uiFont_ = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
     }
+
+    richEditModule_ = LoadLibraryW(L"Msftedit.dll");
+    receiveLogUsesRichEdit_ = richEditModule_ != nullptr;
 
     connectionGroup_ = CreateWindowExW(0, L"BUTTON", tx(T::ConnectionGroup), WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     sendGroup_ = CreateWindowExW(0, L"BUTTON", tx(T::SendGroup), WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
@@ -737,7 +1086,9 @@ void NativeMainWindow::createControls() {
     connectButton_ = CreateWindowExW(0, L"BUTTON", tx(T::ConnectButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_CONNECT_BUTTON), instance_, nullptr);
     disconnectButton_ = CreateWindowExW(0, L"BUTTON", tx(T::DisconnectButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_DISCONNECT_BUTTON), instance_, nullptr);
     sendModeCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SEND_MODE_COMBO), instance_, nullptr);
+    textEncodingCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TEXT_ENCODING_COMBO), instance_, nullptr);
     lineEndingCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LINE_ENDING_COMBO), instance_, nullptr);
+    logFormatCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_FORMAT_COMBO), instance_, nullptr);
     historyCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_HISTORY_COMBO), instance_, nullptr);
     sendEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SEND_EDIT), instance_, nullptr);
     sendButton_ = CreateWindowExW(0, L"BUTTON", tx(T::SendButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SEND_BUTTON), instance_, nullptr);
@@ -767,11 +1118,43 @@ void NativeMainWindow::createControls() {
     toleranceEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", tx(T::ToleranceDefault), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TOLERANCE_EDIT), instance_, nullptr);
     candidateStatic_ = CreateWindowExW(0, L"STATIC", tx(T::CandidateLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     candidateCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_CANDIDATE_COMBO), instance_, nullptr);
-    receiveLog_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_RECEIVE_LOG), instance_, nullptr);
+    receiveLog_ = CreateWindowExW(
+        WS_EX_CLIENTEDGE,
+        receiveLogUsesRichEdit_ ? MSFTEDIT_CLASS : L"EDIT",
+        L"",
+        WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | ES_NOHIDESEL,
+        0,
+        0,
+        0,
+        0,
+        window_,
+        reinterpret_cast<HMENU>(IDC_RECEIVE_LOG),
+        instance_,
+        nullptr);
+    if (receiveLog_ == nullptr && receiveLogUsesRichEdit_) {
+        receiveLogUsesRichEdit_ = false;
+        FreeLibrary(richEditModule_);
+        richEditModule_ = nullptr;
+        receiveLog_ = CreateWindowExW(
+            WS_EX_CLIENTEDGE,
+            L"EDIT",
+            L"",
+            WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL,
+            0,
+            0,
+            0,
+            0,
+            window_,
+            reinterpret_cast<HMENU>(IDC_RECEIVE_LOG),
+            instance_,
+            nullptr);
+    }
     statusText_ = CreateWindowExW(0, L"STATIC", tx(T::InitialStatus), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_STATUS_TEXT), instance_, nullptr);
 
     populateSerialOptionControls();
     setDefaultFonts();
+    applyLogTheme(0);
+    updateRtsControlState();
 }
 
 void NativeMainWindow::populateSerialOptionControls() {
@@ -805,14 +1188,29 @@ void NativeMainWindow::populateSerialOptionControls() {
     selectComboData(flowControlCombo_, static_cast<LPARAM>(SerialFlowControl::None));
 
     addComboItem(sendModeCombo_, tx(T::TextMode), 0);
-    addComboItem(sendModeCombo_, L"HEX", 1);
+    addComboItem(sendModeCombo_, tx(T::HexMode), 1);
+    addComboItem(sendModeCombo_, tx(T::DecimalMode), 2);
+    addComboItem(sendModeCombo_, tx(T::BinaryMode), 3);
     selectComboData(sendModeCombo_, 0);
+
+    addComboItem(textEncodingCombo_, tx(T::Utf8Encoding), CP_UTF8);
+    addComboItem(textEncodingCombo_, tx(T::GbkEncoding), kCodePageGbk);
+    addComboItem(textEncodingCombo_, tx(T::AnsiEncoding), CP_ACP);
+    addComboItem(textEncodingCombo_, tx(T::AsciiEncoding), kCodePageAscii);
+    selectComboData(textEncodingCombo_, CP_UTF8);
 
     addComboItem(lineEndingCombo_, tx(T::NoLineEnding), 0);
     addComboItem(lineEndingCombo_, L"CR", 1);
     addComboItem(lineEndingCombo_, L"LF", 2);
     addComboItem(lineEndingCombo_, L"CRLF", 3);
     selectComboData(lineEndingCombo_, 0);
+
+    addComboItem(logFormatCombo_, tx(T::LogFormatHex), 0);
+    addComboItem(logFormatCombo_, tx(T::LogFormatDecimal), 1);
+    addComboItem(logFormatCombo_, tx(T::LogFormatBinary), 2);
+    addComboItem(logFormatCombo_, tx(T::LogFormatText), 3);
+    addComboItem(logFormatCombo_, tx(T::LogFormatHexText), 4);
+    selectComboData(logFormatCombo_, 0);
 
     addComboItem(scanFunctionCombo_, tx(T::Fc03Holding), 3);
     addComboItem(scanFunctionCombo_, tx(T::Fc04Input), 4);
@@ -847,8 +1245,8 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int actionsX = connectionX + connectionWidth - groupPad - actionsWidth;
     MoveWindow(portLabel_, x, y + 6, labelWidth, labelHeight, TRUE);
     x += labelWidth;
-    MoveWindow(portCombo_, x, y, 184, 220, TRUE);
-    x += 184 + gap;
+    MoveWindow(portCombo_, x, y, 360, 260, TRUE);
+    x += 360 + gap;
     MoveWindow(refreshButton_, x, y, smallButtonWidth, row, TRUE);
     x += smallButtonWidth + gap;
     MoveWindow(saveProfileButton_, x, y, 96, row, TRUE);
@@ -887,7 +1285,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int statusY = height - statusHeight - 4;
     const int contentY = connectionY + connectionHeight + 10;
     const int contentHeight = std::max(360, statusY - contentY - 8);
-    const int leftWidth = 430;
+    const int leftWidth = 460;
     const int columnGap = 10;
     const int rightX = margin + leftWidth + columnGap;
     const int rightWidth = std::max(360, width - rightX - margin);
@@ -898,9 +1296,11 @@ void NativeMainWindow::layoutControls(int width, int height) {
 
     x = margin + groupPad;
     y = sendY + 26;
-    const int historyWidth = leftWidth - groupPad * 2 - 80 - 88 - gap * 2;
+    const int historyWidth = leftWidth - groupPad * 2 - 80 - 82 - 88 - gap * 3;
     MoveWindow(sendModeCombo_, x, y, 80, 160, TRUE);
     x += 80 + gap;
+    MoveWindow(textEncodingCombo_, x, y, 82, 160, TRUE);
+    x += 82 + gap;
     MoveWindow(lineEndingCombo_, x, y, 88, 160, TRUE);
     x += 88 + gap;
     MoveWindow(historyCombo_, x, y, historyWidth, 200, TRUE);
@@ -985,7 +1385,8 @@ void NativeMainWindow::layoutControls(int width, int height) {
     MoveWindow(exportReportButton_, x, y, 100, row, TRUE);
 
     MoveWindow(logGroup_, rightX, contentY, rightWidth, contentHeight, TRUE);
-    MoveWindow(receiveLog_, rightX + groupPad, contentY + 26, rightWidth - groupPad * 2, contentHeight - 40, TRUE);
+    MoveWindow(logFormatCombo_, rightX + groupPad, contentY + 24, 164, 180, TRUE);
+    MoveWindow(receiveLog_, rightX + groupPad, contentY + 58, rightWidth - groupPad * 2, contentHeight - 72, TRUE);
     MoveWindow(statusText_, margin, statusY, width - margin * 2, statusHeight, TRUE);
 }
 
@@ -996,16 +1397,26 @@ void NativeMainWindow::setDefaultFonts() {
 }
 
 void NativeMainWindow::refreshPorts() {
-    const std::wstring current = controlText(portCombo_);
+    const std::string currentPort = selectedPortName();
     SendMessageW(portCombo_, CB_RESETCONTENT, 0, 0);
-    const auto ports = Win32SerialEnumerator::availablePorts();
-    for (const SerialPortDescriptor& port : ports) {
-        SendMessageW(portCombo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(utf8ToWide(port.portName).c_str()));
+    availablePorts_ = Win32SerialEnumerator::availablePorts();
+    for (std::size_t index = 0; index < availablePorts_.size(); ++index) {
+        const std::wstring display = portDisplayText(availablePorts_[index]);
+        const LRESULT item = SendMessageW(portCombo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(display.c_str()));
+        if (item >= 0) {
+            SendMessageW(portCombo_, CB_SETITEMDATA, static_cast<WPARAM>(item), static_cast<LPARAM>(index + 1));
+        }
     }
-    if (!ports.empty()) {
-        const LRESULT preserved = SendMessageW(portCombo_, CB_FINDSTRINGEXACT, static_cast<WPARAM>(-1), reinterpret_cast<LPARAM>(current.c_str()));
+    if (!availablePorts_.empty()) {
+        LRESULT preserved = -1;
+        for (std::size_t index = 0; index < availablePorts_.size(); ++index) {
+            if (normalizedComPortName(availablePorts_[index].portName) == normalizedComPortName(currentPort)) {
+                preserved = static_cast<LRESULT>(index);
+                break;
+            }
+        }
         SendMessageW(portCombo_, CB_SETCURSEL, preserved >= 0 ? static_cast<WPARAM>(preserved) : 0, 0);
-        setStatus(uiString(T::RefreshedPortsPrefix) + std::to_wstring(ports.size()) + uiString(T::PortsUnitSuffix));
+        setStatus(uiString(T::RefreshedPortsPrefix) + std::to_wstring(availablePorts_.size()) + uiString(T::PortsUnitSuffix));
     } else {
         setStatus(tx(T::NoPortsStatus));
     }
@@ -1040,10 +1451,20 @@ void NativeMainWindow::applyLatestSerialProfile() {
         return;
     }
 
-    const std::wstring portName = utf8ToWide(profile->portName);
-    LRESULT portIndex = SendMessageW(portCombo_, CB_FINDSTRINGEXACT, static_cast<WPARAM>(-1), reinterpret_cast<LPARAM>(portName.c_str()));
+    const std::string normalizedProfilePort = normalizedComPortName(profile->portName);
+    const std::wstring portName = utf8ToWide(normalizedProfilePort.empty() ? profile->portName : normalizedProfilePort);
+    LRESULT portIndex = -1;
+    for (std::size_t index = 0; index < availablePorts_.size(); ++index) {
+        if (normalizedComPortName(availablePorts_[index].portName) == normalizedProfilePort) {
+            portIndex = static_cast<LRESULT>(index);
+            break;
+        }
+    }
     if (portIndex < 0 && !portName.empty()) {
         portIndex = SendMessageW(portCombo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(portName.c_str()));
+        if (portIndex >= 0) {
+            SendMessageW(portCombo_, CB_SETITEMDATA, static_cast<WPARAM>(portIndex), 0);
+        }
     }
     if (portIndex >= 0) {
         SendMessageW(portCombo_, CB_SETCURSEL, static_cast<WPARAM>(portIndex), 0);
@@ -1056,6 +1477,7 @@ void NativeMainWindow::applyLatestSerialProfile() {
     selectComboData(flowControlCombo_, static_cast<LPARAM>(flowControlFromKey(profile->flowControl)));
     SendMessageW(dtrCheck_, BM_SETCHECK, profile->dataTerminalReady ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageW(rtsCheck_, BM_SETCHECK, profile->requestToSend ? BST_CHECKED : BST_UNCHECKED, 0);
+    updateRtsControlState();
     setStatus(uiString(T::RestoredProfilePrefix) + portName + uiString(T::ChinesePeriod));
 }
 
@@ -1114,6 +1536,7 @@ void NativeMainWindow::connectSerial() {
     KillTimer(window_, IDT_RECONNECT);
     appendLog(uiString(T::SystemConnectedPrefix) + utf8ToWide(serialPort_.endpoint()));
     SetWindowTextW(connectButton_, tx(T::DisconnectButton));
+    updateRtsControlState();
     saveCurrentSerialProfile();
     setStatus(tx(T::ConnectedStatus));
 }
@@ -1126,6 +1549,7 @@ void NativeMainWindow::disconnectSerial() {
     serialPort_.close();
     appendLog(uiString(T::SystemDisconnectedPrefix) + endpoint);
     SetWindowTextW(connectButton_, tx(T::ConnectButton));
+    updateRtsControlState();
     setStatus(tx(T::DisconnectedStatus));
 }
 
@@ -1163,7 +1587,7 @@ void NativeMainWindow::sendPayload() {
         store_.saveSendHistory(history);
         refreshSendHistory();
     }
-    appendLog(L"[TX] " + bytesToHex(payload));
+    appendPayloadLog(NativeLogKind::Tx, payload);
     setStatus(uiString(T::SentPrefix) + std::to_wstring(result.byteCount) + uiString(T::BytesSuffix));
 }
 
@@ -1187,7 +1611,7 @@ void NativeMainWindow::pollSerial() {
             break;
         }
         saveRawEvent("Rx", payload);
-        appendLog(L"[RX] " + bytesToHex(payload));
+        appendPayloadLog(NativeLogKind::Rx, payload);
     }
 }
 
@@ -1198,7 +1622,8 @@ void NativeMainWindow::handleSerialFailure(const std::string& message) {
     const std::string endpoint = serialPort_.endpoint();
     serialPort_.close();
     SetWindowTextW(connectButton_, tx(T::ConnectButton));
-    appendLog(uiString(T::SystemSerialFailedPrefix) + utf8ToWide(message));
+    updateRtsControlState();
+    appendLog(NativeLogKind::Error, uiString(T::SystemSerialFailedPrefix) + utf8ToWide(message));
     const bool autoReconnect = SendMessageW(autoReconnectCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED;
     if (autoReconnect && lastOpenOptions_.has_value()) {
         reconnectPortName_ = endpoint;
@@ -1237,11 +1662,16 @@ void NativeMainWindow::tryAutoReconnect() {
     waitingReconnect_ = false;
     KillTimer(window_, IDT_RECONNECT);
     SetWindowTextW(connectButton_, tx(T::DisconnectButton));
+    updateRtsControlState();
     appendLog(uiString(T::SystemReconnectOkPrefix) + utf8ToWide(serialPort_.endpoint()));
     setStatus(tx(T::AutoReconnectOk));
 }
 
 void NativeMainWindow::appendLog(const std::wstring& line) {
+    appendLog(NativeLogKind::System, line);
+}
+
+void NativeMainWindow::appendLog(NativeLogKind kind, const std::wstring& line) {
     if (scrollPaused_) {
         ++hiddenLogLineCount_;
         setStatus(uiString(T::ScrollPausedPrefix) + std::to_wstring(hiddenLogLineCount_) + uiString(T::HiddenLinesSuffix));
@@ -1250,9 +1680,47 @@ void NativeMainWindow::appendLog(const std::wstring& line) {
     if (GetWindowTextLengthW(receiveLog_) > static_cast<int>(kMaxLogChars)) {
         SetWindowTextW(receiveLog_, tx(T::LogLimitReset));
     }
-    const std::wstring text = line + L"\r\n";
+    const std::wstring text = L"[" + localClockText() + L"] " + sanitizeLogText(line) + L"\r\n";
     SendMessageW(receiveLog_, EM_SETSEL, static_cast<WPARAM>(-1), static_cast<LPARAM>(-1));
+    if (receiveLogUsesRichEdit_) {
+        CHARFORMAT2W format = {};
+        format.cbSize = sizeof(format);
+        format.dwMask = CFM_COLOR;
+        format.crTextColor = logColorForKind(kind, logThemeIndex_);
+        SendMessageW(receiveLog_, EM_SETCHARFORMAT, SCF_SELECTION, reinterpret_cast<LPARAM>(&format));
+    }
     SendMessageW(receiveLog_, EM_REPLACESEL, FALSE, reinterpret_cast<LPARAM>(text.c_str()));
+}
+
+void NativeMainWindow::appendPayloadLog(NativeLogKind kind, const std::vector<std::uint8_t>& payload) {
+    const wchar_t* prefix = L"[DATA]";
+    switch (kind) {
+    case NativeLogKind::Tx:
+        prefix = L"[TX]";
+        break;
+    case NativeLogKind::Rx:
+        prefix = L"[RX]";
+        break;
+    case NativeLogKind::ModbusTx:
+        prefix = L"[Modbus TX]";
+        break;
+    case NativeLogKind::ModbusRx:
+        prefix = L"[Modbus RX]";
+        break;
+    case NativeLogKind::System:
+        prefix = L"[\u7CFB\u7EDF]";
+        break;
+    case NativeLogKind::Error:
+        prefix = L"[\u9519\u8BEF]";
+        break;
+    }
+    appendLog(kind, std::wstring(prefix) + L" " + formatPayloadForLog(payload));
+}
+
+void NativeMainWindow::clearLog() {
+    SetWindowTextW(receiveLog_, L"");
+    hiddenLogLineCount_ = 0;
+    setStatus(tx(T::ClearLogStatus));
 }
 
 void NativeMainWindow::setStatus(const std::wstring& text) {
@@ -1273,13 +1741,16 @@ void NativeMainWindow::setControlText(HWND control, const std::wstring& text) {
 
 std::vector<std::uint8_t> NativeMainWindow::payloadFromInput(std::wstring* errorText) const {
     const std::wstring text = controlText(sendEdit_);
-    const bool hexMode = selectedComboData(sendModeCombo_, 0) == 1;
+    const int mode = static_cast<int>(selectedComboData(sendModeCombo_, 0));
     std::vector<std::uint8_t> payload;
-    if (hexMode) {
+    if (mode == 1) {
         payload = parseHexPayload(text, errorText);
+    } else if (mode == 2) {
+        payload = parseDecimalPayload(text, errorText);
+    } else if (mode == 3) {
+        payload = parseBinaryPayload(text, errorText);
     } else {
-        const std::string utf8 = wideToUtf8(text);
-        payload.assign(utf8.begin(), utf8.end());
+        payload = encodeTextPayload(text, selectedTextCodePage(), errorText);
     }
     if (errorText == nullptr || errorText->empty()) {
         appendLineEnding(payload, static_cast<int>(selectedComboData(lineEndingCombo_, 0)));
@@ -1287,9 +1758,50 @@ std::vector<std::uint8_t> NativeMainWindow::payloadFromInput(std::wstring* error
     return payload;
 }
 
+std::wstring NativeMainWindow::formatPayloadForLog(const std::vector<std::uint8_t>& payload) const {
+    const int mode = static_cast<int>(selectedComboData(logFormatCombo_, 0));
+    switch (mode) {
+    case 1:
+        return bytesToDecimal(payload);
+    case 2:
+        return bytesToBinary(payload);
+    case 3:
+        return decodeBytesToText(payload, selectedTextCodePage());
+    case 4:
+        return bytesToHex(payload) + L" | " + decodeBytesToText(payload, selectedTextCodePage());
+    default:
+        return bytesToHex(payload);
+    }
+}
+
+unsigned int NativeMainWindow::selectedTextCodePage() const {
+    return static_cast<unsigned int>(selectedComboData(textEncodingCombo_, CP_UTF8));
+}
+
+std::string NativeMainWindow::selectedPortName() const {
+    const LRESULT index = SendMessageW(portCombo_, CB_GETCURSEL, 0, 0);
+    if (index >= 0) {
+        const LRESULT itemData = SendMessageW(portCombo_, CB_GETITEMDATA, static_cast<WPARAM>(index), 0);
+        if (itemData > 0) {
+            const std::size_t portIndex = static_cast<std::size_t>(itemData - 1);
+            if (portIndex < availablePorts_.size()) {
+                return availablePorts_[portIndex].portName;
+            }
+        }
+    }
+
+    std::wstring text = controlText(portCombo_);
+    const std::wstring separator = L" - ";
+    const std::size_t separatorPosition = text.find(separator);
+    if (separatorPosition != std::wstring::npos) {
+        text.resize(separatorPosition);
+    }
+    return wideToUtf8(text);
+}
+
 SerialOpenOptions NativeMainWindow::currentOpenOptions() const {
     SerialOpenOptions options;
-    options.portName = wideToUtf8(controlText(portCombo_));
+    options.portName = selectedPortName();
     options.baudRate = std::max(1, textToInt(baudCombo_, 115200));
     options.dataBits = static_cast<int>(selectedComboData(dataBitsCombo_, 8));
     options.parity = static_cast<SerialParity>(selectedComboData(parityCombo_, static_cast<LPARAM>(SerialParity::None)));
@@ -1298,6 +1810,73 @@ SerialOpenOptions NativeMainWindow::currentOpenOptions() const {
     options.dataTerminalReady = SendMessageW(dtrCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED;
     options.requestToSend = SendMessageW(rtsCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED;
     return options;
+}
+
+void NativeMainWindow::applySerialLineControl(WORD controlId) {
+    const bool enabled = SendMessageW(controlId == IDC_DTR_CHECK ? dtrCheck_ : rtsCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    if (!serialPort_.isOpen()) {
+        setStatus(std::wstring(controlId == IDC_DTR_CHECK ? tx(T::DtrAppliedPrefix) : tx(T::RtsAppliedPrefix))
+            + (enabled ? tx(T::SignalEnabledSuffix) : tx(T::SignalDisabledSuffix))
+            + L" \u4E0B\u6B21\u8FDE\u63A5\u751F\u6548\u3002");
+        return;
+    }
+
+    bool ok = false;
+    if (controlId == IDC_DTR_CHECK) {
+        ok = serialPort_.setDataTerminalReady(enabled);
+        if (ok && lastOpenOptions_.has_value()) {
+            lastOpenOptions_->dataTerminalReady = enabled;
+        }
+    } else {
+        ok = serialPort_.setRequestToSend(enabled);
+        if (ok && lastOpenOptions_.has_value()) {
+            lastOpenOptions_->requestToSend = enabled;
+        }
+    }
+
+    if (!ok) {
+        HWND control = controlId == IDC_DTR_CHECK ? dtrCheck_ : rtsCheck_;
+        SendMessageW(control, BM_SETCHECK, enabled ? BST_UNCHECKED : BST_CHECKED, 0);
+        setStatus(utf8ToWide(serialPort_.lastErrorText()));
+        updateRtsControlState();
+        return;
+    }
+
+    setStatus(std::wstring(controlId == IDC_DTR_CHECK ? tx(T::DtrAppliedPrefix) : tx(T::RtsAppliedPrefix))
+        + (enabled ? tx(T::SignalEnabledSuffix) : tx(T::SignalDisabledSuffix)));
+}
+
+void NativeMainWindow::updateRtsControlState() {
+    const bool selectedHardwareRtsCts = selectedComboData(flowControlCombo_, static_cast<LPARAM>(SerialFlowControl::None))
+        == static_cast<LPARAM>(SerialFlowControl::HardwareRtsCts);
+    const bool hardwareManaged = serialPort_.isOpen() ? serialPort_.usesHardwareRtsCts() : selectedHardwareRtsCts;
+    EnableWindow(rtsCheck_, hardwareManaged ? FALSE : TRUE);
+}
+
+void NativeMainWindow::applyLogTheme(int themeIndex) {
+    logThemeIndex_ = std::clamp(themeIndex, 0, 2);
+    if (menu_ != nullptr) {
+        HMENU viewMenu = GetSubMenu(menu_, 4);
+        CheckMenuRadioItem(
+            viewMenu != nullptr ? viewMenu : menu_,
+            IDM_VIEW_THEME_DEFAULT,
+            IDM_VIEW_THEME_HIGH_CONTRAST,
+            logThemeIndex_ == 0 ? IDM_VIEW_THEME_DEFAULT : (logThemeIndex_ == 1 ? IDM_VIEW_THEME_SOFT : IDM_VIEW_THEME_HIGH_CONTRAST),
+            MF_BYCOMMAND);
+    }
+
+    if (receiveLog_ == nullptr || !receiveLogUsesRichEdit_) {
+        return;
+    }
+
+    const NativeLogPalette palette = logPalette(logThemeIndex_);
+    SendMessageW(receiveLog_, EM_SETBKGNDCOLOR, 0, static_cast<LPARAM>(palette.background));
+    CHARFORMAT2W format = {};
+    format.cbSize = sizeof(format);
+    format.dwMask = CFM_COLOR;
+    format.crTextColor = palette.normal;
+    SendMessageW(receiveLog_, EM_SETCHARFORMAT, SCF_DEFAULT, reinterpret_cast<LPARAM>(&format));
+    InvalidateRect(receiveLog_, nullptr, TRUE);
 }
 
 void NativeMainWindow::runModbusScan() {
@@ -1354,7 +1933,7 @@ void NativeMainWindow::runModbusScan() {
         attempt.endpoint = serialPort_.endpoint();
 
         saveRawEvent("Tx", block.requestFrame);
-        appendLog(L"[Modbus TX] " + bytesToHex(block.requestFrame));
+        appendPayloadLog(NativeLogKind::ModbusTx, block.requestFrame);
         const SerialIoResult writeResult = serialPort_.writeBytes(block.requestFrame);
         if (!writeResult.ok) {
             attempt.status = "write-error";
@@ -1386,7 +1965,7 @@ void NativeMainWindow::runModbusScan() {
         attempt.responseFrame = response;
         if (!response.empty()) {
             saveRawEvent("Rx", response);
-            appendLog(L"[Modbus RX] " + bytesToHex(response));
+            appendPayloadLog(NativeLogKind::ModbusRx, response);
         }
 
         if (response.empty()) {

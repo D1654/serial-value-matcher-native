@@ -57,6 +57,10 @@ if(WIN32)
             UNICODE
             _UNICODE
     )
+    target_link_libraries(svm_win32_serial
+        PUBLIC
+            setupapi
+    )
 endif()
 
 target_include_directories(svm_win32_serial PUBLIC src)

@@ -249,6 +249,44 @@ std::string Win32SerialPort::lastErrorText() const {
     return lastErrorText_;
 }
 
+bool Win32SerialPort::usesHardwareRtsCts() const noexcept {
+    return options_.flowControl == SerialFlowControl::HardwareRtsCts;
+}
+
+bool Win32SerialPort::setDataTerminalReady(bool enabled) {
+    if (!isOpen()) {
+        lastErrorText_ = "串口未打开，无法设置 DTR 信号。";
+        return false;
+    }
+
+    HANDLE handle = asHandle(handle_);
+    if (!EscapeCommFunction(handle, enabled ? SETDTR : CLRDTR)) {
+        return setLastErrorText(lastErrorText_, GetLastError(), "设置 DTR 信号");
+    }
+    options_.dataTerminalReady = enabled;
+    lastErrorText_.clear();
+    return true;
+}
+
+bool Win32SerialPort::setRequestToSend(bool enabled) {
+    if (!isOpen()) {
+        lastErrorText_ = "串口未打开，无法设置 RTS 信号。";
+        return false;
+    }
+    if (usesHardwareRtsCts()) {
+        lastErrorText_ = "RTS 正由 RTS/CTS 硬件流控自动管理，不能手动切换。";
+        return false;
+    }
+
+    HANDLE handle = asHandle(handle_);
+    if (!EscapeCommFunction(handle, enabled ? SETRTS : CLRRTS)) {
+        return setLastErrorText(lastErrorText_, GetLastError(), "设置 RTS 信号");
+    }
+    options_.requestToSend = enabled;
+    lastErrorText_.clear();
+    return true;
+}
+
 SerialIoResult Win32SerialPort::writeBytes(const std::vector<std::uint8_t>& payload) {
     return writeBytes(payload.data(), payload.size());
 }

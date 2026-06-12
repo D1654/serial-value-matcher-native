@@ -27,7 +27,10 @@ public:
 
     std::string endpoint() const;
     std::string lastErrorText() const;
+    bool usesHardwareRtsCts() const noexcept;
 
+    bool setDataTerminalReady(bool enabled);
+    bool setRequestToSend(bool enabled);
     SerialIoResult writeBytes(const std::vector<std::uint8_t>& payload);
     SerialIoResult writeBytes(const std::uint8_t* payload, std::size_t size);
     bool waitForReadyRead(int timeoutMs);
