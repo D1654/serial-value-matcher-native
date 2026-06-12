@@ -42,6 +42,27 @@ private slots:
         QCOMPARE(model.lines().size(), 0);
     }
 
+    void maximumLineCountKeepsNewestLines() {
+        svm::session::ConsoleModel model;
+        model.setMaximumLineCount(2);
+
+        svm::capture::RawIoEvent first;
+        first.endpoint = QStringLiteral("COM1");
+        first.payload = QByteArray::fromHex("01");
+        svm::capture::RawIoEvent second = first;
+        second.payload = QByteArray::fromHex("02");
+        svm::capture::RawIoEvent third = first;
+        third.payload = QByteArray::fromHex("03");
+
+        model.appendEvent(first);
+        model.appendEvent(second);
+        model.appendEvent(third);
+
+        QCOMPARE(model.lines().size(), 2);
+        QCOMPARE(model.lines().first().hexText, QStringLiteral("02"));
+        QCOMPARE(model.lines().last().hexText, QStringLiteral("03"));
+    }
+
 };
 
 QTEST_MAIN(ConsoleModelTests)

@@ -26,6 +26,8 @@ workflow 会在 `windows-2022` runner 上执行：
 6. 执行 `scripts/package-windows.ps1`。
 7. 上传 artifact：`SerialValueMatcherNative-win-x64`。
 
+关键第三方 action 固定到审核过的提交 SHA；如需升级 checkout、Qt 安装或 artifact 上传 action，应先单独验证再更新 SHA。
+
 artifact 内包含：
 
 ```text
@@ -34,6 +36,14 @@ SerialValueMatcherNative-win-x64.zip.sha256.txt
 ```
 
 这就是用于 Windows 端测试的便携软件包，不是安装器。
+
+仓库还提供手动/定期触发的 Windows 非硬件压力测试 workflow：
+
+```text
+.github/workflows/windows-qt-stress.yml
+```
+
+该 workflow 使用 Windows 2022、Qt 6 x64 MSVC 和 Release 配置构建 `quality_stress_tests`，只运行 `stress` 标签测试并输出运行耗时，用于补充 Windows 平台长期运行和资源占用证据。
 
 ## 前置条件
 

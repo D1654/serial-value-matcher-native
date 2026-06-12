@@ -11,6 +11,7 @@ ConsoleModel::ConsoleModel(QObject* parent) : QObject(parent) {
 void ConsoleModel::appendEvent(const capture::RawIoEvent& event) {
     ConsoleLine line = makeLine(event);
     m_lines.append(line);
+    trimToMaximumLineCount();
     emit lineAdded(line);
 }
 
@@ -21,6 +22,15 @@ void ConsoleModel::clear() {
 
 const QVector<ConsoleLine>& ConsoleModel::lines() const {
     return m_lines;
+}
+
+void ConsoleModel::setMaximumLineCount(int maximumLineCount) {
+    m_maximumLineCount = maximumLineCount <= 0 ? 1 : maximumLineCount;
+    trimToMaximumLineCount();
+}
+
+int ConsoleModel::maximumLineCount() const {
+    return m_maximumLineCount;
 }
 
 QString ConsoleModel::directionText(capture::Direction direction) {
@@ -48,6 +58,13 @@ ConsoleLine ConsoleModel::makeLine(const capture::RawIoEvent& event) {
     line.displayLine = QStringLiteral("[%1] %2 %3 HEX=%4 TEXT=%5")
         .arg(line.timestampText, line.directionText, event.endpoint, line.hexText, line.textPreview);
     return line;
+}
+
+void ConsoleModel::trimToMaximumLineCount() {
+    const int overflow = m_lines.size() - m_maximumLineCount;
+    if (overflow > 0) {
+        m_lines.remove(0, overflow);
+    }
 }
 
 } // namespace svm::session

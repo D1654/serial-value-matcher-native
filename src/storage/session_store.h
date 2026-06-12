@@ -32,6 +32,7 @@ public:
     bool open(const QString& databasePath);
     bool initializeSchema();
     bool appendRawEvent(const capture::RawIoEvent& event);
+    bool appendRawEvents(const QList<capture::RawIoEvent>& events);
     qint64 rawEventCount() const;
     bool saveSendHistory(QString content, protocol::PayloadMode mode, protocol::LineEnding lineEnding, int limit = 100);
     QList<SendHistoryEntry> recentSendHistory(int limit = 100) const;

@@ -151,6 +151,28 @@ private slots:
         QCOMPARE(store.rawEventCount(), 1);
     }
 
+    void appendRawEvents_persistsBatchCount() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        svm::storage::SessionStore store;
+        QVERIFY2(store.open(dir.filePath(QStringLiteral("batch.sqlite"))), qPrintable(store.lastErrorText()));
+
+        QList<svm::capture::RawIoEvent> events;
+        for (int index = 0; index < 3; ++index) {
+            svm::capture::RawIoEvent event;
+            event.sessionId = QStringLiteral("batch-session");
+            event.direction = index % 2 == 0 ? svm::capture::Direction::Rx : svm::capture::Direction::Tx;
+            event.timestampUtc = QDateTime::fromString(QStringLiteral("2026-06-01T00:00:00.000Z"), Qt::ISODateWithMs).addMSecs(index);
+            event.endpoint = QStringLiteral("COM1");
+            event.payload = QByteArray(1, static_cast<char>(index));
+            events.append(event);
+        }
+
+        QVERIFY2(store.appendRawEvents(events), qPrintable(store.lastErrorText()));
+        QCOMPARE(store.rawEventCount(), 3);
+    }
+
     void removesSqlConnectionWhenDestroyed()
     {
         QTemporaryDir dir;

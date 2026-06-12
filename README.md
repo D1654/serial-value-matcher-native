@@ -158,7 +158,12 @@ cmake --build build --parallel 1
 ctest --test-dir build --output-on-failure
 ```
 
-仓库还包含手动/定期触发的 Linux 压力测试 workflow：`.github/workflows/linux-qt-stress.yml`。该 workflow 使用 `-DSVM_ENABLE_STRESS_TESTS=ON` 构建并只运行 `stress` 标签测试，不影响普通 push / PR 检查链路。
+仓库还包含手动/定期触发的压力测试 workflow：
+
+- `.github/workflows/linux-qt-stress.yml`：Linux 非硬件压力测试，使用 `-DSVM_ENABLE_STRESS_TESTS=ON` 构建并只运行 `stress` 标签测试。
+- `.github/workflows/windows-qt-stress.yml`：Windows 2022 Release 非硬件压力测试，记录 stress CTest 运行耗时，用于补充 Windows 端资源/长期运行证据。
+
+这些压力测试不影响普通 push / PR 检查链路。
 
 仓库也包含 Windows 便携包 workflow：`.github/workflows/windows-qt-package.yml`。
 
@@ -176,6 +181,7 @@ SerialValueMatcherNative-win-x64.zip.sha256.txt
 ```
 
 该 zip 是 Windows 原生便携运行包，不是安装器；目标是解压后直接启动 `svm-native.exe`。
+Windows workflow 的关键第三方 action 固定到审核过的提交 SHA，避免移动 tag 在发布链路中漂移。
 
 ## 开发环境要求
 

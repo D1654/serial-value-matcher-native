@@ -378,22 +378,49 @@ bool SessionStore::initializeSchema() {
 }
 
 bool SessionStore::appendRawEvent(const capture::RawIoEvent& event) {
+    return appendRawEvents(QList<capture::RawIoEvent>{event});
+}
+
+bool SessionStore::appendRawEvents(const QList<capture::RawIoEvent>& events) {
+    if (events.isEmpty()) {
+        return true;
+    }
+
+    if (!m_db.transaction()) {
+        m_lastErrorText = QStringLiteral("写入原始通信事件失败：无法开启数据库事务：%1").arg(m_db.lastError().text());
+        return false;
+    }
+
+    auto rollback = [this](const QString& message) {
+        m_lastErrorText = message;
+        m_db.rollback();
+        return false;
+    };
+
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral(R"sql(
         INSERT INTO raw_io_events(session_id, direction, timestamp_utc, endpoint, payload)
         VALUES(:session_id, :direction, :timestamp_utc, :endpoint, :payload)
     )sql"));
-    query.bindValue(QStringLiteral(":session_id"), notNullString(event.sessionId));
-    query.bindValue(QStringLiteral(":direction"), event.direction == capture::Direction::Rx ? QStringLiteral("RX") : QStringLiteral("TX"));
-    query.bindValue(QStringLiteral(":timestamp_utc"), event.timestampUtc.toString(Qt::ISODateWithMs));
-    query.bindValue(QStringLiteral(":endpoint"), notNullString(event.endpoint));
-    query.bindValue(QStringLiteral(":payload"), event.payload);
 
-    const bool ok = query.exec();
-    if (!ok) {
-        m_lastErrorText = QStringLiteral("写入原始通信事件失败：%1").arg(query.lastError().text());
+    for (const capture::RawIoEvent& event : events) {
+        query.bindValue(QStringLiteral(":session_id"), notNullString(event.sessionId));
+        query.bindValue(QStringLiteral(":direction"), event.direction == capture::Direction::Rx ? QStringLiteral("RX") : QStringLiteral("TX"));
+        query.bindValue(QStringLiteral(":timestamp_utc"), event.timestampUtc.toString(Qt::ISODateWithMs));
+        query.bindValue(QStringLiteral(":endpoint"), notNullString(event.endpoint));
+        query.bindValue(QStringLiteral(":payload"), event.payload);
+
+        if (!query.exec()) {
+            return rollback(QStringLiteral("写入原始通信事件失败：%1").arg(query.lastError().text()));
+        }
     }
-    return ok;
+
+    if (!m_db.commit()) {
+        return rollback(QStringLiteral("写入原始通信事件失败：提交事务失败：%1").arg(m_db.lastError().text()));
+    }
+
+    m_lastErrorText.clear();
+    return true;
 }
 
 qint64 SessionStore::rawEventCount() const {

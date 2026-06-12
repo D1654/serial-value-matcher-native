@@ -26,6 +26,8 @@ public:
     void appendEvent(const capture::RawIoEvent& event);
     void clear();
     const QVector<ConsoleLine>& lines() const;
+    void setMaximumLineCount(int maximumLineCount);
+    int maximumLineCount() const;
 
     static QString directionText(capture::Direction direction);
     static QString formatHex(const QByteArray& payload);
@@ -37,7 +39,10 @@ signals:
     void cleared();
 
 private:
+    void trimToMaximumLineCount();
+
     QVector<ConsoleLine> m_lines;
+    int m_maximumLineCount = 5000;
 };
 
 } // namespace svm::session

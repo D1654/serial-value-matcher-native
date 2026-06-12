@@ -8,6 +8,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QEventLoop>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -22,6 +23,7 @@
 #include <QStringList>
 #include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QTextDocument>
 #include <QThread>
 #include <QToolBar>
 #include <QUuid>
@@ -50,6 +52,12 @@
 
 namespace svm::app {
 namespace {
+
+constexpr int kConsoleMaximumLineCount = 5000;
+constexpr int kCommunicationStatusIntervalMs = 250;
+constexpr int kRawEventFlushIntervalMs = 100;
+constexpr int kRawEventFlushBatchSize = 500;
+constexpr int kRawEventMaximumPending = 5000;
 
 class GuardedCloseDialog final : public QDialog {
 public:
@@ -184,8 +192,11 @@ MainWindow::MainWindow(QWidget* parent)
     sendLayout->addWidget(m_sendEdit, 1);
     sendLayout->addWidget(sendButton);
 
+    m_consoleModel.setMaximumLineCount(kConsoleMaximumLineCount);
+
     m_console = new QPlainTextEdit(central);
     m_console->setReadOnly(true);
+    m_console->document()->setMaximumBlockCount(kConsoleMaximumLineCount);
     m_console->setPlaceholderText(QStringLiteral("RX/TX 原始事件将在这里显示，并同步写入 SQLite。"));
 
     rootLayout->addLayout(connectionLayout);
@@ -198,7 +209,9 @@ MainWindow::MainWindow(QWidget* parent)
     m_pauseScrollAction = toolbar->addAction(QStringLiteral("暂停滚动"));
     m_pauseScrollAction->setCheckable(true);
     m_clearConsoleAction = toolbar->addAction(QStringLiteral("清空接收区"));
-    toolbar->addAction(QStringLiteral("导入回放"));
+    auto* importReplayAction = toolbar->addAction(QStringLiteral("导入回放"));
+    importReplayAction->setEnabled(false);
+    importReplayAction->setToolTip(QStringLiteral("回放导入尚未接入；当前版本优先保障实时串口和 Modbus 扫描分析链路。"));
     m_modbusScanAction = toolbar->addAction(QStringLiteral("Modbus 扫描"));
     m_modbusScanAction->setToolTip(QStringLiteral("按当前串口参数执行一次 Modbus RTU 只读扫描，并把扫描事实保存到 SQLite。"));
     m_analysisWorkspaceAction = toolbar->addAction(QStringLiteral("分析工作区"));
@@ -206,6 +219,11 @@ MainWindow::MainWindow(QWidget* parent)
 
     m_reconnectTimer = new QTimer(this);
     m_reconnectTimer->setInterval(2000);
+    m_rawEventFlushTimer = new QTimer(this);
+    m_rawEventFlushTimer->setInterval(kRawEventFlushIntervalMs);
+    m_consoleStatusTimer = new QTimer(this);
+    m_consoleStatusTimer->setInterval(kCommunicationStatusIntervalMs);
+    m_consoleStatusTimer->setSingleShot(true);
 
     initializeStorage();
     refreshPorts();
@@ -229,6 +247,8 @@ MainWindow::MainWindow(QWidget* parent)
         }
     });
     connect(m_reconnectTimer, &QTimer::timeout, this, &MainWindow::refreshPorts);
+    connect(m_rawEventFlushTimer, &QTimer::timeout, this, &MainWindow::flushRawEvents);
+    connect(m_consoleStatusTimer, &QTimer::timeout, this, &MainWindow::refreshCommunicationStatus);
     connect(&m_serialService, &transport::SerialPortService::serialErrorOccurred, this, &MainWindow::handleSerialError);
     connect(&m_serialService, &transport::SerialPortService::opened, this, [this](const QString& portName) {
         rememberSuccessfulConnection(portName);
@@ -242,9 +262,16 @@ MainWindow::MainWindow(QWidget* parent)
             statusBar()->showMessage(QStringLiteral("已断开"));
         }
     });
-    connect(&m_captureBus, &capture::CaptureBus::eventCaptured, &m_sessionStore, &storage::SessionStore::appendRawEvent);
+    connect(&m_captureBus, &capture::CaptureBus::eventCaptured, this, &MainWindow::queueRawEvent);
     connect(&m_captureBus, &capture::CaptureBus::eventCaptured, &m_consoleModel, &session::ConsoleModel::appendEvent);
     connect(&m_consoleModel, &session::ConsoleModel::lineAdded, this, &MainWindow::appendConsoleLine);
+}
+
+MainWindow::~MainWindow() {
+    if (m_rawEventFlushTimer != nullptr) {
+        m_rawEventFlushTimer->stop();
+    }
+    flushRawEvents();
 }
 
 void MainWindow::refreshPorts() {
@@ -331,12 +358,64 @@ void MainWindow::sendText() {
 }
 
 void MainWindow::appendConsoleLine(const session::ConsoleLine& line) {
+    ++m_communicationEventCount;
     if (!m_scrollPaused) {
         m_console->appendPlainText(line.displayLine);
     }
-    statusBar()->showMessage(QStringLiteral("通信事件：%1 条%2")
-        .arg(m_sessionStore.rawEventCount())
-        .arg(m_scrollPaused ? QStringLiteral("（滚动已暂停）") : QString()));
+    if (m_consoleStatusTimer != nullptr && !m_consoleStatusTimer->isActive()) {
+        m_consoleStatusTimer->start();
+    }
+}
+
+void MainWindow::queueRawEvent(const capture::RawIoEvent& event) {
+    m_pendingRawEvents.append(event);
+    while (m_pendingRawEvents.size() > kRawEventMaximumPending) {
+        m_pendingRawEvents.removeFirst();
+        ++m_droppedRawEventCount;
+    }
+
+    if (m_rawEventFlushTimer != nullptr && !m_rawEventFlushTimer->isActive()) {
+        m_rawEventFlushTimer->start();
+    }
+    if (m_pendingRawEvents.size() >= kRawEventFlushBatchSize) {
+        flushRawEvents();
+    }
+}
+
+void MainWindow::flushRawEvents() {
+    if (m_pendingRawEvents.isEmpty()) {
+        if (m_rawEventFlushTimer != nullptr) {
+            m_rawEventFlushTimer->stop();
+        }
+        return;
+    }
+
+    const int batchSize = qMin(m_pendingRawEvents.size(), kRawEventFlushBatchSize);
+    const QList<capture::RawIoEvent> events = m_pendingRawEvents.mid(0, batchSize);
+    m_pendingRawEvents.erase(m_pendingRawEvents.begin(), m_pendingRawEvents.begin() + batchSize);
+
+    if (!m_sessionStore.appendRawEvents(events)) {
+        m_pendingRawEvents = events + m_pendingRawEvents;
+        statusBar()->showMessage(m_sessionStore.lastErrorText());
+        return;
+    }
+
+    m_persistedRawEventCount += events.size();
+    if (m_pendingRawEvents.isEmpty() && m_rawEventFlushTimer != nullptr) {
+        m_rawEventFlushTimer->stop();
+    }
+}
+
+void MainWindow::refreshCommunicationStatus() {
+    const QString droppedText = m_droppedRawEventCount > 0
+        ? QStringLiteral("，丢弃待写入事件 %1 条").arg(m_droppedRawEventCount)
+        : QString();
+    statusBar()->showMessage(QStringLiteral("通信事件：%1 条，待写入 SQLite：%2 条，SQLite 累计：%3 条%4%5")
+        .arg(m_communicationEventCount)
+        .arg(m_pendingRawEvents.size())
+        .arg(m_persistedRawEventCount)
+        .arg(m_scrollPaused ? QStringLiteral("（滚动已暂停）") : QString())
+        .arg(droppedText));
 }
 
 void MainWindow::setScrollPaused(bool paused) {
@@ -350,6 +429,7 @@ void MainWindow::setScrollPaused(bool paused) {
 void MainWindow::clearConsole() {
     m_consoleModel.clear();
     m_console->clear();
+    m_communicationEventCount = 0;
     statusBar()->showMessage(QStringLiteral("接收区已清空，SQLite 原始记录不会删除。"));
 }
 
@@ -574,7 +654,10 @@ void MainWindow::showModbusScanDialog() {
             activeCancelFlag->store(true, std::memory_order_relaxed);
         }
         if (!activeThread.isNull()) {
-            activeThread->wait();
+            statusBar()->showMessage(QStringLiteral("正在等待扫描线程收尾，界面仍可响应其他事件。"));
+            while (!activeThread.isNull() && !activeThread->wait(50)) {
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+            }
         }
     }
 }
@@ -583,6 +666,7 @@ void MainWindow::showAnalysisWorkspace() {
     QDialog dialog(this);
     dialog.setWindowTitle(QStringLiteral("分析工作区 - 稳定候选"));
     auto* layout = new QVBoxLayout(&dialog);
+    bool reopenAfterRefresh = false;
 
     auto validateRuleTypeBeforeSave = [this](const QString& candidateType, int registerCount) -> bool {
         const QString validationError = matching::validateProtocolRuleTypeAndRegisterCount(candidateType, registerCount);
@@ -689,7 +773,7 @@ void MainWindow::showAnalysisWorkspace() {
     layout->addLayout(stabilityLayout);
     layout->addWidget(stabilityStatusLabel);
 
-    auto runStabilityAnalysis = [this, minimumSampleSpin, strongSampleSpin, stabilityStatusLabel]() -> bool {
+    auto runStabilityAnalysis = [this, &dialog, &reopenAfterRefresh, minimumSampleSpin, strongSampleSpin, stabilityStatusLabel]() -> bool {
         analysis::StabilityWorkflowOptions options;
         options.matchRunLimit = 50;
         options.minimumSampleCount = minimumSampleSpin->value();
@@ -703,13 +787,15 @@ void MainWindow::showAnalysisWorkspace() {
             return false;
         }
 
-        const QString message = QStringLiteral("稳定性分析完成并保存：运行 %1｜来源匹配 %2 次｜稳定候选 %3 个。重新打开分析工作区可查看最新稳定候选。")
+        const QString message = QStringLiteral("稳定性分析完成并保存：运行 %1｜来源匹配 %2 次｜稳定候选 %3 个。分析工作区将自动刷新。")
             .arg(result.stabilityRunId)
             .arg(result.sourceMatchRunCount)
             .arg(result.stableCandidateCount);
         stabilityStatusLabel->setText(message);
         statusBar()->showMessage(message);
         QMessageBox::information(this, QStringLiteral("稳定性分析"), message);
+        reopenAfterRefresh = true;
+        QTimer::singleShot(0, &dialog, &QDialog::accept);
         return true;
     };
 
@@ -863,7 +949,14 @@ void MainWindow::showAnalysisWorkspace() {
             table->setItem(row, 8, new QTableWidgetItem(candidate.evidenceSummary));
         }
 
-        table->resizeColumnsToContents();
+        table->setColumnWidth(0, 72);
+        table->setColumnWidth(1, 72);
+        table->setColumnWidth(2, 64);
+        table->setColumnWidth(3, 96);
+        table->setColumnWidth(4, 96);
+        table->setColumnWidth(5, 116);
+        table->setColumnWidth(6, 132);
+        table->setColumnWidth(7, 132);
         table->horizontalHeader()->setStretchLastSection(true);
         layout->addWidget(table, 1);
 
@@ -924,7 +1017,7 @@ void MainWindow::showAnalysisWorkspace() {
             detailText->setPlainText(lines.join(QLatin1Char('\n')));
         };
 
-        connect(confirmRuleButton, &QPushButton::clicked, this, [this, table, candidates, validateRuleTypeBeforeSave, validateInterpretationMapBeforeSave]() {
+        connect(confirmRuleButton, &QPushButton::clicked, this, [this, &dialog, &reopenAfterRefresh, table, candidates, validateRuleTypeBeforeSave, validateInterpretationMapBeforeSave]() {
             const int row = table->currentRow();
             if (row < 0 || row >= candidates.size()) {
                 QMessageBox::information(this, QStringLiteral("确认规则"), QStringLiteral("请先选择一个稳定候选。"));
@@ -993,9 +1086,11 @@ void MainWindow::showAnalysisWorkspace() {
                 return;
             }
 
-            const QString message = QStringLiteral("已保存协议字段规则：%1（%2）。重新打开分析工作区可在规则列表查看。").arg(rule.fieldName, rule.ruleId);
+            const QString message = QStringLiteral("已保存协议字段规则：%1（%2）。分析工作区将自动刷新。").arg(rule.fieldName, rule.ruleId);
             statusBar()->showMessage(message);
             QMessageBox::information(this, QStringLiteral("确认规则"), message);
+            reopenAfterRefresh = true;
+            QTimer::singleShot(0, &dialog, &QDialog::accept);
         });
 
         connect(table, &QTableWidget::currentCellChanged, this, [renderCandidateDetails](int currentRow, int, int, int) {
@@ -1056,7 +1151,14 @@ void MainWindow::showAnalysisWorkspace() {
                 ? rule.createdAtUtc.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))
                 : QStringLiteral("未知")));
         }
-        rulesTable->resizeColumnsToContents();
+        rulesTable->setColumnWidth(0, 150);
+        rulesTable->setColumnWidth(1, 96);
+        rulesTable->setColumnWidth(2, 72);
+        rulesTable->setColumnWidth(3, 72);
+        rulesTable->setColumnWidth(4, 132);
+        rulesTable->setColumnWidth(5, 72);
+        rulesTable->setColumnWidth(6, 72);
+        rulesTable->setColumnWidth(7, 96);
         rulesTable->horizontalHeader()->setStretchLastSection(true);
         layout->addWidget(rulesTable);
 
@@ -1366,7 +1468,13 @@ void MainWindow::showAnalysisWorkspace() {
                 verificationTable->setItem(row, 6, new QTableWidgetItem(result.interpretationText.isEmpty() ? QStringLiteral("-") : result.interpretationText));
                 verificationTable->setItem(row, 7, new QTableWidgetItem(result.evidenceText));
             }
-            verificationTable->resizeColumnsToContents();
+            verificationTable->setColumnWidth(0, 96);
+            verificationTable->setColumnWidth(1, 140);
+            verificationTable->setColumnWidth(2, 110);
+            verificationTable->setColumnWidth(3, 72);
+            verificationTable->setColumnWidth(4, 180);
+            verificationTable->setColumnWidth(5, 150);
+            verificationTable->setColumnWidth(6, 150);
             verificationTable->horizontalHeader()->setStretchLastSection(true);
 
             const QString message = QStringLiteral("规则验证完成并保存：扫描 %1｜运行 %2｜规则 %3 条｜已验证 %4 条｜缺少观测 %5 条｜暂不支持/失败 %6 条。")
@@ -1388,6 +1496,9 @@ void MainWindow::showAnalysisWorkspace() {
 
     dialog.resize(980, 560);
     dialog.exec();
+    if (reopenAfterRefresh) {
+        showAnalysisWorkspace();
+    }
 }
 
 void MainWindow::applySendHistory(int index) {
@@ -1510,6 +1621,8 @@ void MainWindow::initializeStorage() {
     if (!m_sessionStore.open(dbPath)) {
         statusBar()->showMessage(m_sessionStore.lastErrorText());
     } else {
+        const qint64 rawCount = m_sessionStore.rawEventCount();
+        m_persistedRawEventCount = rawCount < 0 ? 0 : rawCount;
         statusBar()->showMessage(QStringLiteral("会话数据库已就绪：%1").arg(dbPath));
         refreshSendHistory();
     }

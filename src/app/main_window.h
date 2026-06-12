@@ -3,6 +3,7 @@
 #include <QAction>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QList>
 #include <QLineEdit>
 #include <QMainWindow>
 #include <QPlainTextEdit>
@@ -23,12 +24,16 @@ class MainWindow final : public QMainWindow {
 
 public:
     explicit MainWindow(QWidget* parent = nullptr);
+    ~MainWindow() override;
 
 private slots:
     void refreshPorts();
     void toggleConnection();
     void sendText();
+    void queueRawEvent(const capture::RawIoEvent& event);
+    void flushRawEvents();
     void appendConsoleLine(const session::ConsoleLine& line);
+    void refreshCommunicationStatus();
     void setScrollPaused(bool paused);
     void clearConsole();
     void applySendHistory(int index);
@@ -74,7 +79,13 @@ private:
     QLineEdit* m_sendEdit = nullptr;
     QPlainTextEdit* m_console = nullptr;
     QTimer* m_reconnectTimer = nullptr;
+    QTimer* m_rawEventFlushTimer = nullptr;
+    QTimer* m_consoleStatusTimer = nullptr;
     transport::SerialReconnectPolicy m_reconnectPolicy;
+    QList<capture::RawIoEvent> m_pendingRawEvents;
+    qint64 m_communicationEventCount = 0;
+    qint64 m_persistedRawEventCount = 0;
+    qint64 m_droppedRawEventCount = 0;
     bool m_scrollPaused = false;
     bool m_reconnectAttemptInProgress = false;
 };
