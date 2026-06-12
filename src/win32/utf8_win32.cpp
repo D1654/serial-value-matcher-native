@@ -11,6 +11,18 @@
 #include <windows.h>
 
 namespace svm::win32 {
+namespace {
+
+std::string lossyAsciiFromWide(std::wstring_view value) {
+    std::string result;
+    result.reserve(value.size());
+    for (wchar_t ch : value) {
+        result.push_back(ch >= 0 && ch <= 0x7F ? static_cast<char>(ch) : '?');
+    }
+    return result;
+}
+
+} // namespace
 
 std::wstring utf8ToWide(std::string_view value) {
     if (value.empty()) {
@@ -54,7 +66,7 @@ std::string wideToUtf8(std::wstring_view value) {
         nullptr,
         nullptr);
     if (required <= 0) {
-        return std::string(value.begin(), value.end());
+        return lossyAsciiFromWide(value);
     }
 
     std::string result(static_cast<std::size_t>(required), '\0');

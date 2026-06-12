@@ -20,6 +20,15 @@
 namespace svm::win32 {
 namespace {
 
+std::string lossyAsciiFromWide(std::wstring_view value) {
+    std::string result;
+    result.reserve(value.size());
+    for (wchar_t ch : value) {
+        result.push_back(ch >= 0 && ch <= 0x7F ? static_cast<char>(ch) : '?');
+    }
+    return result;
+}
+
 std::string wideToUtf8(std::wstring_view value) {
     if (value.empty()) {
         return {};
@@ -27,7 +36,7 @@ std::string wideToUtf8(std::wstring_view value) {
 
     const int required = WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
     if (required <= 0) {
-        return std::string(value.begin(), value.end());
+        return lossyAsciiFromWide(value);
     }
 
     std::string result(static_cast<std::size_t>(required), '\0');

@@ -46,6 +46,8 @@ if(WIN32)
         PRIVATE
             WIN32_LEAN_AND_MEAN
             NOMINMAX
+            UNICODE
+            _UNICODE
     )
 endif()
 
@@ -87,6 +89,8 @@ if(SVM_BUILD_WIN32_APP)
         PRIVATE
             WIN32_LEAN_AND_MEAN
             NOMINMAX
+            UNICODE
+            _UNICODE
     )
 
     if(MSVC)
