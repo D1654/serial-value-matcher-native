@@ -46,6 +46,7 @@ public:
     QList<ScanObservationRecord> scanObservationsByIds(const QList<qint64>& observationIds) const;
     bool saveMatchRun(const MatchRunRecord& run, const QList<matching::ValueMatchCandidate>& candidates);
     std::optional<MatchRunRecord> matchRun(const QString& runId) const;
+    QList<MatchRunRecord> recentMatchRuns(int limit = 20) const;
     QList<MatchCandidateRecord> matchCandidates(const QString& runId) const;
     bool saveStabilityRun(const StabilityRunRecord& run, const QList<matching::StableCandidate>& candidates);
     std::optional<StabilityRunRecord> stabilityRun(const QString& stabilityRunId) const;

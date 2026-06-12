@@ -1,5 +1,9 @@
 #include <QtTest/QtTest>
+#include <QSqlDatabase>
+#include <QSqlError>
+#include <QSqlQuery>
 #include <QTemporaryDir>
+#include <QUuid>
 
 #include "matching/value_candidate_generator.h"
 #include "storage/session_store.h"
@@ -70,6 +74,20 @@ QList<ValueMatchCandidate> generatedCandidates()
     Q_ASSERT(result.success);
     Q_ASSERT(result.candidates.size() == 1);
     return result.candidates;
+}
+
+void dropTableForReadFailure(const QString& databasePath, const QString& tableName)
+{
+    const QString connectionName = QStringLiteral("drop-match-table-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        db.setDatabaseName(databasePath);
+        QVERIFY2(db.open(), qPrintable(db.lastError().text()));
+        QSqlQuery query(db);
+        QVERIFY2(query.exec(QStringLiteral("DROP TABLE %1").arg(tableName)), qPrintable(query.lastError().text()));
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connectionName);
 }
 
 } // namespace
@@ -148,6 +166,34 @@ private slots:
         QVERIFY(store.matchCandidates(QStringLiteral("replace-run")).isEmpty());
     }
 
+    void reloadsRecentMatchRunsNewestFirst()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        svm::storage::SessionStore store;
+        QVERIFY2(store.open(dir.filePath(QStringLiteral("recent-matches.sqlite"))), qPrintable(store.lastErrorText()));
+
+        auto older = matchRun(QStringLiteral("older-run"));
+        older.createdAtUtc = QDateTime::fromString(QStringLiteral("2026-06-01T10:00:00.000Z"), Qt::ISODateWithMs);
+        auto newer = matchRun(QStringLiteral("newer-run"));
+        newer.createdAtUtc = QDateTime::fromString(QStringLiteral("2026-06-01T10:05:00.000Z"), Qt::ISODateWithMs);
+
+        QVERIFY2(store.saveMatchRun(older, generatedCandidates()), qPrintable(store.lastErrorText()));
+        QVERIFY2(store.saveMatchRun(newer, {}), qPrintable(store.lastErrorText()));
+
+        const auto runs = store.recentMatchRuns(10);
+        QVERIFY(!store.hasReadError());
+        QCOMPARE(runs.size(), 2);
+        QCOMPARE(runs.at(0).runId, QStringLiteral("newer-run"));
+        QCOMPARE(runs.at(1).runId, QStringLiteral("older-run"));
+
+        const auto limited = store.recentMatchRuns(1);
+        QVERIFY(!store.hasReadError());
+        QCOMPARE(limited.size(), 1);
+        QCOMPARE(limited.first().runId, QStringLiteral("newer-run"));
+    }
+
     void rejectsEmptyRunIdWithChineseError()
     {
         QTemporaryDir dir;
@@ -158,6 +204,36 @@ private slots:
 
         QVERIFY(!store.saveMatchRun(matchRun(QString()), generatedCandidates()));
         QVERIFY(store.lastErrorText().contains(QStringLiteral("匹配运行 ID")));
+    }
+
+    void surfacesMatchReadFailures()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString databasePath = dir.filePath(QStringLiteral("match-read-error.sqlite"));
+
+        svm::storage::SessionStore store;
+        QVERIFY2(store.open(databasePath), qPrintable(store.lastErrorText()));
+        QVERIFY2(store.saveMatchRun(matchRun(QStringLiteral("match-read-error")), generatedCandidates()), qPrintable(store.lastErrorText()));
+
+        dropTableForReadFailure(databasePath, QStringLiteral("match_candidates"));
+
+        const auto candidates = store.matchCandidates(QStringLiteral("match-read-error"));
+        QVERIFY(candidates.isEmpty());
+        QVERIFY(store.hasReadError());
+        QVERIFY(store.lastReadErrorText().contains(QStringLiteral("读取匹配候选失败")));
+
+        dropTableForReadFailure(databasePath, QStringLiteral("match_runs"));
+
+        const auto recentRuns = store.recentMatchRuns();
+        QVERIFY(recentRuns.isEmpty());
+        QVERIFY(store.hasReadError());
+        QVERIFY(store.lastReadErrorText().contains(QStringLiteral("读取最近匹配运行失败")));
+
+        const auto run = store.matchRun(QStringLiteral("match-read-error"));
+        QVERIFY(!run.has_value());
+        QVERIFY(store.hasReadError());
+        QVERIFY(store.lastReadErrorText().contains(QStringLiteral("读取匹配运行失败")));
     }
 };
 

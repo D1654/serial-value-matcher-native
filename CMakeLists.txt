@@ -20,6 +20,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core Widgets SerialPort Sql Test)
 qt_standard_project_setup()
 
 add_library(svm_native_core
+    src/analysis/stability_analysis_workflow.cpp
     src/capture/capture_bus.cpp
     src/session/console_model.cpp
     src/transport/serial_error_translator.cpp
@@ -64,6 +65,7 @@ qt_add_executable(svm-native
     WIN32
     src/app/main.cpp
     src/app/main_window.cpp
+    src/app/modbus_scan_result_adapter.cpp
     src/app/modbus_scan_worker.cpp
     src/app/qt_serial_byte_channel.cpp
 )
@@ -92,6 +94,8 @@ endif()
 
 enable_testing()
 
+option(SVM_ENABLE_STRESS_TESTS "Build long-running non-hardware stress tests" OFF)
+
 function(add_svm_qt_test target source)
     qt_add_executable(${target}
         ${source}
@@ -102,6 +106,9 @@ function(add_svm_qt_test target source)
             Qt6::Test
     )
     add_test(NAME ${target} COMMAND ${target})
+    if(ARGN)
+        set_tests_properties(${target} PROPERTIES LABELS "${ARGN}")
+    endif()
 endfunction()
 
 add_svm_qt_test(modbus_rtu_codec_tests tests/modbus_rtu_codec_tests.cpp)
@@ -116,6 +123,7 @@ add_svm_qt_test(value_candidate_generator_tests tests/value_candidate_generator_
 add_svm_qt_test(match_persistence_tests tests/match_persistence_tests.cpp)
 add_svm_qt_test(candidate_stability_analyzer_tests tests/candidate_stability_analyzer_tests.cpp)
 add_svm_qt_test(stability_persistence_tests tests/stability_persistence_tests.cpp)
+add_svm_qt_test(stability_analysis_workflow_tests tests/stability_analysis_workflow_tests.cpp)
 add_svm_qt_test(protocol_rule_persistence_tests tests/protocol_rule_persistence_tests.cpp)
 add_svm_qt_test(protocol_rule_verifier_tests tests/protocol_rule_verifier_tests.cpp)
 add_svm_qt_test(protocol_rule_interpretation_tests tests/protocol_rule_interpretation_tests.cpp)
@@ -131,3 +139,8 @@ add_svm_qt_test(serial_profile_tests tests/serial_profile_tests.cpp)
 add_svm_qt_test(serial_port_selection_tests tests/serial_port_selection_tests.cpp)
 add_svm_qt_test(serial_reconnect_policy_tests tests/serial_reconnect_policy_tests.cpp)
 add_svm_qt_test(serial_error_translator_tests tests/serial_error_translator_tests.cpp)
+add_svm_qt_test(quality_regression_tests tests/quality_regression_tests.cpp quality)
+
+if(SVM_ENABLE_STRESS_TESTS)
+    add_svm_qt_test(quality_stress_tests tests/quality_stress_tests.cpp stress)
+endif()

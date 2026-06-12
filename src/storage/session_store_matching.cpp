@@ -123,15 +123,23 @@ bool SessionStore::saveMatchRun(const MatchRunRecord& run, const QList<matching:
 }
 
 std::optional<MatchRunRecord> SessionStore::matchRun(const QString& runId) const {
+    clearReadError();
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral(R"sql(
+    if (!query.prepare(QStringLiteral(R"sql(
         SELECT run_id, source_scan_session_id, target_label, target_value, target_unit, sampled_at_utc,
                tolerance_absolute, tolerance_relative_ratio, candidate_count, created_at_utc
         FROM match_runs
         WHERE run_id = :run_id
-    )sql"));
+    )sql"))) {
+        setReadError(QStringLiteral("读取匹配运行失败"), query.lastError());
+        return std::nullopt;
+    }
     query.bindValue(QStringLiteral(":run_id"), runId);
-    if (!query.exec() || !query.next()) {
+    if (!query.exec()) {
+        setReadError(QStringLiteral("读取匹配运行失败"), query.lastError());
+        return std::nullopt;
+    }
+    if (!query.next()) {
         return std::nullopt;
     }
 
@@ -149,10 +157,44 @@ std::optional<MatchRunRecord> SessionStore::matchRun(const QString& runId) const
     return record;
 }
 
+QList<MatchRunRecord> SessionStore::recentMatchRuns(int limit) const {
+    clearReadError();
+    QList<MatchRunRecord> runs;
+    const int safeLimit = limit <= 0 ? 1 : limit;
+    QSqlQuery query(m_db);
+    if (!query.exec(QStringLiteral(R"sql(
+        SELECT run_id, source_scan_session_id, target_label, target_value, target_unit, sampled_at_utc,
+               tolerance_absolute, tolerance_relative_ratio, candidate_count, created_at_utc
+        FROM match_runs
+        ORDER BY created_at_utc DESC, run_id DESC
+        LIMIT %1
+    )sql").arg(safeLimit))) {
+        setReadError(QStringLiteral("读取最近匹配运行失败"), query.lastError());
+        return runs;
+    }
+
+    while (query.next()) {
+        MatchRunRecord record;
+        record.runId = query.value(0).toString();
+        record.sourceScanSessionId = query.value(1).toString();
+        record.targetLabel = query.value(2).toString();
+        record.targetValue = query.value(3).toDouble();
+        record.targetUnit = query.value(4).toString();
+        record.sampledAtUtc = dateFromString(query.value(5).toString());
+        record.toleranceAbsolute = query.value(6).toDouble();
+        record.toleranceRelativeRatio = query.value(7).toDouble();
+        record.candidateCount = query.value(8).toInt();
+        record.createdAtUtc = dateFromString(query.value(9).toString());
+        runs.append(record);
+    }
+    return runs;
+}
+
 QList<MatchCandidateRecord> SessionStore::matchCandidates(const QString& runId) const {
+    clearReadError();
     QList<MatchCandidateRecord> candidates;
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral(R"sql(
+    if (!query.prepare(QStringLiteral(R"sql(
         SELECT id, run_id, rank_index, candidate_type, word_order, byte_order, source_session_id,
                slave_id, function_code, start_address, register_count, observation_ids, addresses,
                block_indexes, attempt_indexes, raw_registers, decoded_value, scale_multiplier,
@@ -161,9 +203,13 @@ QList<MatchCandidateRecord> SessionStore::matchCandidates(const QString& runId) 
         FROM match_candidates
         WHERE run_id = :run_id
         ORDER BY rank_index ASC, id ASC
-    )sql"));
+    )sql"))) {
+        setReadError(QStringLiteral("读取匹配候选失败"), query.lastError());
+        return candidates;
+    }
     query.bindValue(QStringLiteral(":run_id"), runId);
     if (!query.exec()) {
+        setReadError(QStringLiteral("读取匹配候选失败"), query.lastError());
         return candidates;
     }
 
@@ -311,15 +357,23 @@ bool SessionStore::saveStabilityRun(const StabilityRunRecord& run, const QList<m
 }
 
 std::optional<StabilityRunRecord> SessionStore::stabilityRun(const QString& stabilityRunId) const {
+    clearReadError();
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral(R"sql(
+    if (!query.prepare(QStringLiteral(R"sql(
         SELECT stability_run_id, source_match_run_ids, minimum_sample_count, strong_sample_count,
                stable_candidate_count, created_at_utc
         FROM stability_runs
         WHERE stability_run_id = :stability_run_id
-    )sql"));
+    )sql"))) {
+        setReadError(QStringLiteral("读取稳定性运行失败"), query.lastError());
+        return std::nullopt;
+    }
     query.bindValue(QStringLiteral(":stability_run_id"), stabilityRunId);
-    if (!query.exec() || !query.next()) {
+    if (!query.exec()) {
+        setReadError(QStringLiteral("读取稳定性运行失败"), query.lastError());
+        return std::nullopt;
+    }
+    if (!query.next()) {
         return std::nullopt;
     }
 
@@ -334,6 +388,7 @@ std::optional<StabilityRunRecord> SessionStore::stabilityRun(const QString& stab
 }
 
 std::optional<StabilityRunRecord> SessionStore::latestStabilityRun() const {
+    clearReadError();
     QSqlQuery query(m_db);
     if (!query.exec(QStringLiteral(R"sql(
         SELECT stability_run_id, source_match_run_ids, minimum_sample_count, strong_sample_count,
@@ -342,6 +397,7 @@ std::optional<StabilityRunRecord> SessionStore::latestStabilityRun() const {
         ORDER BY created_at_utc DESC, stability_run_id DESC
         LIMIT 1
     )sql"))) {
+        setReadError(QStringLiteral("读取最近稳定性运行失败"), query.lastError());
         return std::nullopt;
     }
     if (!query.next()) {
@@ -359,9 +415,10 @@ std::optional<StabilityRunRecord> SessionStore::latestStabilityRun() const {
 }
 
 QList<StableCandidateRecord> SessionStore::stableCandidates(const QString& stabilityRunId) const {
+    clearReadError();
     QList<StableCandidateRecord> candidates;
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral(R"sql(
+    if (!query.prepare(QStringLiteral(R"sql(
         SELECT id, stability_run_id, rank_index, candidate_type, word_order, byte_order,
                slave_id, function_code, start_address, register_count, scale_multiplier, scale_offset,
                sample_count, meets_minimum_sample_count, confidence_level, run_ids, source_scan_session_ids,
@@ -371,9 +428,13 @@ QList<StableCandidateRecord> SessionStore::stableCandidates(const QString& stabi
         FROM stable_candidates
         WHERE stability_run_id = :stability_run_id
         ORDER BY rank_index ASC, id ASC
-    )sql"));
+    )sql"))) {
+        setReadError(QStringLiteral("读取稳定候选失败"), query.lastError());
+        return candidates;
+    }
     query.bindValue(QStringLiteral(":stability_run_id"), stabilityRunId);
     if (!query.exec()) {
+        setReadError(QStringLiteral("读取稳定候选失败"), query.lastError());
         return candidates;
     }
 

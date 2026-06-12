@@ -33,6 +33,8 @@
 #include <memory>
 #include <utility>
 
+#include "analysis/stability_analysis_workflow.h"
+#include "app/modbus_scan_result_adapter.h"
 #include "app/modbus_scan_worker.h"
 #include "matching/protocol_rule_interpretation.h"
 #include "matching/protocol_rule_metadata.h"
@@ -43,7 +45,6 @@
 #include "modbus/modbus_scan_plan.h"
 #include "report/rule_verification_report.h"
 #include "report/text_file_writer.h"
-#include "storage/scan_persistence_records.h"
 #include "transport/serial_port_enumerator.h"
 #include "transport/serial_port_selection.h"
 
@@ -78,106 +79,6 @@ protected:
 private:
     std::function<bool()> closeGuard_;
 };
-
-QString scanExecutionStatusName(modbus::ScanExecutionStatus status) {
-    switch (status) {
-    case modbus::ScanExecutionStatus::Completed:
-        return QStringLiteral("Completed");
-    case modbus::ScanExecutionStatus::CompletedWithErrors:
-        return QStringLiteral("CompletedWithErrors");
-    case modbus::ScanExecutionStatus::Failed:
-        return QStringLiteral("Failed");
-    }
-    return QStringLiteral("Unknown");
-}
-
-QString scanAttemptStatusName(modbus::ScanAttemptStatus status) {
-    switch (status) {
-    case modbus::ScanAttemptStatus::Success:
-        return QStringLiteral("Success");
-    case modbus::ScanAttemptStatus::ModbusException:
-        return QStringLiteral("ModbusException");
-    case modbus::ScanAttemptStatus::ParseError:
-        return QStringLiteral("ParseError");
-    case modbus::ScanAttemptStatus::Timeout:
-        return QStringLiteral("Timeout");
-    case modbus::ScanAttemptStatus::TransportError:
-        return QStringLiteral("TransportError");
-    }
-    return QStringLiteral("Unknown");
-}
-
-storage::ScanExecutionPersistenceRecord scanExecutionToPersistence(
-    const QString& sessionId,
-    const modbus::ScanExecutionResult& result) {
-    storage::ScanExecutionPersistenceRecord persistence;
-    persistence.session.sessionId = sessionId;
-    persistence.session.slaveId = result.plan.slaveId;
-    persistence.session.functionCode = result.plan.functionCode;
-    persistence.session.startAddress = result.plan.range.startAddress;
-    persistence.session.endAddress = result.plan.range.endAddress;
-    persistence.session.blockSize = result.plan.blockSize;
-    persistence.session.requestCount = result.plan.requestCount();
-    persistence.session.status = scanExecutionStatusName(result.status);
-    persistence.session.startedAtUtc = result.startedAtUtc;
-    persistence.session.finishedAtUtc = result.finishedAtUtc;
-    persistence.session.successBlockCount = result.successBlockCount;
-    persistence.session.failedBlockCount = result.failedBlockCount;
-    persistence.session.errorMessage = result.errorMessage;
-
-    for (const auto& block : result.blocks) {
-        for (const auto& attempt : block.attempts) {
-            storage::ScanAttemptRecord record;
-            record.sessionId = sessionId;
-            record.blockIndex = attempt.blockIndex;
-            record.attemptIndex = attempt.attemptIndex;
-            record.startAddress = block.block.startAddress;
-            record.quantity = block.block.quantity;
-            record.status = scanAttemptStatusName(attempt.status);
-            record.requestFrame = attempt.requestFrame;
-            record.responseFrame = attempt.responseFrame;
-            record.errorMessage = attempt.errorMessage;
-            record.isModbusException = attempt.isModbusException;
-            record.exceptionCode = attempt.exceptionCode;
-            record.exceptionDescription = attempt.exceptionDescription;
-            record.sentAtUtc = attempt.sentAtUtc;
-            record.receivedAtUtc = attempt.receivedAtUtc;
-            record.endpoint = attempt.endpoint;
-            persistence.attempts.append(record);
-        }
-
-        for (const auto& observation : block.observations) {
-            storage::ScanObservationRecord record;
-            record.sessionId = sessionId;
-            record.blockIndex = observation.blockIndex;
-            record.attemptIndex = observation.attemptIndex;
-            record.slaveId = observation.slaveId;
-            record.functionCode = observation.functionCode;
-            record.address = observation.address;
-            record.value = observation.value;
-            record.observedAtUtc = observation.observedAtUtc;
-            persistence.observations.append(record);
-        }
-    }
-
-    return persistence;
-}
-
-QString scanSummaryText(const QString& sessionId, const modbus::ScanExecutionResult& result) {
-    int attemptCount = 0;
-    for (const auto& block : result.blocks) {
-        attemptCount += block.attempts.size();
-    }
-
-    return QStringLiteral("扫描会话：%1｜状态：%2｜请求块：%3｜尝试：%4｜成功块：%5｜失败块：%6｜寄存器观测：%7")
-        .arg(sessionId)
-        .arg(modbus::describeScanExecutionStatus(result.status))
-        .arg(result.plan.requestCount())
-        .arg(attemptCount)
-        .arg(result.successBlockCount)
-        .arg(result.failedBlockCount)
-        .arg(result.observations.size());
-}
 
 } // namespace
 
@@ -764,6 +665,58 @@ void MainWindow::showAnalysisWorkspace() {
     layout->addLayout(generatorLayout);
     layout->addWidget(generationStatusLabel);
 
+    auto* stabilityLayout = new QHBoxLayout();
+    auto* minimumSampleSpin = new QSpinBox(&dialog);
+    minimumSampleSpin->setRange(2, 100);
+    minimumSampleSpin->setValue(2);
+    minimumSampleSpin->setToolTip(QStringLiteral("达到该样本数后，稳定候选才会进入中/高置信判断。"));
+
+    auto* strongSampleSpin = new QSpinBox(&dialog);
+    strongSampleSpin->setRange(2, 100);
+    strongSampleSpin->setValue(4);
+    strongSampleSpin->setToolTip(QStringLiteral("达到该样本数后，样本数量质量记为强证据。"));
+
+    auto* analyzeStabilityButton = new QPushButton(QStringLiteral("执行多样本稳定性分析"), &dialog);
+    auto* stabilityStatusLabel = new QLabel(QStringLiteral("稳定性分析：生成至少 2 次候选后，可基于最近匹配运行计算稳定候选。"), &dialog);
+    stabilityStatusLabel->setWordWrap(true);
+
+    stabilityLayout->addWidget(new QLabel(QStringLiteral("最少样本"), &dialog));
+    stabilityLayout->addWidget(minimumSampleSpin);
+    stabilityLayout->addWidget(new QLabel(QStringLiteral("强证据样本"), &dialog));
+    stabilityLayout->addWidget(strongSampleSpin);
+    stabilityLayout->addWidget(analyzeStabilityButton);
+    stabilityLayout->addStretch(1);
+    layout->addLayout(stabilityLayout);
+    layout->addWidget(stabilityStatusLabel);
+
+    auto runStabilityAnalysis = [this, minimumSampleSpin, strongSampleSpin, stabilityStatusLabel]() -> bool {
+        analysis::StabilityWorkflowOptions options;
+        options.matchRunLimit = 50;
+        options.minimumSampleCount = minimumSampleSpin->value();
+        options.strongSampleCount = strongSampleSpin->value();
+
+        const analysis::StabilityWorkflowResult result = analysis::runRecentMatchStabilityAnalysis(m_sessionStore, options);
+        if (!result.success) {
+            const QString message = result.errorMessage;
+            stabilityStatusLabel->setText(message);
+            QMessageBox::warning(this, QStringLiteral("稳定性分析"), message);
+            return false;
+        }
+
+        const QString message = QStringLiteral("稳定性分析完成并保存：运行 %1｜来源匹配 %2 次｜稳定候选 %3 个。重新打开分析工作区可查看最新稳定候选。")
+            .arg(result.stabilityRunId)
+            .arg(result.sourceMatchRunCount)
+            .arg(result.stableCandidateCount);
+        stabilityStatusLabel->setText(message);
+        statusBar()->showMessage(message);
+        QMessageBox::information(this, QStringLiteral("稳定性分析"), message);
+        return true;
+    };
+
+    connect(analyzeStabilityButton, &QPushButton::clicked, this, [runStabilityAnalysis]() {
+        runStabilityAnalysis();
+    });
+
     connect(generateButton, &QPushButton::clicked, this, [this, scanSessionCombo, targetValueSpin, targetUnitEdit, toleranceSpin, generationStatusLabel]() {
         const QString selectedSessionId = scanSessionCombo->currentData().toString();
         if (selectedSessionId.isEmpty()) {
@@ -775,9 +728,11 @@ void MainWindow::showAnalysisWorkspace() {
 
         const auto scanSession = m_sessionStore.scanSession(selectedSessionId);
         if (!scanSession.has_value()) {
-            const QString message = QStringLiteral("扫描会话不存在或已被清理：%1。").arg(selectedSessionId);
+            const QString message = m_sessionStore.hasReadError()
+                ? m_sessionStore.lastReadErrorText()
+                : QStringLiteral("扫描会话不存在或已被清理：%1。").arg(selectedSessionId);
             generationStatusLabel->setText(message);
-            QMessageBox::information(this, QStringLiteral("候选生成"), message);
+            QMessageBox::warning(this, QStringLiteral("候选生成"), message);
             return;
         }
 
@@ -832,12 +787,18 @@ void MainWindow::showAnalysisWorkspace() {
             .arg(scanSession->sessionId)
             .arg(result.candidates.size())
             .arg(run.runId);
-        generationStatusLabel->setText(message + QStringLiteral(" 多样本稳定性排序会在后续步骤接入。"));
+        generationStatusLabel->setText(message + QStringLiteral(" 继续积累样本后，可点击“执行多样本稳定性分析”。"));
         statusBar()->showMessage(message);
     });
 
     const auto latestRun = m_sessionStore.latestStabilityRun();
-    if (!latestRun.has_value()) {
+    if (m_sessionStore.hasReadError()) {
+        const QString message = m_sessionStore.lastReadErrorText();
+        auto* errorLabel = new QLabel(QStringLiteral("读取稳定性分析失败：%1").arg(message), &dialog);
+        errorLabel->setWordWrap(true);
+        layout->addWidget(errorLabel);
+        statusBar()->showMessage(message);
+    } else if (!latestRun.has_value()) {
         auto* emptyLabel = new QLabel(QStringLiteral(
             "暂无稳定候选。\n\n"
             "请先完成扫描、目标值候选生成和多样本稳定性分析；完成后这里会显示候选字段、稳定性评分和证据链。"), &dialog);
@@ -845,6 +806,13 @@ void MainWindow::showAnalysisWorkspace() {
         layout->addWidget(emptyLabel);
     } else {
         const auto candidates = m_sessionStore.stableCandidates(latestRun->stabilityRunId);
+        if (m_sessionStore.hasReadError()) {
+            const QString message = m_sessionStore.lastReadErrorText();
+            auto* errorLabel = new QLabel(QStringLiteral("读取稳定候选失败：%1").arg(message), &dialog);
+            errorLabel->setWordWrap(true);
+            layout->addWidget(errorLabel);
+            statusBar()->showMessage(message);
+        } else {
         auto* summaryLabel = new QLabel(QStringLiteral("最近稳定性分析：%1｜来源匹配 %2 次｜稳定候选 %3 个｜创建时间 %4")
             .arg(latestRun->stabilityRunId)
             .arg(latestRun->sourceMatchRunIds.size())
@@ -931,7 +899,9 @@ void MainWindow::showAnalysisWorkspace() {
             lines.append(QStringLiteral("观测证据链："));
 
             const auto observations = m_sessionStore.scanObservationsByIds(candidate.observationIds);
-            if (observations.isEmpty()) {
+            if (m_sessionStore.hasReadError()) {
+                lines.append(QStringLiteral("- 读取 observation 证据链失败：%1").arg(m_sessionStore.lastReadErrorText()));
+            } else if (observations.isEmpty()) {
                 lines.append(QStringLiteral("- 未能在数据库中找到对应 observation 记录。"));
             } else {
                 for (const storage::ScanObservationRecord& observation : observations) {
@@ -1034,6 +1004,7 @@ void MainWindow::showAnalysisWorkspace() {
         if (!candidates.isEmpty()) {
             table->setCurrentCell(0, 0);
             renderCandidateDetails(0);
+        }
         }
     }
 

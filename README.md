@@ -66,7 +66,7 @@
   - 规则验证记录。
 - 数据库 schema 支持兼容升级，便于后续现场版本迭代。
 - `SessionStore` 实现已按职责拆分为 schema、scan、matching/stability、rules 多个编译单元，公共 API 保持稳定。
-- 扫描观测和规则验证相关读取会显式记录 `lastReadErrorText()`，避免把数据库读取失败误判为空数据。
+- 扫描观测、匹配运行、稳定性分析、协议规则和规则验证相关读取会显式记录 `lastReadErrorText()`，避免把数据库读取失败误判为空数据。
 
 ### 协议与 Modbus RTU
 
@@ -88,6 +88,7 @@
 - `ValueCandidateGenerator`：从寄存器观测中生成多种候选值。
 - `NumericDecoder`：统一候选生成和规则验证使用的数值解码语义。
 - `CandidateStabilityAnalyzer`：分析候选值稳定性。
+- `StabilityAnalysisWorkflow`：从最近匹配运行聚合候选观测并保存稳定性分析结果，支撑 UI 中“执行多样本稳定性分析”入口。
 - 候选生成使用有界 Top-N 工作集，规则验证会预索引最新观测样本，减少重复扫描和排序成本。
 - 支持把稳定候选确认为协议字段规则，并保存字段名、地址、寄存器数量、倍率/偏移、单位、置信度、证据摘要等元数据。
 - `ProtocolRuleVerifier`：根据扫描观测验证协议字段规则，输出：
@@ -113,15 +114,17 @@
 
 ## 当前测试基线
 
-当前全量 QtTest 基线：**27/27 passed**。
+当前默认 QtTest 基线：**29/29 passed**。
 
 覆盖范围包括：
 
 - Modbus RTU 编解码、读请求/读响应、扫描计划、扫描执行器、串口传输适配、扫描持久化；
 - 数值解码、候选值生成、匹配持久化、稳定性分析、稳定性持久化；
+- 最近匹配运行到稳定性分析结果的工作流；
 - 协议规则持久化、规则验证、规则解释映射、验证记录持久化、验证报告；
 - 校验函数、会话存储、控制台模型、发送编码、发送历史；
 - 串口配置、端口选择、重连策略、串口错误中文诊断。
+- 默认质量回归测试覆盖大样本候选生成、规则验证索引路径和稳定性分析分组路径。
 
 常用验证命令：
 
@@ -133,6 +136,14 @@ ctest --test-dir build-codex --output-on-failure
 ```
 
 说明：`build-codex` 是本地接管验证目录；常规开发可继续使用自己的 `build` 目录。当前低内存 Debian VM 上优先使用 `--parallel 1`，比并行构建更稳。
+
+可选压力测试默认不进入日常构建，可按需开启：
+
+```bash
+cmake -S . -B build-stress -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSVM_ENABLE_STRESS_TESTS=ON
+cmake --build build-stress --target quality_stress_tests --parallel 1
+ctest --test-dir build-stress --output-on-failure -L stress
+```
 
 ## CI 与 Windows 便携包
 
@@ -146,6 +157,8 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --parallel 1
 ctest --test-dir build --output-on-failure
 ```
+
+仓库还包含手动/定期触发的 Linux 压力测试 workflow：`.github/workflows/linux-qt-stress.yml`。该 workflow 使用 `-DSVM_ENABLE_STRESS_TESTS=ON` 构建并只运行 `stress` 标签测试，不影响普通 push / PR 检查链路。
 
 仓库也包含 Windows 便携包 workflow：`.github/workflows/windows-qt-package.yml`。
 

@@ -1,5 +1,9 @@
 #include <QtTest/QtTest>
+#include <QSqlDatabase>
+#include <QSqlError>
+#include <QSqlQuery>
 #include <QTemporaryDir>
+#include <QUuid>
 
 #include "matching/candidate_stability_analyzer.h"
 #include "storage/session_store.h"
@@ -58,6 +62,20 @@ svm::storage::StabilityRunRecord stabilityRun(QString runId = QStringLiteral("st
     run.strongSampleCount = 3;
     run.createdAtUtc = QDateTime::currentDateTimeUtc();
     return run;
+}
+
+void dropTableForReadFailure(const QString& databasePath, const QString& tableName)
+{
+    const QString connectionName = QStringLiteral("drop-stability-table-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        db.setDatabaseName(databasePath);
+        QVERIFY2(db.open(), qPrintable(db.lastError().text()));
+        QSqlQuery query(db);
+        QVERIFY2(query.exec(QStringLiteral("DROP TABLE %1").arg(tableName)), qPrintable(query.lastError().text()));
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connectionName);
 }
 
 } // namespace
@@ -147,6 +165,36 @@ private slots:
 
         QVERIFY(!store.saveStabilityRun(stabilityRun(QString()), stableCandidates()));
         QVERIFY(store.lastErrorText().contains(QStringLiteral("稳定性运行 ID")));
+    }
+
+    void surfacesStabilityReadFailures()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString databasePath = dir.filePath(QStringLiteral("stability-read-error.sqlite"));
+
+        svm::storage::SessionStore store;
+        QVERIFY2(store.open(databasePath), qPrintable(store.lastErrorText()));
+        QVERIFY2(store.saveStabilityRun(stabilityRun(QStringLiteral("stability-read-error")), stableCandidates()), qPrintable(store.lastErrorText()));
+
+        dropTableForReadFailure(databasePath, QStringLiteral("stable_candidates"));
+
+        const auto candidates = store.stableCandidates(QStringLiteral("stability-read-error"));
+        QVERIFY(candidates.isEmpty());
+        QVERIFY(store.hasReadError());
+        QVERIFY(store.lastReadErrorText().contains(QStringLiteral("读取稳定候选失败")));
+
+        dropTableForReadFailure(databasePath, QStringLiteral("stability_runs"));
+
+        const auto run = store.stabilityRun(QStringLiteral("stability-read-error"));
+        QVERIFY(!run.has_value());
+        QVERIFY(store.hasReadError());
+        QVERIFY(store.lastReadErrorText().contains(QStringLiteral("读取稳定性运行失败")));
+
+        const auto latestRun = store.latestStabilityRun();
+        QVERIFY(!latestRun.has_value());
+        QVERIFY(store.hasReadError());
+        QVERIFY(store.lastReadErrorText().contains(QStringLiteral("读取最近稳定性运行失败")));
     }
 };
 
