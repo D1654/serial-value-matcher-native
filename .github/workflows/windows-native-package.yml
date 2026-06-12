@@ -1,0 +1,77 @@
+name: Windows Native Size-Gated Package
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  BUILD_DIR: build-windows-native
+  PACKAGE_NAME: SerialValueMatcherNative-win32-native-x64
+
+jobs:
+  build-test-package:
+    name: Build, self-test, and size-gate Win32 native app
+    runs-on: windows-2022
+
+    steps:
+      - name: Check out repository
+        # actions/checkout v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+
+      - name: Configure native-only
+        shell: pwsh
+        run: >
+          cmake -S . -B $env:BUILD_DIR
+          -G "Visual Studio 17 2022"
+          -A x64
+          -DSVM_BUILD_QT_APP=OFF
+          -DSVM_BUILD_QT_TESTS=OFF
+          -DSVM_BUILD_WIN32_APP=ON
+
+      - name: Build Release
+        shell: pwsh
+        run: cmake --build $env:BUILD_DIR --config Release --parallel 1
+
+      - name: Run native tests
+        shell: pwsh
+        run: ctest --test-dir $env:BUILD_DIR --output-on-failure -C Release
+
+      - name: Run native app self-test
+        shell: pwsh
+        run: .\$env:BUILD_DIR\Release\svm-native-win32.exe --self-test
+
+      - name: Package native zip
+        shell: pwsh
+        run: >
+          .\scripts\package-windows-native.ps1
+          -BuildDir $env:BUILD_DIR
+          -Config Release
+          -SkipBuild
+
+      - name: Report native package size
+        shell: pwsh
+        run: |
+          $summaryPath = "artifacts/windows-native/$env:PACKAGE_NAME.package-summary.txt"
+          Get-Content $summaryPath
+          "## Windows native package size" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "````text" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          Get-Content $summaryPath | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+      - name: Upload native artifact
+        # actions/upload-artifact v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ${{ env.PACKAGE_NAME }}
+          path: |
+            artifacts/windows-native/${{ env.PACKAGE_NAME }}.zip
+            artifacts/windows-native/${{ env.PACKAGE_NAME }}.zip.sha256.txt
+            artifacts/windows-native/${{ env.PACKAGE_NAME }}.package-summary.txt
+          if-no-files-found: error
+          retention-days: 14

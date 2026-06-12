@@ -6,10 +6,11 @@
 
 ## 推荐路径：GitHub Actions 自动出包
 
-仓库包含 Windows 自动出包 workflow：
+仓库包含两条 Windows 自动出包 workflow：
 
 ```text
 .github/workflows/windows-qt-package.yml
+.github/workflows/windows-native-package.yml
 ```
 
 触发方式：
@@ -18,7 +19,7 @@
 - 提交 pull request
 - 在 GitHub Actions 页面手动运行 `workflow_dispatch`
 
-workflow 会在 `windows-2022` runner 上执行：
+Qt baseline workflow 会在 `windows-2022` runner 上执行：
 
 1. 检出仓库。
 2. 安装 Qt 6 x64 MSVC 和 `qtserialport` 模块。
@@ -27,6 +28,18 @@ workflow 会在 `windows-2022` runner 上执行：
 5. 运行 CTest。
 6. 执行 `scripts/package-windows.ps1`。
 7. 上传 artifact：`SerialValueMatcherNative-win-x64`。
+
+Win32 native workflow 会在 `windows-2022` runner 上执行：
+
+1. 检出仓库。
+2. 不安装 Qt。
+3. 使用 Visual Studio 2022 x64 生成器配置 CMake，并显式设置 `SVM_BUILD_QT_APP=OFF`、`SVM_BUILD_QT_TESTS=OFF`、`SVM_BUILD_WIN32_APP=ON`。
+4. 编译 Release。
+5. 运行 4 个 Qt-free native 测试。
+6. 运行 `svm-native-win32.exe --self-test`。
+7. 执行 `scripts/package-windows-native.ps1`。
+8. 校验包内没有 `Qt6*.dll`、`qsqlite.dll` 和 `sqldrivers`，并执行第一阶段体积门禁。
+9. 上传 artifact：`SerialValueMatcherNative-win32-native-x64`。
 
 关键第三方 action 固定到审核过的提交 SHA；如需升级 checkout、Qt 安装或 artifact 上传 action，应先单独验证再更新 SHA。
 
@@ -39,6 +52,16 @@ SerialValueMatcherNative-win-x64.package-summary.txt
 ```
 
 这就是用于 Windows 端测试的便携软件包，不是安装器。
+
+native artifact 内包含：
+
+```text
+SerialValueMatcherNative-win32-native-x64.zip
+SerialValueMatcherNative-win32-native-x64.zip.sha256.txt
+SerialValueMatcherNative-win32-native-x64.package-summary.txt
+```
+
+该包是瘦身迁移验证包，当前仍不替代 Qt baseline 主发布包。
 
 仓库还提供手动/定期触发的 Windows 非硬件压力测试 workflow：
 
@@ -84,6 +107,8 @@ ctest --test-dir build --output-on-failure -C Release
 
 ## 打包脚本
 
+### Qt baseline
+
 执行：
 
 ```powershell
@@ -115,6 +140,43 @@ artifacts/windows/SerialValueMatcherNative-win-x64.package-summary.txt
 ```
 
 体积摘要会记录 zip bytes、解压后 bytes、文件数量、最大文件和 Qt DLL 列表。Qt baseline 包允许包含 Qt DLL；未来 Win32 native 包必须不包含 `Qt6*.dll`。
+
+### Win32 native 小包
+
+配置和构建：
+
+```powershell
+cmake -S . -B build-windows-native -G "Visual Studio 17 2022" -A x64 -DSVM_BUILD_QT_APP=OFF -DSVM_BUILD_QT_TESTS=OFF -DSVM_BUILD_WIN32_APP=ON
+cmake --build build-windows-native --config Release --parallel 1
+ctest --test-dir build-windows-native --output-on-failure -C Release
+```
+
+执行自测：
+
+```powershell
+.\build-windows-native\Release\svm-native-win32.exe --self-test
+```
+
+打包：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\package-windows-native.ps1 -BuildDir build-windows-native -Config Release -SkipBuild
+```
+
+默认输出：
+
+```text
+artifacts/windows-native/SerialValueMatcherNative-win32-native-x64.zip
+artifacts/windows-native/SerialValueMatcherNative-win32-native-x64.zip.sha256.txt
+artifacts/windows-native/SerialValueMatcherNative-win32-native-x64.package-summary.txt
+```
+
+`scripts/inspect-windows-package.ps1` 会检查 native 包：
+
+- 不允许 `Qt6*.dll`；
+- 不允许 `qsqlite.dll` 或 `sqldrivers`；
+- zip 必须 `<= 5 MB`；
+- 解压后必须 `<= 8 MB`。
 
 ## Win32 native 小包门禁
 

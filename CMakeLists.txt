@@ -89,6 +89,14 @@ if(SVM_BUILD_WIN32_APP)
             NOMINMAX
     )
 
+    if(MSVC)
+        set_property(TARGET svm-native-win32 PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+        )
+        target_compile_options(svm-native-win32 PRIVATE /O1 /GL)
+        target_link_options(svm-native-win32 PRIVATE /OPT:REF /OPT:ICF /LTCG)
+    endif()
+
     install(TARGETS svm-native-win32
         RUNTIME DESTINATION .
     )

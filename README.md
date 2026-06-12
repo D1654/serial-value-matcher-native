@@ -219,9 +219,12 @@ ctest --test-dir build-codex --output-on-failure
 
 Windows 原生打包脚本已建立：
 
-- 打包脚本：`scripts/package-windows.ps1`
+- Qt baseline 打包脚本：`scripts/package-windows.ps1`
+- Win32 native 打包脚本：`scripts/package-windows-native.ps1`
+- Win32 native 包检查脚本：`scripts/inspect-windows-package.ps1`
 - 部署说明：`docs/windows-deployment.md`
-- 自动出包：`.github/workflows/windows-qt-package.yml`
+- Qt baseline 自动出包：`.github/workflows/windows-qt-package.yml`
+- Win32 native 自动出包：`.github/workflows/windows-native-package.yml`
 
 典型命令：
 
@@ -245,6 +248,14 @@ cmake --build build-win32-native --config Release --target svm-native-win32
 ```
 
 该目标用于瘦身迁移验证，当前尚未替代 Qt baseline 发布包。
+
+native 包命令：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\package-windows-native.ps1 -BuildDir build-win32-native -Config Release -SkipBuild
+```
+
+脚本会运行 `--self-test`、生成 zip/SHA256/体积摘要，并失败于 `Qt6*.dll`、`qsqlite.dll` 或第一阶段体积门禁超限。
 
 实际发布包仍需在 Windows Qt 构建机上完成最终验收。
 
