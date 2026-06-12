@@ -38,7 +38,7 @@ jobs:
 
       - name: Configure
         shell: pwsh
-        run: cmake -S . -B $env:BUILD_DIR -G "Visual Studio 17 2022" -A x64
+        run: cmake -S . -B $env:BUILD_DIR -G "Visual Studio 17 2022" -A x64 -DSVM_BUILD_QT_APP=ON -DSVM_BUILD_WIN32_APP=OFF
 
       - name: Build Release
         shell: pwsh
@@ -58,6 +58,16 @@ jobs:
             -QtBinDir $qtBinDir `
             -SkipBuild
 
+      - name: Report package size
+        shell: pwsh
+        run: |
+          $summaryPath = "artifacts/windows/$env:PACKAGE_NAME.package-summary.txt"
+          Get-Content $summaryPath
+          "## Windows Qt package size" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "````text" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          Get-Content $summaryPath | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
       - name: Upload portable artifact
         # actions/upload-artifact v7
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -66,5 +76,6 @@ jobs:
           path: |
             artifacts/windows/${{ env.PACKAGE_NAME }}.zip
             artifacts/windows/${{ env.PACKAGE_NAME }}.zip.sha256.txt
+            artifacts/windows/${{ env.PACKAGE_NAME }}.package-summary.txt
           if-no-files-found: error
           retention-days: 14

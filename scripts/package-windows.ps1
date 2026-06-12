@@ -21,6 +21,23 @@ function Require-Command($Name, $Hint) {
     return $cmd.Source
 }
 
+function Get-FileLengthSum($Files) {
+    $sum = ($Files | Measure-Object -Property Length -Sum).Sum
+    if ($null -eq $sum) {
+        return 0
+    }
+    return [int64]$sum
+}
+
+function Get-RelativePackagePath($Root, $Path) {
+    $normalizedRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+    $normalizedPath = [System.IO.Path]::GetFullPath($Path)
+    if ($normalizedPath.StartsWith($normalizedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $normalizedPath.Substring($normalizedRoot.Length).TrimStart('\', '/')
+    }
+    return $normalizedPath
+}
+
 if ([string]::IsNullOrWhiteSpace($Config)) {
     $Config = "Release"
 }
@@ -31,6 +48,7 @@ $packageRoot = Join-Path $repoRoot $PackageDir
 $stageDir = Join-Path $packageRoot "SerialValueMatcherNative-win-x64"
 $zipPath = Join-Path $packageRoot "SerialValueMatcherNative-win-x64.zip"
 $hashPath = "$zipPath.sha256.txt"
+$summaryPath = Join-Path $packageRoot "SerialValueMatcherNative-win-x64.package-summary.txt"
 
 Write-Host "仓库目录：$repoRoot"
 Write-Host "构建目录：$buildPath"
@@ -90,9 +108,49 @@ if (Test-Path (Join-Path $repoRoot "docs\windows-deployment.md")) {
 }
 
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+if (Test-Path $summaryPath) { Remove-Item $summaryPath -Force }
 Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $zipPath -Force
 $hash = Get-FileHash -Algorithm SHA256 $zipPath
 "SHA256 $($hash.Hash)  $(Split-Path -Leaf $zipPath)" | Set-Content -Path $hashPath -Encoding UTF8
 
+$packageFiles = @(Get-ChildItem -Path $stageDir -Recurse -File)
+$packageBytes = Get-FileLengthSum $packageFiles
+$zipBytes = (Get-Item $zipPath).Length
+$largestFiles = $packageFiles | Sort-Object -Property Length -Descending | Select-Object -First 12
+$qtDlls = @($packageFiles | Where-Object { $_.Name -like "Qt6*.dll" } | Sort-Object -Property Name)
+
+$summary = New-Object System.Collections.Generic.List[string]
+$summary.Add("SerialValueMatcher Native Windows Qt package summary")
+$summary.Add("Package kind: Qt baseline")
+$summary.Add("Zip path: $zipPath")
+$summary.Add("Zip bytes: $zipBytes")
+$summary.Add("Extracted bytes: $packageBytes")
+$summary.Add("File count: $($packageFiles.Count)")
+$summary.Add("SHA256: $($hash.Hash)")
+$summary.Add("")
+$summary.Add("Largest files:")
+foreach ($file in $largestFiles) {
+    $summary.Add(("  {0,12}  {1}" -f $file.Length, (Get-RelativePackagePath $stageDir $file.FullName)))
+}
+$summary.Add("")
+$summary.Add("Qt DLLs:")
+if ($qtDlls.Count -eq 0) {
+    $summary.Add("  none")
+} else {
+    foreach ($file in $qtDlls) {
+        $summary.Add(("  {0,12}  {1}" -f $file.Length, (Get-RelativePackagePath $stageDir $file.FullName)))
+    }
+}
+$summary.Add("")
+$summary.Add("Native slimming gate:")
+$summary.Add("  Qt baseline packages may contain Qt DLLs.")
+$summary.Add("  Future Win32 native packages must not contain Qt6*.dll.")
+$summary.Add("  First native gate: zip <= 5 MB, extracted <= 8 MB.")
+$summary.Add("  Stretch native gate: zip <= 2 MB, extracted <= 3 MB.")
+$summary | Set-Content -Path $summaryPath -Encoding UTF8
+
 Write-Host "Windows 打包完成：$zipPath"
 Write-Host "SHA256：$($hash.Hash)"
+Write-Host "体积摘要：$summaryPath"
+Write-Host "Zip bytes：$zipBytes"
+Write-Host "Extracted bytes：$packageBytes"

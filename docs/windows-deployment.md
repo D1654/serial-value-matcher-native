@@ -1,6 +1,8 @@
 # Windows 原生打包说明
 
-本文记录串口值匹配器（SerialValueMatcher Native）的 Windows Qt 打包流程。目标是产出不依赖 C#/.NET Desktop Runtime 的 Windows 原生便携包，解压后可直接运行 `svm-native.exe`。
+本文记录串口值匹配器（SerialValueMatcher Native）的 Windows 打包流程。当前稳定发布路径是 Qt baseline 便携包，目标是产出不依赖 C#/.NET Desktop Runtime 的 Windows 原生便携软件，解压后可直接运行 `svm-native.exe`。
+
+项目正在执行架构级瘦身：保留 Qt baseline 作为可运行基线，同时新增 Win32 native 小包路线。瘦身目标和体积门禁见 `docs/windows-native-slimming.md`。
 
 ## 推荐路径：GitHub Actions 自动出包
 
@@ -20,7 +22,7 @@ workflow 会在 `windows-2022` runner 上执行：
 
 1. 检出仓库。
 2. 安装 Qt 6 x64 MSVC 和 `qtserialport` 模块。
-3. 使用 Visual Studio 2022 x64 生成器配置 CMake。
+3. 使用 Visual Studio 2022 x64 生成器配置 CMake，并显式设置 `SVM_BUILD_QT_APP=ON`、`SVM_BUILD_WIN32_APP=OFF`。
 4. 编译 Release。
 5. 运行 CTest。
 6. 执行 `scripts/package-windows.ps1`。
@@ -33,6 +35,7 @@ artifact 内包含：
 ```text
 SerialValueMatcherNative-win-x64.zip
 SerialValueMatcherNative-win-x64.zip.sha256.txt
+SerialValueMatcherNative-win-x64.package-summary.txt
 ```
 
 这就是用于 Windows 端测试的便携软件包，不是安装器。
@@ -101,14 +104,26 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -BuildDir
    - `platforms/qwindows.dll`
    - `sqldrivers/qsqlite.dll`
 4. 复制 README 和 Windows 打包说明。
-5. 生成 zip 包和 SHA256 文本。
+5. 生成 zip 包、SHA256 文本和体积摘要。
 
 默认输出：
 
 ```text
 artifacts/windows/SerialValueMatcherNative-win-x64.zip
 artifacts/windows/SerialValueMatcherNative-win-x64.zip.sha256.txt
+artifacts/windows/SerialValueMatcherNative-win-x64.package-summary.txt
 ```
+
+体积摘要会记录 zip bytes、解压后 bytes、文件数量、最大文件和 Qt DLL 列表。Qt baseline 包允许包含 Qt DLL；未来 Win32 native 包必须不包含 `Qt6*.dll`。
+
+## Win32 native 小包门禁
+
+Win32 native 包成为主发布包前必须满足：
+
+- 第一阶段：zip `<= 5 MB`，解压后 `<= 8 MB`。
+- 冲刺阶段：zip `<= 2 MB`，解压后 `<= 3 MB`。
+- 包内不得包含 `Qt6*.dll`。
+- 仍需保持中文界面、中文错误诊断、解压即运行、不依赖 C#/.NET Desktop Runtime。
 
 ## 打包验收清单
 
@@ -121,6 +136,7 @@ artifacts/windows/SerialValueMatcherNative-win-x64.zip.sha256.txt
 - [ ] 文本 / HEX 发送区可打开并操作，串口打开失败、DTR/RTS 设置失败和写入失败会显示中文诊断。
 - [ ] Modbus 扫描入口可打开；实际设备扫描需在受控串口/设备环境中单独验收。
 - [ ] SHA256 已记录并随包发布。
+- [ ] 体积摘要已记录并随包发布。
 
 ## 常见问题
 

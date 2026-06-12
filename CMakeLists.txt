@@ -15,6 +15,13 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(SVM_BUILD_QT_APP "Build the current Qt Widgets application target" ON)
+option(SVM_BUILD_WIN32_APP "Build the future lightweight Win32 native application target" OFF)
+
+if(SVM_BUILD_WIN32_APP)
+    message(FATAL_ERROR "SVM_BUILD_WIN32_APP is reserved for the Change #4 native slimming implementation and is not available yet.")
+endif()
+
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets SerialPort Sql Test)
 
 qt_standard_project_setup()
@@ -61,26 +68,28 @@ target_link_libraries(svm_native_core
         Qt6::Sql
 )
 
-qt_add_executable(svm-native
-    WIN32
-    src/app/main.cpp
-    src/app/main_window.cpp
-    src/app/modbus_scan_result_adapter.cpp
-    src/app/modbus_scan_worker.cpp
-    src/app/qt_serial_byte_channel.cpp
-)
+if(SVM_BUILD_QT_APP)
+    qt_add_executable(svm-native
+        WIN32
+        src/app/main.cpp
+        src/app/main_window.cpp
+        src/app/modbus_scan_result_adapter.cpp
+        src/app/modbus_scan_worker.cpp
+        src/app/qt_serial_byte_channel.cpp
+    )
 
-target_link_libraries(svm-native
-    PRIVATE
-        svm_native_core
-        Qt6::Widgets
-)
+    target_link_libraries(svm-native
+        PRIVATE
+            svm_native_core
+            Qt6::Widgets
+    )
 
-install(TARGETS svm-native
-    RUNTIME DESTINATION .
-)
+    install(TARGETS svm-native
+        RUNTIME DESTINATION .
+    )
+endif()
 
-if(WIN32)
+if(WIN32 AND SVM_BUILD_QT_APP)
     find_program(POWERSHELL_EXE powershell pwsh)
     if(POWERSHELL_EXE)
         add_custom_target(package-windows

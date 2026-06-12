@@ -11,12 +11,13 @@
 - 作者：`w`
 - 主要用户：中文母语的现场调试、设备联调、协议验证人员
 - 交付目标：Windows 端原生可运行便携软件，解压后可直接启动，不以安装器为第一目标
-- 技术边界：C++20 + Qt6 原生桌面应用，不依赖 C#/.NET Desktop Runtime
+- 技术边界：当前稳定基线为 C++20 + Qt6 原生桌面应用；架构级瘦身路线会新增 Win32 native 小包目标；两条路线都不依赖 C#/.NET Desktop Runtime
 
 ## 技术路线
 
 - C++20
-- Qt6 Widgets
+- Qt6 Widgets（当前稳定基线）
+- Win32 native（架构级瘦身目标，分阶段落地）
 - CMake / Ninja
 - QSerialPort
 - SQLite / QtSql
@@ -32,6 +33,7 @@
   - RYCOM / CuteCom：串口参数、HEX 显示、发送历史、宏等功能细节；
   - Serial Studio / Vodka：数据管线、脚本解析、可视化/插件接口参考。
 - 用户可见内容中文优先：界面、状态提示、错误诊断、验证报告和文档都优先按中文用户认知组织。
+- Windows 端体积目标分两步推进：先保留 Qt baseline 可运行包，再建立不含 `Qt6*.dll` 的 Win32 native 小包；第一阶段目标 zip `<= 5 MB`、解压 `<= 8 MB`，冲刺目标 zip `<= 2 MB`、解压 `<= 3 MB`。
 
 ## 当前能力
 
@@ -178,10 +180,12 @@ artifact 内包含：
 ```text
 SerialValueMatcherNative-win-x64.zip
 SerialValueMatcherNative-win-x64.zip.sha256.txt
+SerialValueMatcherNative-win-x64.package-summary.txt
 ```
 
 该 zip 是 Windows 原生便携运行包，不是安装器；目标是解压后直接启动 `svm-native.exe`。
 Windows workflow 的关键第三方 action 固定到审核过的提交 SHA，避免移动 tag 在发布链路中漂移。
+当前 artifact 是 Qt baseline 包，允许携带 Qt 运行库；架构级瘦身路线会新增 Win32 native artifact，并要求包内不出现 `Qt6*.dll`。
 
 ## 开发环境要求
 
@@ -229,6 +233,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -BuildDir
 - `platforms/qwindows.dll`
 - `sqldrivers/qsqlite.dll`
 
+打包脚本还会生成体积摘要，记录 zip bytes、解压后 bytes、文件数、最大文件和 Qt DLL 列表。Win32 native 小包的具体门禁见 `docs/windows-native-slimming.md`。
+
 实际发布包仍需在 Windows Qt 构建机上完成最终验收。
 
 ## 相关文档
@@ -236,4 +242,5 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -BuildDir
 - `native-spec.md`：原生版规格说明。
 - `docs/architecture.md`：架构说明。
 - `docs/windows-deployment.md`：Windows 打包与验收说明。
+- `docs/windows-native-slimming.md`：Windows 架构级瘦身路线、体积基线和 native 小包门禁。
 - `docs/task-*.md`：阶段性任务记录。
