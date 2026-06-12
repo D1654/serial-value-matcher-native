@@ -44,7 +44,7 @@ jobs:
 
       - name: Run native app self-test
         shell: pwsh
-        run: .\$env:BUILD_DIR\Release\svm-native-win32.exe --self-test
+        run: '& (Join-Path $env:BUILD_DIR "Release\svm-native-win32.exe") --self-test'
 
       - name: Package native zip
         shell: pwsh
