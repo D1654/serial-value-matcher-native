@@ -50,6 +50,12 @@ endif()
 
 target_include_directories(svm_win32_serial PUBLIC src)
 
+add_library(svm_native_storage
+    src/native_storage/native_session_store.cpp
+)
+
+target_include_directories(svm_native_storage PUBLIC src)
+
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets SerialPort Sql Test)
 
 qt_standard_project_setup()
@@ -165,6 +171,17 @@ set_target_properties(native_win32_serial_tests PROPERTIES
 )
 target_link_libraries(native_win32_serial_tests PRIVATE svm_win32_serial)
 add_test(NAME native_win32_serial_tests COMMAND native_win32_serial_tests)
+
+add_executable(native_storage_tests
+    tests/native_storage_tests.cpp
+)
+set_target_properties(native_storage_tests PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+target_link_libraries(native_storage_tests PRIVATE svm_native_storage)
+add_test(NAME native_storage_tests COMMAND native_storage_tests)
 
 function(add_svm_qt_test target source)
     qt_add_executable(${target}

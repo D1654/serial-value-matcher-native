@@ -116,7 +116,7 @@
 
 ## 当前测试基线
 
-当前默认 CTest 基线：**32/32 passed**，其中包含 29 个 QtTest 目标、2 个 Qt-free native core 测试目标和 1 个 Win32 串口后端硬件无关测试目标。
+当前默认 CTest 基线：**33/33 passed**，其中包含 29 个 QtTest 目标、2 个 Qt-free native core 测试目标、1 个 Win32 串口后端硬件无关测试目标和 1 个 native storage 测试目标。
 
 覆盖范围包括：
 

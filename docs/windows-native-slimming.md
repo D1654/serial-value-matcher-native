@@ -42,6 +42,7 @@ Win32 原生包必须满足以下门禁后才能成为主 Windows 发布包：
 - `svm-native`：当前 Qt Widgets 稳定基线，继续用于功能回归、用户试用和风险兜底。
 - 未来 Win32 native target：轻量 Windows 原生目标，逐步接入 Qt-free 核心、Win32 串口后端和小包发布链路。
 - `svm_win32_serial`：已新增的 Qt-free Win32 串口后端库。Linux 下构建硬件无关参数/错误核心；Windows 下额外编译 `CreateFileW`/`ReadFile`/`WriteFile`/`SetCommState`/`QueryDosDeviceW` 实现。
+- `svm_native_storage`：已新增的 Qt-free 文件存储库。第一阶段不引入 SQLite amalgamation，避免把 native 小包重新推向 MB 级依赖膨胀；后续如需复杂查询再单独评估 SQLite 静态链接。
 
 默认构建仍保留 Qt 版本：
 
@@ -87,3 +88,14 @@ Change #4 已开始替换 `Qt6SerialPort.dll` 路线。当前新增的后端包�
 - `tests/native_win32_serial_tests.cpp`：硬件无关测试，覆盖参数校验、端口名规范化和 Win32 错误中文诊断。
 
 真机验收步骤见 `docs/windows-serial-validation.md`。该后端目前仍是并行能力，尚未替换 Qt baseline UI 的串口入口；替换将在 Win32 native UI shell 和最终 parity/switch 任务中完成。
+
+## Native 存储选择
+
+Change #4 第一阶段选择标准库文件存储，而不是 SQLite：
+
+- 目标是先移除 `Qt6Sql.dll` 和 `sqldrivers/qsqlite.dll`，并把 native 路线维持在最小依赖集合；
+- 存储格式是长度前缀记录文件，可保存 UTF-8 中文文本和二进制串口帧，不依赖 JSON/SQLite 解析库；
+- 当前覆盖 raw I/O、发送历史、串口配置、扫描结果、匹配候选、协议规则和规则验证结果；
+- Qt baseline 仍继续使用现有 SQLite/Qt SQL `SessionStore`，迁移期间两条路径并存。
+
+该选择牺牲了 SQL 查询能力，换取更小体积和更少运行时依赖。若 Win32 native UI 后续需要复杂筛选、跨表查询或大数据量索引，再以独立任务评估 SQLite amalgamation 的体积收益比。
