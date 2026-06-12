@@ -391,8 +391,8 @@ bool NativeMainWindow::create(HINSTANCE instance) {
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
-        1180,
-        760,
+        1220,
+        780,
         nullptr,
         nullptr,
         instance_,
@@ -499,6 +499,12 @@ LRESULT CALLBACK NativeMainWindow::windowProc(HWND window, UINT message, WPARAM 
 
 LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
+    case WM_GETMINMAXINFO: {
+        auto* minMax = reinterpret_cast<MINMAXINFO*>(lParam);
+        minMax->ptMinTrackSize.x = 1080;
+        minMax->ptMinTrackSize.y = 760;
+        return 0;
+    }
     case WM_CREATE:
         createMenus();
         createControls();
@@ -706,6 +712,11 @@ void NativeMainWindow::createControls() {
         uiFont_ = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
     }
 
+    connectionGroup_ = CreateWindowExW(0, L"BUTTON", tx(T::ConnectionGroup), WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    sendGroup_ = CreateWindowExW(0, L"BUTTON", tx(T::SendGroup), WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    workflowGroup_ = CreateWindowExW(0, L"BUTTON", tx(T::WorkflowGroup), WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    logGroup_ = CreateWindowExW(0, L"BUTTON", tx(T::LogGroup), WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    workflowHint_ = CreateWindowExW(0, L"STATIC", tx(T::WorkflowHint), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     portLabel_ = CreateWindowExW(0, L"STATIC", tx(T::PortLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     portCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_PORT_COMBO), instance_, nullptr);
     refreshButton_ = CreateWindowExW(0, L"BUTTON", tx(T::RefreshButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_REFRESH_BUTTON), instance_, nullptr);
@@ -736,16 +747,25 @@ void NativeMainWindow::createControls() {
     analysisButton_ = CreateWindowExW(0, L"BUTTON", tx(T::AnalysisButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_ANALYSIS_BUTTON), instance_, nullptr);
     ruleVerifyButton_ = CreateWindowExW(0, L"BUTTON", tx(T::RuleVerifyButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_RULE_VERIFY_BUTTON), instance_, nullptr);
     exportReportButton_ = CreateWindowExW(0, L"BUTTON", tx(T::ExportReportButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_EXPORT_REPORT_BUTTON), instance_, nullptr);
+    scanSectionLabel_ = CreateWindowExW(0, L"STATIC", tx(T::ScanSectionLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    scanSlaveLabel_ = CreateWindowExW(0, L"STATIC", tx(T::ScanSlaveLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     scanSlaveEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"1", WS_CHILD | WS_VISIBLE | ES_NUMBER, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SCAN_SLAVE_EDIT), instance_, nullptr);
+    scanFunctionLabel_ = CreateWindowExW(0, L"STATIC", tx(T::ScanFunctionLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     scanFunctionCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SCAN_FUNCTION_COMBO), instance_, nullptr);
+    scanStartLabel_ = CreateWindowExW(0, L"STATIC", tx(T::ScanStartLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     scanStartEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"0", WS_CHILD | WS_VISIBLE | ES_NUMBER, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SCAN_START_EDIT), instance_, nullptr);
+    scanEndLabel_ = CreateWindowExW(0, L"STATIC", tx(T::ScanEndLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     scanEndEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"15", WS_CHILD | WS_VISIBLE | ES_NUMBER, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SCAN_END_EDIT), instance_, nullptr);
-    targetStatic_ = CreateWindowExW(0, L"STATIC", tx(T::TargetLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    analysisSectionLabel_ = CreateWindowExW(0, L"STATIC", tx(T::AnalysisSectionLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    targetStatic_ = CreateWindowExW(0, L"STATIC", tx(T::TargetNameLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     targetLabelEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", tx(T::TargetNameDefault), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TARGET_LABEL_EDIT), instance_, nullptr);
+    targetValueStatic_ = CreateWindowExW(0, L"STATIC", tx(T::TargetValueLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     targetValueEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", tx(T::TargetValueDefault), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TARGET_VALUE_EDIT), instance_, nullptr);
+    targetUnitStatic_ = CreateWindowExW(0, L"STATIC", tx(T::TargetUnitLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     targetUnitEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", tx(T::TargetUnitDefault), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TARGET_UNIT_EDIT), instance_, nullptr);
-    toleranceStatic_ = CreateWindowExW(0, L"STATIC", tx(T::ToleranceLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    toleranceStatic_ = CreateWindowExW(0, L"STATIC", tx(T::ToleranceFieldLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     toleranceEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", tx(T::ToleranceDefault), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TOLERANCE_EDIT), instance_, nullptr);
+    candidateStatic_ = CreateWindowExW(0, L"STATIC", tx(T::CandidateLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     candidateCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_CANDIDATE_COMBO), instance_, nullptr);
     receiveLog_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_RECEIVE_LOG), instance_, nullptr);
     statusText_ = CreateWindowExW(0, L"STATIC", tx(T::InitialStatus), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_STATUS_TEXT), instance_, nullptr);
@@ -803,111 +823,170 @@ void NativeMainWindow::populateSerialOptionControls() {
 }
 
 void NativeMainWindow::layoutControls(int width, int height) {
+    width = std::max(width, 1040);
+    height = std::max(height, 700);
+
     const int margin = 12;
+    const int groupPad = 16;
     const int row = 30;
     const int gap = 8;
-    const int labelWidth = 58;
+    const int labelHeight = 22;
+    const int labelWidth = 56;
     const int buttonWidth = 82;
     const int smallButtonWidth = 74;
 
-    int x = margin;
-    const int y = margin;
-    MoveWindow(portLabel_, x, y + 6, labelWidth, 22, TRUE);
+    const int connectionX = margin;
+    const int connectionY = margin;
+    const int connectionWidth = width - margin * 2;
+    const int connectionHeight = 122;
+    MoveWindow(connectionGroup_, connectionX, connectionY, connectionWidth, connectionHeight, TRUE);
+
+    int x = connectionX + groupPad;
+    int y = connectionY + 26;
+    const int actionsWidth = buttonWidth * 2 + gap;
+    const int actionsX = connectionX + connectionWidth - groupPad - actionsWidth;
+    MoveWindow(portLabel_, x, y + 6, labelWidth, labelHeight, TRUE);
     x += labelWidth;
-    MoveWindow(portCombo_, x, y, 170, 220, TRUE);
-    x += 170 + gap;
-    MoveWindow(refreshButton_, x, y, buttonWidth, row, TRUE);
-    x += buttonWidth + gap;
+    MoveWindow(portCombo_, x, y, 184, 220, TRUE);
+    x += 184 + gap;
+    MoveWindow(refreshButton_, x, y, smallButtonWidth, row, TRUE);
+    x += smallButtonWidth + gap;
     MoveWindow(saveProfileButton_, x, y, 96, row, TRUE);
     x += 96 + gap;
-    MoveWindow(autoReconnectCheck_, x, y + 4, 96, 24, TRUE);
-    x += 96 + gap;
-    MoveWindow(connectButton_, x, y, buttonWidth, row, TRUE);
-    x += buttonWidth + gap;
-    MoveWindow(disconnectButton_, x, y, buttonWidth, row, TRUE);
+    MoveWindow(autoReconnectCheck_, x, y + 4, 116, 24, TRUE);
+    MoveWindow(connectButton_, actionsX, y, buttonWidth, row, TRUE);
+    MoveWindow(disconnectButton_, actionsX + buttonWidth + gap, y, buttonWidth, row, TRUE);
 
-    const int optionsY = y + row + 10;
-    x = margin;
-    MoveWindow(baudLabel_, x, optionsY + 6, labelWidth, 22, TRUE);
+    y = connectionY + 70;
+    x = connectionX + groupPad;
+    MoveWindow(baudLabel_, x, y + 6, labelWidth, labelHeight, TRUE);
     x += labelWidth;
-    MoveWindow(baudCombo_, x, optionsY, 104, 220, TRUE);
+    MoveWindow(baudCombo_, x, y, 104, 220, TRUE);
     x += 104 + gap;
-    MoveWindow(dataBitsLabel_, x, optionsY + 6, labelWidth, 22, TRUE);
+    MoveWindow(dataBitsLabel_, x, y + 6, 54, labelHeight, TRUE);
+    x += 54;
+    MoveWindow(dataBitsCombo_, x, y, 60, 160, TRUE);
+    x += 60 + gap;
+    MoveWindow(parityLabel_, x, y + 6, 42, labelHeight, TRUE);
+    x += 42;
+    MoveWindow(parityCombo_, x, y, 92, 180, TRUE);
+    x += 92 + gap;
+    MoveWindow(stopBitsLabel_, x, y + 6, labelWidth, labelHeight, TRUE);
     x += labelWidth;
-    MoveWindow(dataBitsCombo_, x, optionsY, 58, 160, TRUE);
-    x += 58 + gap;
-    MoveWindow(parityLabel_, x, optionsY + 6, 46, 22, TRUE);
-    x += 46;
-    MoveWindow(parityCombo_, x, optionsY, 90, 180, TRUE);
-    x += 90 + gap;
-    MoveWindow(stopBitsLabel_, x, optionsY + 6, labelWidth, 22, TRUE);
-    x += labelWidth;
-    MoveWindow(stopBitsCombo_, x, optionsY, 66, 160, TRUE);
+    MoveWindow(stopBitsCombo_, x, y, 66, 160, TRUE);
     x += 66 + gap;
-    MoveWindow(flowControlLabel_, x, optionsY + 6, 46, 22, TRUE);
+    MoveWindow(flowControlLabel_, x, y + 6, 46, labelHeight, TRUE);
     x += 46;
-    MoveWindow(flowControlCombo_, x, optionsY, 100, 180, TRUE);
-    x += 100 + gap;
-    MoveWindow(dtrCheck_, x, optionsY + 4, 52, 24, TRUE);
+    MoveWindow(flowControlCombo_, x, y, 110, 180, TRUE);
+    x += 110 + gap;
+    MoveWindow(dtrCheck_, x, y + 4, 52, 24, TRUE);
     x += 52 + gap;
-    MoveWindow(rtsCheck_, x, optionsY + 4, 52, 24, TRUE);
+    MoveWindow(rtsCheck_, x, y + 4, 52, 24, TRUE);
 
-    const int sendY = optionsY + row + 10;
-    x = margin;
-    MoveWindow(sendModeCombo_, x, sendY, 72, 160, TRUE);
-    x += 72 + gap;
-    MoveWindow(lineEndingCombo_, x, sendY, 88, 160, TRUE);
-    x += 88 + gap;
-    MoveWindow(historyCombo_, x, sendY, 150, 200, TRUE);
-    x += 150 + gap;
-    const int trailingButtons = buttonWidth + smallButtonWidth * 3 + gap * 4;
-    MoveWindow(sendEdit_, x, sendY, std::max(120, width - x - margin - trailingButtons), row, TRUE);
-    x = width - margin - trailingButtons;
-    MoveWindow(sendButton_, x, sendY, buttonWidth, row, TRUE);
-    x += buttonWidth + gap;
-    MoveWindow(pauseScrollButton_, x, sendY, smallButtonWidth, row, TRUE);
-    x += smallButtonWidth + gap;
-    MoveWindow(clearButton_, x, sendY, smallButtonWidth, row, TRUE);
-
-    const int workflowY = sendY + row + 10;
-    x = margin;
-    MoveWindow(modbusButton_, x, workflowY, 104, row, TRUE);
-    x += 104 + gap;
-    MoveWindow(scanSlaveEdit_, x, workflowY, 42, row, TRUE);
-    x += 42 + gap;
-    MoveWindow(scanFunctionCombo_, x, workflowY, 140, 180, TRUE);
-    x += 140 + gap;
-    MoveWindow(scanStartEdit_, x, workflowY, 70, row, TRUE);
-    x += 70 + gap;
-    MoveWindow(scanEndEdit_, x, workflowY, 70, row, TRUE);
-
-    const int analysisY = workflowY + row + 8;
-    x = margin;
-    MoveWindow(targetStatic_, x, analysisY + 6, 42, 22, TRUE);
-    x += 42;
-    MoveWindow(targetLabelEdit_, x, analysisY, 96, row, TRUE);
-    x += 96 + gap;
-    MoveWindow(targetValueEdit_, x, analysisY, 86, row, TRUE);
-    x += 86 + gap;
-    MoveWindow(targetUnitEdit_, x, analysisY, 58, row, TRUE);
-    x += 58 + gap;
-    MoveWindow(toleranceStatic_, x, analysisY + 6, 42, 22, TRUE);
-    x += 42;
-    MoveWindow(toleranceEdit_, x, analysisY, 74, row, TRUE);
-    x += 74 + gap;
-    const int actionWidth = 104 + 90 + 90 + gap * 4;
-    MoveWindow(candidateCombo_, x, analysisY, std::max(150, width - x - margin - actionWidth), 220, TRUE);
-    x = width - margin - actionWidth;
-    MoveWindow(analysisButton_, x, analysisY, 104, row, TRUE);
-    x += 104 + gap;
-    MoveWindow(ruleVerifyButton_, x, analysisY, 90, row, TRUE);
-    x += 90 + gap;
-    MoveWindow(exportReportButton_, x, analysisY, 90, row, TRUE);
-
-    const int logY = analysisY + row + 12;
     const int statusHeight = 26;
-    MoveWindow(receiveLog_, margin, logY, width - margin * 2, height - logY - statusHeight - margin, TRUE);
-    MoveWindow(statusText_, margin, height - statusHeight - 4, width - margin * 2, statusHeight, TRUE);
+    const int statusY = height - statusHeight - 4;
+    const int contentY = connectionY + connectionHeight + 10;
+    const int contentHeight = std::max(360, statusY - contentY - 8);
+    const int leftWidth = 430;
+    const int columnGap = 10;
+    const int rightX = margin + leftWidth + columnGap;
+    const int rightWidth = std::max(360, width - rightX - margin);
+
+    const int sendY = contentY;
+    const int sendHeight = 128;
+    MoveWindow(sendGroup_, margin, sendY, leftWidth, sendHeight, TRUE);
+
+    x = margin + groupPad;
+    y = sendY + 26;
+    const int historyWidth = leftWidth - groupPad * 2 - 80 - 88 - gap * 2;
+    MoveWindow(sendModeCombo_, x, y, 80, 160, TRUE);
+    x += 80 + gap;
+    MoveWindow(lineEndingCombo_, x, y, 88, 160, TRUE);
+    x += 88 + gap;
+    MoveWindow(historyCombo_, x, y, historyWidth, 200, TRUE);
+
+    x = margin + groupPad;
+    y = sendY + 62;
+    const int sendEditWidth = leftWidth - groupPad * 2 - buttonWidth - gap;
+    MoveWindow(sendEdit_, x, y, sendEditWidth, row, TRUE);
+    MoveWindow(sendButton_, x + sendEditWidth + gap, y, buttonWidth, row, TRUE);
+
+    y = sendY + 96;
+    MoveWindow(pauseScrollButton_, margin + groupPad, y, 104, 24, TRUE);
+    MoveWindow(clearButton_, margin + groupPad + 104 + gap, y, smallButtonWidth, 24, TRUE);
+
+    const int workflowY = sendY + sendHeight + 10;
+    const int workflowHeight = std::max(320, contentHeight - sendHeight - 10);
+    MoveWindow(workflowGroup_, margin, workflowY, leftWidth, workflowHeight, TRUE);
+
+    const int innerX = margin + groupPad;
+    const int innerWidth = leftWidth - groupPad * 2;
+    y = workflowY + 26;
+    MoveWindow(workflowHint_, innerX, y, innerWidth, 24, TRUE);
+
+    y += 32;
+    MoveWindow(scanSectionLabel_, innerX, y, innerWidth, labelHeight, TRUE);
+    y += 24;
+    x = innerX;
+    MoveWindow(scanSlaveLabel_, x, y + 6, 42, labelHeight, TRUE);
+    x += 42;
+    MoveWindow(scanSlaveEdit_, x, y, 50, row, TRUE);
+    x += 50 + gap;
+    MoveWindow(scanFunctionLabel_, x, y + 6, 42, labelHeight, TRUE);
+    x += 42;
+    MoveWindow(scanFunctionCombo_, x, y, innerWidth - (x - innerX), 180, TRUE);
+
+    y += 36;
+    x = innerX;
+    MoveWindow(scanStartLabel_, x, y + 6, 70, labelHeight, TRUE);
+    x += 70;
+    MoveWindow(scanStartEdit_, x, y, 72, row, TRUE);
+    x += 72 + gap;
+    MoveWindow(scanEndLabel_, x, y + 6, 70, labelHeight, TRUE);
+    x += 70;
+    MoveWindow(scanEndEdit_, x, y, 72, row, TRUE);
+
+    y += 36;
+    MoveWindow(modbusButton_, innerX + innerWidth - 140, y, 140, row, TRUE);
+    y += 42;
+    MoveWindow(analysisSectionLabel_, innerX, y, innerWidth, labelHeight, TRUE);
+    y += 24;
+    x = innerX;
+    MoveWindow(targetStatic_, x, y + 6, 38, labelHeight, TRUE);
+    x += 38;
+    MoveWindow(targetLabelEdit_, x, y, 126, row, TRUE);
+    x += 126 + gap;
+    MoveWindow(targetValueStatic_, x, y + 6, 58, labelHeight, TRUE);
+    x += 58;
+    MoveWindow(targetValueEdit_, x, y, innerX + innerWidth - x, row, TRUE);
+
+    y += 36;
+    x = innerX;
+    MoveWindow(targetUnitStatic_, x, y + 6, 38, labelHeight, TRUE);
+    x += 38;
+    MoveWindow(targetUnitEdit_, x, y, 126, row, TRUE);
+    x += 126 + gap;
+    MoveWindow(toleranceStatic_, x, y + 6, 42, labelHeight, TRUE);
+    x += 42;
+    MoveWindow(toleranceEdit_, x, y, innerX + innerWidth - x, row, TRUE);
+
+    y += 36;
+    x = innerX;
+    MoveWindow(candidateStatic_, x, y + 6, 42, labelHeight, TRUE);
+    x += 42;
+    MoveWindow(candidateCombo_, x, y, innerX + innerWidth - x, 220, TRUE);
+
+    y += 40;
+    x = innerX;
+    MoveWindow(analysisButton_, x, y, 112, row, TRUE);
+    x += 112 + gap;
+    MoveWindow(ruleVerifyButton_, x, y, 100, row, TRUE);
+    x += 100 + gap;
+    MoveWindow(exportReportButton_, x, y, 100, row, TRUE);
+
+    MoveWindow(logGroup_, rightX, contentY, rightWidth, contentHeight, TRUE);
+    MoveWindow(receiveLog_, rightX + groupPad, contentY + 26, rightWidth - groupPad * 2, contentHeight - 40, TRUE);
+    MoveWindow(statusText_, margin, statusY, width - margin * 2, statusHeight, TRUE);
 }
 
 void NativeMainWindow::setDefaultFonts() {

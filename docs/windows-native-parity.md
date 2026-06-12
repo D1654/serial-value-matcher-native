@@ -36,17 +36,17 @@
 | raw I/O 持久化 | SQLite/Qt SQL | native length-prefixed file store | 必须 | native 达标 |
 | 串口配置 Profile UI | 是 | 是，保存/恢复默认 Profile | 主发布前必须 | Change #5 补齐 |
 | 自动重连 | 是 | 是，基础端口恢复重连 | 主发布前必须 | Change #5 补齐，需真机补验 |
-| Modbus RTU 扫描 UI | 是 | 是，基础 FC03/FC04 扫描入口 | 主发布前必须 | Change #5 初步接入，需真机补验和交互深化 |
-| 候选分析 UI | 是 | Qt-free core 有，native UI 未接入 | 主发布前必须 | native 缺口 |
-| 稳定性分析/规则验证 UI | 是 | core/storage 部分有，native 有显式入口和缺口说明 | 主发布前必须 | native 深度缺口 |
-| 报告导出 UI | 是 | Qt-free renderer 有，native 有显式入口和缺口说明 | 主发布前必须 | native 深度缺口 |
+| Modbus RTU 扫描 UI | 是 | 是，基础 FC03/FC04 扫描入口 | 主发布前必须 | Change #5 初步接入，Change #7 调整为工作流分区，需真机补验 |
+| 候选分析 UI | 是 | 是，基于最近扫描生成候选并持久化 | 主发布前必须 | Change #6 轻量接入，Change #7 改善入口组织 |
+| 稳定性分析/规则验证 UI | 是 | 规则验证已轻量接入；稳定性分析和规则编辑表格仍不完整 | 主发布前必须 | native 仍有深度交互缺口 |
+| 报告导出 UI | 是 | 是，导出规则验证 Markdown 报告 | 主发布前必须 | Change #6 轻量接入 |
 | Windows 串口真机验收 | 部分通过既有使用 | 清单已建立，未记录真实硬件结果 | 主发布前必须 | native 待补证据 |
 
 ## 发布决策
 
 - **当前主 Windows 发布包**：继续使用 Qt baseline `SerialValueMatcherNative-win-x64`。
-- **当前 native 包状态**：`SerialValueMatcherNative-win32-native-x64` 是 size-gated preview，可用于验证极小体积、启动、自测、中文 UI 修复、基础串口终端和基础 Modbus 扫描工作流。
-- **不执行主发布切换的原因**：native shell 的候选分析、稳定性分析、规则验证和报告导出仍未达到 Qt baseline 的完整交互深度，且需要真实 Windows 串口设备复测中文显示和串口长期运行。
+- **当前 native 包状态**：`SerialValueMatcherNative-win32-native-x64` 是 size-gated preview，可用于验证极小体积、启动、自测、中文 UI、基础串口终端、基础 Modbus 扫描、轻量候选生成、规则验证和报告导出工作流。
+- **不执行主发布切换的原因**：native shell 的稳定性分析、规则编辑表格和证据浏览仍未达到 Qt baseline 的完整交互深度，且需要真实 Windows 串口设备复测中文显示和串口长期运行。
 - **后续切换条件**：native 包必须补齐上表所有“主发布前必须”能力，并完成真实 Windows 串口设备验收后，才能替代 Qt baseline。
 
 这意味着架构级瘦身已经拿到了可运行的小包证据，但完整产品发布仍采用双轨策略，避免用小包体积换取静默功能回退。
