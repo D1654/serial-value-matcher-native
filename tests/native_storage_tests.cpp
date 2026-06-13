@@ -100,6 +100,44 @@ void sendHistoryAndProfilesKeepLatestRecords() {
     std::filesystem::remove_all(path);
 }
 
+void uiPreferencesRoundTrip() {
+    const auto path = temporaryStorePath();
+    auto store = openStore(path);
+
+    svm::native_storage::UiPreferences preferences;
+    preferences.name = "default";
+    preferences.logThemeIndex = 2;
+    preferences.logFormat = 4;
+    preferences.logEncodingCodePage = 936;
+    preferences.showLogTimestamps = false;
+    preferences.sendPayloadMode = 1;
+    preferences.sendTextEncodingCodePage = 936;
+    preferences.sendLineEnding = 3;
+    preferences.windowLeft = 20;
+    preferences.windowTop = 30;
+    preferences.windowWidth = 1280;
+    preferences.windowHeight = 820;
+    preferences.updatedAtUtc = "2026-06-13T00:00:00Z";
+    assert(store.saveUiPreferences(preferences));
+
+    auto reopened = openStore(path);
+    const auto loaded = reopened.latestUiPreferences();
+    assert(loaded.has_value());
+    assert(loaded->logThemeIndex == 2);
+    assert(loaded->logFormat == 4);
+    assert(loaded->logEncodingCodePage == 936);
+    assert(!loaded->showLogTimestamps);
+    assert(loaded->sendPayloadMode == 1);
+    assert(loaded->sendTextEncodingCodePage == 936);
+    assert(loaded->sendLineEnding == 3);
+    assert(loaded->windowLeft == 20);
+    assert(loaded->windowTop == 30);
+    assert(loaded->windowWidth == 1280);
+    assert(loaded->windowHeight == 820);
+
+    std::filesystem::remove_all(path);
+}
+
 void scanAndMatchRecordsRoundTrip() {
     const auto path = temporaryStorePath();
     auto store = openStore(path);
@@ -265,6 +303,7 @@ void protocolRulesAndVerificationRoundTrip() {
 int main() {
     rawEventsAreBatchedAndReopened();
     sendHistoryAndProfilesKeepLatestRecords();
+    uiPreferencesRoundTrip();
     scanAndMatchRecordsRoundTrip();
     protocolRulesAndVerificationRoundTrip();
 

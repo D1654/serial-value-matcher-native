@@ -43,6 +43,23 @@ struct SerialProfile {
     std::string updatedAtUtc;
 };
 
+struct UiPreferences {
+    std::int64_t id = 0;
+    std::string name = "default";
+    int logThemeIndex = 0;
+    int logFormat = 0;
+    int logEncodingCodePage = 65001;
+    bool showLogTimestamps = true;
+    int sendPayloadMode = 0;
+    int sendTextEncodingCodePage = 65001;
+    int sendLineEnding = 0;
+    int windowLeft = -1;
+    int windowTop = -1;
+    int windowWidth = 1220;
+    int windowHeight = 780;
+    std::string updatedAtUtc;
+};
+
 struct ScanSessionRecord {
     std::string sessionId;
     int slaveId = 0;
@@ -214,6 +231,9 @@ public:
 
     bool saveSerialProfile(SerialProfile profile);
     std::optional<SerialProfile> latestSerialProfile() const;
+
+    bool saveUiPreferences(UiPreferences preferences);
+    std::optional<UiPreferences> latestUiPreferences() const;
 
     bool saveScanExecution(const ScanExecutionRecord& execution);
     std::vector<ScanSessionRecord> recentScanSessions(int limit = 50) const;

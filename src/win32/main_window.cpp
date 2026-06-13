@@ -19,6 +19,7 @@
 #include <richedit.h>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <cwctype>
 #include <fstream>
@@ -36,7 +37,9 @@ namespace modbus_core = ::svm::core::modbus;
 namespace report_core = ::svm::core::report;
 
 constexpr wchar_t kWindowClassName[] = L"SvmNativeMainWindow";
-constexpr std::size_t kMaxLogChars = 200000;
+constexpr std::size_t kMaxLogEntries = 2000;
+constexpr std::size_t kMaxVisibleLogChars = 350000;
+constexpr std::size_t kMaxRenderedLogLineChars = 4096;
 constexpr UINT kCodePageGbk = 936;
 constexpr UINT kCodePageAscii = 20127;
 
@@ -383,6 +386,35 @@ std::wstring sanitizeLogText(std::wstring_view text) {
         }
     }
     return sanitized;
+}
+
+std::wstring lowerCopy(std::wstring_view text) {
+    std::wstring lowered;
+    lowered.reserve(text.size());
+    for (wchar_t ch : text) {
+        lowered.push_back(static_cast<wchar_t>(std::towlower(ch)));
+    }
+    return lowered;
+}
+
+bool containsCaseInsensitive(std::wstring_view haystack, std::wstring_view needle) {
+    if (needle.empty()) {
+        return true;
+    }
+    return lowerCopy(haystack).find(lowerCopy(needle)) != std::wstring::npos;
+}
+
+std::wstring clipRenderedLogLine(std::wstring text) {
+    if (text.size() <= kMaxRenderedLogLineChars) {
+        return text;
+    }
+    const std::wstring suffix = tx(T::LogEntryClippedSuffix);
+    const std::size_t keep = kMaxRenderedLogLineChars > suffix.size()
+        ? kMaxRenderedLogLineChars - suffix.size()
+        : kMaxRenderedLogLineChars;
+    text.resize(keep);
+    text += suffix;
+    return text;
 }
 
 std::wstring localClockText() {
@@ -780,12 +812,21 @@ bool NativeMainWindow::runSelfTest() {
     history.textEncodingCodePage = CP_UTF8;
     history.sentAtUtc = timestampText();
 
+    native_storage::UiPreferences preferences;
+    preferences.logThemeIndex = 1;
+    preferences.logFormat = 4;
+    preferences.logEncodingCodePage = CP_UTF8;
+    preferences.showLogTimestamps = false;
+    preferences.updatedAtUtc = timestampText();
+
     const bool ok = store.appendRawEvent(event)
         && store.rawEventCount() == 1
         && store.saveSerialProfile(profile)
         && store.latestSerialProfile().has_value()
         && store.saveSendHistory(history)
-        && !store.recentSendHistory(1).empty();
+        && !store.recentSendHistory(1).empty()
+        && store.saveUiPreferences(preferences)
+        && store.latestUiPreferences().has_value();
     std::filesystem::remove_all(storePath);
     return ok;
 }
@@ -818,6 +859,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         if (!store_.open(defaultStoreDirectory())) {
             setStatus(utf8ToWide(store_.lastErrorText()));
         }
+        applyUiPreferences();
         refreshPorts();
         applyLatestSerialProfile();
         refreshSendHistory();
@@ -859,6 +901,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         case IDC_FLOW_CONTROL_COMBO:
             if (HIWORD(wParam) == CBN_SELCHANGE) {
                 updateRtsControlState();
+                saveUiPreferences();
                 if ((!serialPort_.isOpen()
                         && selectedComboData(flowControlCombo_, static_cast<LPARAM>(SerialFlowControl::None))
                             == static_cast<LPARAM>(SerialFlowControl::HardwareRtsCts))
@@ -869,18 +912,49 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             return 0;
         case IDC_LOG_FORMAT_COMBO:
             if (HIWORD(wParam) == CBN_SELCHANGE) {
+                rebuildLogView();
+                saveUiPreferences();
                 setStatus(tx(T::LogFormatChanged));
             }
             return 0;
         case IDC_LOG_ENCODING_COMBO:
             if (HIWORD(wParam) == CBN_SELCHANGE) {
+                rebuildLogView();
+                saveUiPreferences();
                 setStatus(tx(T::LogEncodingChanged));
             }
             return 0;
         case IDC_SEND_MODE_COMBO:
             if (HIWORD(wParam) == CBN_SELCHANGE) {
+                saveUiPreferences();
                 setSendModeStatus();
             }
+            return 0;
+        case IDC_TEXT_ENCODING_COMBO:
+        case IDC_LINE_ENDING_COMBO:
+            if (HIWORD(wParam) == CBN_SELCHANGE) {
+                saveUiPreferences();
+            }
+            return 0;
+        case IDC_LOG_FILTER_EDIT:
+            if (HIWORD(wParam) == EN_CHANGE) {
+                updateLogFilter();
+            }
+            return 0;
+        case IDC_LOG_SEARCH_EDIT:
+            if (HIWORD(wParam) == EN_CHANGE) {
+                lastLogSearchText_.clear();
+                lastLogSearchOffset_ = 0;
+            }
+            return 0;
+        case IDC_LOG_FIND_BUTTON:
+            findNextLogMatch();
+            return 0;
+        case IDC_COPY_LOG_BUTTON:
+            copyVisibleLogToClipboard();
+            return 0;
+        case IDC_EXPORT_LOG_BUTTON:
+            exportVisibleLog();
             return 0;
         case IDC_SAVE_PROFILE_BUTTON:
             saveCurrentSerialProfile();
@@ -888,6 +962,10 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         case IDC_PAUSE_SCROLL_BUTTON:
             scrollPaused_ = !scrollPaused_;
             SetWindowTextW(pauseScrollButton_, scrollPaused_ ? tx(T::ResumeScrollButton) : tx(T::PauseScrollButton));
+            if (!scrollPaused_) {
+                rebuildLogView();
+                hiddenLogLineCount_ = 0;
+            }
             setStatus(scrollPaused_ ? tx(T::PauseScrollStatus) : tx(T::ResumeScrollStatus));
             return 0;
         case IDC_HISTORY_COMBO:
@@ -936,10 +1014,23 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         case IDM_TOOLS_PAUSE_SCROLL:
             scrollPaused_ = !scrollPaused_;
             SetWindowTextW(pauseScrollButton_, scrollPaused_ ? tx(T::ResumeScrollButton) : tx(T::PauseScrollButton));
+            if (!scrollPaused_) {
+                rebuildLogView();
+                hiddenLogLineCount_ = 0;
+            }
             setStatus(scrollPaused_ ? tx(T::PauseScrollStatus) : tx(T::ResumeScrollStatus));
             return 0;
         case IDM_TOOLS_CLEAR_LOG:
             clearLog();
+            return 0;
+        case IDM_TOOLS_COPY_LOG:
+            copyVisibleLogToClipboard();
+            return 0;
+        case IDM_TOOLS_EXPORT_LOG:
+            exportVisibleLog();
+            return 0;
+        case IDM_TOOLS_FIND_LOG:
+            findNextLogMatch();
             return 0;
         case IDM_ANALYSIS_MODBUS_SCAN:
             runModbusScan();
@@ -955,19 +1046,27 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             return 0;
         case IDM_VIEW_THEME_DEFAULT:
             applyLogTheme(0);
+            rebuildLogView();
+            saveUiPreferences();
             setStatus(tx(T::ThemeDefaultStatus));
             return 0;
         case IDM_VIEW_THEME_SOFT:
             applyLogTheme(1);
+            rebuildLogView();
+            saveUiPreferences();
             setStatus(tx(T::ThemeSoftStatus));
             return 0;
         case IDM_VIEW_THEME_HIGH_CONTRAST:
             applyLogTheme(2);
+            rebuildLogView();
+            saveUiPreferences();
             setStatus(tx(T::ThemeHighContrastStatus));
             return 0;
         case IDM_VIEW_SHOW_TIMESTAMPS:
             showLogTimestamps_ = !showLogTimestamps_;
             updateLogTimestampMenu();
+            rebuildLogView();
+            saveUiPreferences();
             setStatus(showLogTimestamps_ ? tx(T::LogTimestampsEnabledStatus) : tx(T::LogTimestampsDisabledStatus));
             return 0;
         case IDM_HELP_ABOUT:
@@ -988,9 +1087,11 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         }
         break;
     case WM_CLOSE:
+        saveUiPreferences();
         DestroyWindow(window_);
         return 0;
     case WM_DESTROY:
+        saveUiPreferences();
         KillTimer(window_, IDT_SERIAL_POLL);
         KillTimer(window_, IDT_RECONNECT);
         disconnectSerial();
@@ -1032,6 +1133,10 @@ void NativeMainWindow::createMenus() {
     AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_SEND, tx(T::ToolsSendMenu));
     AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_PAUSE_SCROLL, tx(T::ToolsPauseScrollMenu));
     AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_CLEAR_LOG, tx(T::ToolsClearLogMenu));
+    AppendMenuW(toolsMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_FIND_LOG, tx(T::ToolsFindLogMenu));
+    AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_COPY_LOG, tx(T::ToolsCopyLogMenu));
+    AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_EXPORT_LOG, tx(T::ToolsExportLogMenu));
 
     AppendMenuW(analysisMenu, MF_STRING, IDM_ANALYSIS_MODBUS_SCAN, tx(T::AnalysisModbusScanMenu));
     AppendMenuW(analysisMenu, MF_STRING, IDM_ANALYSIS_WORKSPACE, tx(T::AnalysisWorkspaceMenu));
@@ -1109,6 +1214,11 @@ void NativeMainWindow::createControls() {
     lineEndingCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LINE_ENDING_COMBO), instance_, nullptr);
     logFormatCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_FORMAT_COMBO), instance_, nullptr);
     logEncodingCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_ENCODING_COMBO), instance_, nullptr);
+    logFilterEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_FILTER_EDIT), instance_, nullptr);
+    logSearchEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_SEARCH_EDIT), instance_, nullptr);
+    findLogButton_ = CreateWindowExW(0, L"BUTTON", tx(T::FindButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_FIND_BUTTON), instance_, nullptr);
+    copyLogButton_ = CreateWindowExW(0, L"BUTTON", tx(T::CopyLogButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_COPY_LOG_BUTTON), instance_, nullptr);
+    exportLogButton_ = CreateWindowExW(0, L"BUTTON", tx(T::ExportLogButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_EXPORT_LOG_BUTTON), instance_, nullptr);
     historyCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_HISTORY_COMBO), instance_, nullptr);
     sendEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SEND_EDIT), instance_, nullptr);
     sendButton_ = CreateWindowExW(0, L"BUTTON", tx(T::SendButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SEND_BUTTON), instance_, nullptr);
@@ -1170,6 +1280,9 @@ void NativeMainWindow::createControls() {
             nullptr);
     }
     statusText_ = CreateWindowExW(0, L"STATIC", tx(T::InitialStatus), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_STATUS_TEXT), instance_, nullptr);
+    SendMessageW(logFilterEdit_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(tx(T::LogFilterCue)));
+    SendMessageW(logSearchEdit_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(tx(T::LogSearchCue)));
+    SendMessageW(receiveLog_, EM_EXLIMITTEXT, 0, static_cast<LPARAM>(kMaxVisibleLogChars + kMaxRenderedLogLineChars));
 
     populateSerialOptionControls();
     setDefaultFonts();
@@ -1414,9 +1527,28 @@ void NativeMainWindow::layoutControls(int width, int height) {
     MoveWindow(exportReportButton_, x, y, 100, row, TRUE);
 
     MoveWindow(logGroup_, rightX, contentY, rightWidth, contentHeight, TRUE);
-    MoveWindow(logFormatCombo_, rightX + groupPad, contentY + 24, 164, 180, TRUE);
-    MoveWindow(logEncodingCombo_, rightX + groupPad + 164 + gap, contentY + 24, 82, 160, TRUE);
-    MoveWindow(receiveLog_, rightX + groupPad, contentY + 58, rightWidth - groupPad * 2, contentHeight - 72, TRUE);
+    const int logInnerX = rightX + groupPad;
+    const int logInnerWidth = rightWidth - groupPad * 2;
+    const int logActionWidth = 58;
+    const int logFormatWidth = 148;
+    const int logEncodingWidth = 76;
+    x = logInnerX;
+    y = contentY + 24;
+    MoveWindow(logFormatCombo_, x, y, logFormatWidth, 180, TRUE);
+    x += logFormatWidth + gap;
+    MoveWindow(logEncodingCombo_, x, y, logEncodingWidth, 160, TRUE);
+    x += logEncodingWidth + gap;
+    MoveWindow(findLogButton_, x, y, logActionWidth, row, TRUE);
+    x += logActionWidth + gap;
+    MoveWindow(copyLogButton_, x, y, logActionWidth, row, TRUE);
+    x += logActionWidth + gap;
+    MoveWindow(exportLogButton_, x, y, logActionWidth, row, TRUE);
+    y += 34;
+    const int logSearchWidth = std::max(120, (logInnerWidth - gap) / 2);
+    const int logFilterWidth = std::max(120, logInnerWidth - logSearchWidth - gap);
+    MoveWindow(logFilterEdit_, logInnerX, y, logFilterWidth, row, TRUE);
+    MoveWindow(logSearchEdit_, logInnerX + logFilterWidth + gap, y, logSearchWidth, row, TRUE);
+    MoveWindow(receiveLog_, logInnerX, contentY + 96, logInnerWidth, contentHeight - 110, TRUE);
     MoveWindow(statusText_, margin, statusY, width - margin * 2, statusHeight, TRUE);
 }
 
@@ -1553,6 +1685,62 @@ void NativeMainWindow::saveCurrentSerialProfile() {
         return;
     }
     setStatus(uiString(T::SavedProfilePrefix) + utf8ToWide(options.portName) + L"\uFF0C" + std::to_wstring(options.baudRate) + uiString(T::ChinesePeriod));
+}
+
+void NativeMainWindow::applyUiPreferences() {
+    if (!store_.isOpen()) {
+        return;
+    }
+    const auto preferences = store_.latestUiPreferences();
+    if (!preferences.has_value()) {
+        return;
+    }
+
+    selectComboData(logFormatCombo_, preferences->logFormat);
+    selectComboData(logEncodingCombo_, preferences->logEncodingCodePage);
+    selectComboData(sendModeCombo_, preferences->sendPayloadMode);
+    selectComboData(textEncodingCombo_, preferences->sendTextEncodingCodePage);
+    selectComboData(lineEndingCombo_, preferences->sendLineEnding);
+    showLogTimestamps_ = preferences->showLogTimestamps;
+    applyLogTheme(preferences->logThemeIndex);
+    updateLogTimestampMenu();
+
+    if (preferences->windowWidth >= 1080 && preferences->windowHeight >= 760) {
+        RECT currentRect = {};
+        GetWindowRect(window_, &currentRect);
+        MoveWindow(
+            window_,
+            preferences->windowLeft >= 0 ? preferences->windowLeft : currentRect.left,
+            preferences->windowTop >= 0 ? preferences->windowTop : currentRect.top,
+            preferences->windowWidth,
+            preferences->windowHeight,
+            TRUE);
+    }
+    setStatus(tx(T::UiPreferencesRestoredStatus));
+}
+
+void NativeMainWindow::saveUiPreferences() {
+    if (!store_.isOpen() || window_ == nullptr) {
+        return;
+    }
+
+    RECT windowRect = {};
+    GetWindowRect(window_, &windowRect);
+    native_storage::UiPreferences preferences;
+    preferences.name = "default";
+    preferences.logThemeIndex = logThemeIndex_;
+    preferences.logFormat = static_cast<int>(selectedComboData(logFormatCombo_, 0));
+    preferences.logEncodingCodePage = static_cast<int>(selectedLogCodePage());
+    preferences.showLogTimestamps = showLogTimestamps_;
+    preferences.sendPayloadMode = static_cast<int>(selectedComboData(sendModeCombo_, 0));
+    preferences.sendTextEncodingCodePage = static_cast<int>(selectedTextCodePage());
+    preferences.sendLineEnding = static_cast<int>(selectedComboData(lineEndingCombo_, 0));
+    preferences.windowLeft = windowRect.left;
+    preferences.windowTop = windowRect.top;
+    preferences.windowWidth = windowRect.right - windowRect.left;
+    preferences.windowHeight = windowRect.bottom - windowRect.top;
+    preferences.updatedAtUtc = timestampText();
+    store_.saveUiPreferences(preferences);
 }
 
 void NativeMainWindow::toggleConnection() {
@@ -1723,26 +1911,11 @@ void NativeMainWindow::appendLog(const std::wstring& line) {
 }
 
 void NativeMainWindow::appendLog(NativeLogKind kind, const std::wstring& line) {
-    if (scrollPaused_) {
-        ++hiddenLogLineCount_;
-        setStatus(uiString(T::ScrollPausedPrefix) + std::to_wstring(hiddenLogLineCount_) + uiString(T::HiddenLinesSuffix));
-        return;
-    }
-    if (GetWindowTextLengthW(receiveLog_) > static_cast<int>(kMaxLogChars)) {
-        SetWindowTextW(receiveLog_, tx(T::LogLimitReset));
-    }
-    const std::wstring text = (showLogTimestamps_ ? (L"[" + localClockText() + L"] ") : std::wstring())
-        + sanitizeLogText(line)
-        + L"\r\n";
-    SendMessageW(receiveLog_, EM_SETSEL, static_cast<WPARAM>(-1), static_cast<LPARAM>(-1));
-    if (receiveLogUsesRichEdit_) {
-        CHARFORMAT2W format = {};
-        format.cbSize = sizeof(format);
-        format.dwMask = CFM_COLOR;
-        format.crTextColor = logColorForKind(kind, logThemeIndex_);
-        SendMessageW(receiveLog_, EM_SETCHARFORMAT, SCF_SELECTION, reinterpret_cast<LPARAM>(&format));
-    }
-    SendMessageW(receiveLog_, EM_REPLACESEL, FALSE, reinterpret_cast<LPARAM>(text.c_str()));
+    NativeLogEntry entry;
+    entry.kind = kind;
+    entry.timestamp = localClockText();
+    entry.text = line;
+    addLogEntry(std::move(entry));
 }
 
 void NativeMainWindow::appendPayloadLog(NativeLogKind kind, const std::vector<std::uint8_t>& payload) {
@@ -1767,13 +1940,253 @@ void NativeMainWindow::appendPayloadLog(NativeLogKind kind, const std::vector<st
         prefix = L"[\u9519\u8BEF]";
         break;
     }
-    appendLog(kind, std::wstring(prefix) + L" " + formatPayloadForLog(payload));
+    NativeLogEntry entry;
+    entry.kind = kind;
+    entry.timestamp = localClockText();
+    entry.payloadPrefix = prefix;
+    entry.payload = payload;
+    entry.hasPayload = true;
+    addLogEntry(std::move(entry));
 }
 
 void NativeMainWindow::clearLog() {
+    logEntries_.clear();
+    visibleLogChars_ = 0;
     SetWindowTextW(receiveLog_, L"");
     hiddenLogLineCount_ = 0;
+    lastLogSearchOffset_ = 0;
+    lastLogSearchText_.clear();
     setStatus(tx(T::ClearLogStatus));
+}
+
+void NativeMainWindow::rebuildLogView() {
+    if (receiveLog_ == nullptr) {
+        return;
+    }
+
+    std::vector<std::pair<NativeLogKind, std::wstring>> visibleLines;
+    std::size_t visibleChars = 0;
+    for (const NativeLogEntry& entry : logEntries_) {
+        if (!logEntryMatchesFilter(entry)) {
+            continue;
+        }
+        std::wstring rendered = renderLogEntry(entry);
+        const std::size_t renderedSize = rendered.size();
+        while (!visibleLines.empty() && visibleChars + renderedSize > kMaxVisibleLogChars) {
+            visibleChars -= visibleLines.front().second.size();
+            visibleLines.erase(visibleLines.begin());
+        }
+        if (renderedSize <= kMaxVisibleLogChars) {
+            visibleChars += renderedSize;
+            visibleLines.emplace_back(entry.kind, std::move(rendered));
+        }
+    }
+
+    SendMessageW(receiveLog_, WM_SETREDRAW, FALSE, 0);
+    SetWindowTextW(receiveLog_, L"");
+    visibleLogChars_ = 0;
+    for (const auto& line : visibleLines) {
+        appendVisibleLogText(line.first, line.second);
+    }
+    SendMessageW(receiveLog_, WM_SETREDRAW, TRUE, 0);
+    InvalidateRect(receiveLog_, nullptr, TRUE);
+    lastLogSearchOffset_ = 0;
+}
+
+void NativeMainWindow::appendVisibleLogEntry(const NativeLogEntry& entry) {
+    appendVisibleLogText(entry.kind, renderLogEntry(entry));
+}
+
+void NativeMainWindow::appendVisibleLogText(NativeLogKind kind, const std::wstring& text) {
+    if (receiveLog_ == nullptr) {
+        return;
+    }
+    SendMessageW(receiveLog_, EM_SETSEL, static_cast<WPARAM>(-1), static_cast<LPARAM>(-1));
+    if (receiveLogUsesRichEdit_) {
+        CHARFORMAT2W format = {};
+        format.cbSize = sizeof(format);
+        format.dwMask = CFM_COLOR;
+        format.crTextColor = logColorForKind(kind, logThemeIndex_);
+        SendMessageW(receiveLog_, EM_SETCHARFORMAT, SCF_SELECTION, reinterpret_cast<LPARAM>(&format));
+    }
+    SendMessageW(receiveLog_, EM_REPLACESEL, FALSE, reinterpret_cast<LPARAM>(text.c_str()));
+    visibleLogChars_ += text.size();
+}
+
+void NativeMainWindow::addLogEntry(NativeLogEntry entry) {
+    entry.text = sanitizeLogText(entry.text);
+    bool trimmed = false;
+    logEntries_.push_back(std::move(entry));
+    while (logEntries_.size() > kMaxLogEntries) {
+        logEntries_.pop_front();
+        trimmed = true;
+    }
+
+    if (scrollPaused_) {
+        ++hiddenLogLineCount_;
+        setStatus(uiString(T::ScrollPausedPrefix) + std::to_wstring(hiddenLogLineCount_) + uiString(T::HiddenLinesSuffix));
+        return;
+    }
+
+    if (trimmed) {
+        rebuildLogView();
+        return;
+    }
+
+    const NativeLogEntry& latest = logEntries_.back();
+    if (logEntryMatchesFilter(latest)) {
+        appendVisibleLogEntry(latest);
+        if (visibleLogChars_ > kMaxVisibleLogChars) {
+            rebuildLogView();
+        }
+    }
+}
+
+std::wstring NativeMainWindow::renderLogEntry(const NativeLogEntry& entry) const {
+    std::wstring line;
+    if (showLogTimestamps_) {
+        line += L"[";
+        line += entry.timestamp;
+        line += L"] ";
+    }
+    if (entry.hasPayload) {
+        line += entry.payloadPrefix;
+        line += L" ";
+        line += formatPayloadForLog(entry.payload);
+    } else {
+        line += entry.text;
+    }
+    line = clipRenderedLogLine(sanitizeLogText(line));
+    line += L"\r\n";
+    return line;
+}
+
+bool NativeMainWindow::logEntryMatchesFilter(const NativeLogEntry& entry) const {
+    if (logFilterText_.empty()) {
+        return true;
+    }
+    return containsCaseInsensitive(renderLogEntry(entry), logFilterText_);
+}
+
+std::wstring NativeMainWindow::visibleLogText() const {
+    return controlText(receiveLog_);
+}
+
+void NativeMainWindow::updateLogFilter() {
+    logFilterText_ = controlText(logFilterEdit_);
+    rebuildLogView();
+    std::size_t visibleCount = 0;
+    for (const NativeLogEntry& entry : logEntries_) {
+        if (logEntryMatchesFilter(entry)) {
+            ++visibleCount;
+        }
+    }
+    setStatus(uiString(T::LogFilterChangedPrefix) + std::to_wstring(visibleCount) + uiString(T::ChinesePeriod));
+}
+
+void NativeMainWindow::findNextLogMatch() {
+    const std::wstring needle = controlText(logSearchEdit_);
+    if (needle.empty()) {
+        setStatus(tx(T::LogFindEmptyStatus));
+        return;
+    }
+
+    const std::wstring visibleText = visibleLogText();
+    const std::wstring loweredText = lowerCopy(visibleText);
+    const std::wstring loweredNeedle = lowerCopy(needle);
+    if (needle != lastLogSearchText_) {
+        lastLogSearchText_ = needle;
+        lastLogSearchOffset_ = 0;
+    }
+
+    std::size_t position = loweredText.find(loweredNeedle, lastLogSearchOffset_);
+    if (position == std::wstring::npos && lastLogSearchOffset_ > 0) {
+        position = loweredText.find(loweredNeedle);
+    }
+    if (position == std::wstring::npos) {
+        setStatus(uiString(T::LogFindNotFoundPrefix) + needle + uiString(T::ChinesePeriod));
+        return;
+    }
+
+    SendMessageW(receiveLog_, EM_SETSEL, static_cast<WPARAM>(position), static_cast<LPARAM>(position + needle.size()));
+    SendMessageW(receiveLog_, EM_SCROLLCARET, 0, 0);
+    lastLogSearchOffset_ = position + needle.size();
+    setStatus(uiString(T::LogFindMatchedPrefix) + needle + uiString(T::ChinesePeriod));
+}
+
+void NativeMainWindow::copyVisibleLogToClipboard() {
+    const std::wstring text = visibleLogText();
+    if (!OpenClipboard(window_)) {
+        setStatus(tx(T::LogCopyFailedStatus));
+        return;
+    }
+    EmptyClipboard();
+    const SIZE_T bytes = (text.size() + 1) * sizeof(wchar_t);
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (memory == nullptr) {
+        CloseClipboard();
+        setStatus(tx(T::LogCopyFailedStatus));
+        return;
+    }
+    void* locked = GlobalLock(memory);
+    if (locked == nullptr) {
+        GlobalFree(memory);
+        CloseClipboard();
+        setStatus(tx(T::LogCopyFailedStatus));
+        return;
+    }
+    std::memcpy(locked, text.c_str(), bytes);
+    GlobalUnlock(memory);
+    if (SetClipboardData(CF_UNICODETEXT, memory) == nullptr) {
+        GlobalFree(memory);
+        CloseClipboard();
+        setStatus(tx(T::LogCopyFailedStatus));
+        return;
+    }
+    CloseClipboard();
+    setStatus(tx(T::LogCopiedStatus));
+}
+
+void NativeMainWindow::exportVisibleLog() {
+    const std::wstring text = visibleLogText();
+    if (text.empty()) {
+        setStatus(tx(T::LogExportEmptyStatus));
+        return;
+    }
+
+    wchar_t fileName[MAX_PATH] = {};
+    const std::wstring defaultName = uiString(T::LogExportDefaultPrefix)
+        + utf8ToWide(timestampIdText())
+        + L".txt";
+    wcsncpy_s(fileName, defaultName.c_str(), _TRUNCATE);
+
+    OPENFILENAMEW dialog = {};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = window_;
+    dialog.lpstrFilter = tx(T::LogExportFilter);
+    dialog.lpstrFile = fileName;
+    dialog.nMaxFile = MAX_PATH;
+    dialog.lpstrDefExt = L"txt";
+    dialog.lpstrTitle = tx(T::LogExportDialogTitle);
+    dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+    if (!GetSaveFileNameW(&dialog)) {
+        return;
+    }
+
+    const std::string utf8Text = wideToUtf8(text);
+    std::ofstream output(std::filesystem::path(fileName), std::ios::binary | std::ios::trunc);
+    if (!output) {
+        setStatus(uiString(T::LogExportFailedPrefix) + std::wstring(fileName));
+        return;
+    }
+    constexpr unsigned char bom[] = {0xEF, 0xBB, 0xBF};
+    output.write(reinterpret_cast<const char*>(bom), sizeof(bom));
+    output.write(utf8Text.data(), static_cast<std::streamsize>(utf8Text.size()));
+    if (!output) {
+        setStatus(uiString(T::LogExportFailedPrefix) + std::wstring(fileName));
+        return;
+    }
+    setStatus(uiString(T::LogExportOkPrefix) + std::wstring(fileName) + uiString(T::ChinesePeriod));
 }
 
 void NativeMainWindow::setStatus(const std::wstring& text) {

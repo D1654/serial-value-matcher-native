@@ -19,6 +19,9 @@ const wchar_t* uiText(TextId id) {
     case TextId::ToolsSendMenu: return L"\u53D1\u9001(&E)";
     case TextId::ToolsPauseScrollMenu: return L"\u6682\u505C/\u6062\u590D\u6EDA\u52A8(&P)";
     case TextId::ToolsClearLogMenu: return L"\u6E05\u7A7A\u63A5\u6536\u533A(&L)";
+    case TextId::ToolsCopyLogMenu: return L"\u590D\u5236\u53EF\u89C1\u65E5\u5FD7(&C)";
+    case TextId::ToolsExportLogMenu: return L"\u5BFC\u51FA\u53EF\u89C1\u65E5\u5FD7(&G)";
+    case TextId::ToolsFindLogMenu: return L"\u67E5\u627E\u65E5\u5FD7(&F)";
     case TextId::AnalysisModbusScanMenu: return L"Modbus \u626B\u63CF(&M)";
     case TextId::AnalysisWorkspaceMenu: return L"\u5206\u6790\u5DE5\u4F5C\u533A(&W)";
     case TextId::AnalysisRuleVerifyMenu: return L"\u89C4\u5219\u9A8C\u8BC1(&V)";
@@ -34,6 +37,8 @@ const wchar_t* uiText(TextId id) {
     case TextId::SendGroup: return L"\u53D1\u9001\u63A7\u5236";
     case TextId::WorkflowGroup: return L"\u626B\u63CF\u4E0E\u5206\u6790\u5DE5\u4F5C\u6D41";
     case TextId::LogGroup: return L"\u901A\u4FE1\u65E5\u5FD7";
+    case TextId::LogFilterCue: return L"\u8FC7\u6EE4";
+    case TextId::LogSearchCue: return L"\u641C\u7D22";
     case TextId::WorkflowHint: return L"\u6D41\u7A0B\uFF1A\u8FDE\u63A5\u8BBE\u5907 \u2192 \u626B\u63CF\u5BC4\u5B58\u5668 \u2192 \u751F\u6210\u5019\u9009 \u2192 \u9A8C\u8BC1\u89C4\u5219 \u2192 \u5BFC\u51FA\u62A5\u544A";
     case TextId::PortLabel: return L"\u4E32\u53E3";
     case TextId::RefreshButton: return L"\u5237\u65B0";
@@ -50,6 +55,9 @@ const wchar_t* uiText(TextId id) {
     case TextId::PauseScrollButton: return L"\u6682\u505C\u6EDA\u52A8";
     case TextId::ResumeScrollButton: return L"\u6062\u590D\u6EDA\u52A8";
     case TextId::ClearButton: return L"\u6E05\u7A7A";
+    case TextId::FindButton: return L"\u67E5\u627E";
+    case TextId::CopyLogButton: return L"\u590D\u5236";
+    case TextId::ExportLogButton: return L"\u5BFC\u51FA";
     case TextId::ModbusScanButton: return L"Modbus \u626B\u63CF";
     case TextId::AnalysisButton: return L"\u5206\u6790\u751F\u6210";
     case TextId::RuleVerifyButton: return L"\u89C4\u5219\u9A8C\u8BC1";
@@ -100,6 +108,19 @@ const wchar_t* uiText(TextId id) {
     case TextId::ToleranceFieldLabel: return L"\u5BB9\u5DEE";
     case TextId::CandidateLabel: return L"\u5019\u9009";
     case TextId::ClearLogStatus: return L"\u63A5\u6536\u533A\u5DF2\u6E05\u7A7A\uFF0Cnative \u5B58\u50A8\u8BB0\u5F55\u4E0D\u4F1A\u5220\u9664\u3002";
+    case TextId::LogCopiedStatus: return L"\u5DF2\u590D\u5236\u5F53\u524D\u53EF\u89C1\u901A\u4FE1\u65E5\u5FD7\u3002";
+    case TextId::LogCopyFailedStatus: return L"\u590D\u5236\u65E5\u5FD7\u5931\u8D25\uFF1A\u65E0\u6CD5\u6253\u5F00\u526A\u8D34\u677F\u3002";
+    case TextId::LogExportDialogTitle: return L"\u5BFC\u51FA\u901A\u4FE1\u65E5\u5FD7";
+    case TextId::LogExportFilter: return L"\u6587\u672C\u6587\u4EF6 (*.txt)\0*.txt\0\u6240\u6709\u6587\u4EF6 (*.*)\0*.*\0";
+    case TextId::LogExportDefaultPrefix: return L"\u901A\u4FE1\u65E5\u5FD7-";
+    case TextId::LogExportEmptyStatus: return L"\u5F53\u524D\u53EF\u89C1\u901A\u4FE1\u65E5\u5FD7\u4E3A\u7A7A\uFF0C\u65E0\u9700\u5BFC\u51FA\u3002";
+    case TextId::LogExportFailedPrefix: return L"\u5BFC\u51FA\u901A\u4FE1\u65E5\u5FD7\u5931\u8D25\uFF1A";
+    case TextId::LogExportOkPrefix: return L"\u5DF2\u5BFC\u51FA\u901A\u4FE1\u65E5\u5FD7\uFF1A";
+    case TextId::LogFilterChangedPrefix: return L"\u65E5\u5FD7\u8FC7\u6EE4\u5DF2\u66F4\u65B0\uFF0C\u53EF\u89C1\u884C ";
+    case TextId::LogFindEmptyStatus: return L"\u8BF7\u8F93\u5165\u8981\u641C\u7D22\u7684\u65E5\u5FD7\u5173\u952E\u8BCD\u3002";
+    case TextId::LogFindNotFoundPrefix: return L"\u672A\u627E\u5230\u65E5\u5FD7\u5173\u952E\u8BCD\uFF1A";
+    case TextId::LogFindMatchedPrefix: return L"\u5DF2\u5B9A\u4F4D\u65E5\u5FD7\u5173\u952E\u8BCD\uFF1A";
+    case TextId::UiPreferencesRestoredStatus: return L"\u5DF2\u6062\u590D\u754C\u9762\u504F\u597D\u3002";
     case TextId::ThemeDefaultMenu: return L"\u9ED8\u8BA4\u8272\u7CFB(&D)";
     case TextId::ThemeSoftMenu: return L"\u67D4\u548C\u8272\u7CFB(&S)";
     case TextId::ThemeHighContrastMenu: return L"\u9AD8\u5BF9\u6BD4\u8272\u7CFB(&H)";
@@ -152,7 +173,7 @@ const wchar_t* uiText(TextId id) {
     case TextId::AutoReconnectOk: return L"\u81EA\u52A8\u91CD\u8FDE\u6210\u529F\u3002";
     case TextId::ScrollPausedPrefix: return L"\u6EDA\u52A8\u5DF2\u6682\u505C\uFF0C\u5DF2\u9690\u85CF ";
     case TextId::HiddenLinesSuffix: return L" \u6761\u65B0\u65E5\u5FD7\uFF1B\u6570\u636E\u4ECD\u5728\u63A5\u6536\u548C\u4FDD\u5B58\u3002";
-    case TextId::LogLimitReset: return L"[\u7CFB\u7EDF] \u63A5\u6536\u65E5\u5FD7\u5DF2\u8FBE\u5230\u4E0A\u9650\uFF0C\u5DF2\u6E05\u7A7A\u4EE5\u4FDD\u62A4\u957F\u671F\u8FD0\u884C\u5185\u5B58\u3002\r\n";
+    case TextId::LogEntryClippedSuffix: return L" ... [\u5DF2\u622A\u65AD\uFF0C\u5B8C\u6574\u6570\u636E\u5DF2\u5199\u5165 native \u5B58\u50A8]";
     case TextId::ConnectBeforeModbus: return L"\u8BF7\u5148\u8FDE\u63A5\u4E32\u53E3\uFF0C\u518D\u6267\u884C Modbus \u626B\u63CF\u3002";
     case TextId::StorageModbusClosed: return L"native \u5B58\u50A8\u672A\u6253\u5F00\uFF0C\u65E0\u6CD5\u4FDD\u5B58 Modbus \u626B\u63CF\u7ED3\u679C\u3002";
     case TextId::ModbusInvalidTitle: return L"Modbus \u626B\u63CF\u53C2\u6570\u65E0\u6548";

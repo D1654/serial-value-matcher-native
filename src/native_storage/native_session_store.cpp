@@ -16,6 +16,7 @@ constexpr std::string_view kSchemaFile = "schema.txt";
 constexpr std::string_view kRawEventsFile = "raw_io_events.svmr";
 constexpr std::string_view kSendHistoryFile = "send_history.svmr";
 constexpr std::string_view kSerialProfilesFile = "serial_profiles.svmr";
+constexpr std::string_view kUiPreferencesFile = "ui_preferences.svmr";
 constexpr std::string_view kScanSessionsFile = "scan_sessions.svmr";
 constexpr std::string_view kScanAttemptsFile = "scan_attempts.svmr";
 constexpr std::string_view kScanObservationsFile = "scan_observations.svmr";
@@ -30,6 +31,7 @@ const std::vector<std::string_view>& storeFiles() {
         kRawEventsFile,
         kSendHistoryFile,
         kSerialProfilesFile,
+        kUiPreferencesFile,
         kScanSessionsFile,
         kScanAttemptsFile,
         kScanObservationsFile,
@@ -304,6 +306,49 @@ NativeSessionStore::Record recordFromSerialProfile(const SerialProfile& profile)
         toString(profile.dataTerminalReady),
         toString(profile.requestToSend),
         profile.updatedAtUtc,
+    };
+}
+
+UiPreferences uiPreferencesFromRecord(const NativeSessionStore::Record& record) {
+    UiPreferences preferences;
+    if (record.size() < 13) {
+        return preferences;
+    }
+    preferences.id = toInt64(record[0]);
+    preferences.name = record[1];
+    preferences.logThemeIndex = toInt(record[2]);
+    preferences.logFormat = toInt(record[3]);
+    preferences.logEncodingCodePage = toInt(record[4], 65001);
+    preferences.showLogTimestamps = toBool(record[5]);
+    preferences.sendPayloadMode = toInt(record[6]);
+    preferences.sendTextEncodingCodePage = toInt(record[7], 65001);
+    preferences.sendLineEnding = toInt(record[8]);
+    preferences.windowLeft = toInt(record[9], -1);
+    preferences.windowTop = toInt(record[10], -1);
+    preferences.windowWidth = toInt(record[11], 1220);
+    preferences.windowHeight = toInt(record[12], 780);
+    if (record.size() >= 14) {
+        preferences.updatedAtUtc = record[13];
+    }
+    return preferences;
+}
+
+NativeSessionStore::Record recordFromUiPreferences(const UiPreferences& preferences) {
+    return {
+        toString(preferences.id),
+        preferences.name,
+        toString(preferences.logThemeIndex),
+        toString(preferences.logFormat),
+        toString(preferences.logEncodingCodePage),
+        toString(preferences.showLogTimestamps),
+        toString(preferences.sendPayloadMode),
+        toString(preferences.sendTextEncodingCodePage),
+        toString(preferences.sendLineEnding),
+        toString(preferences.windowLeft),
+        toString(preferences.windowTop),
+        toString(preferences.windowWidth),
+        toString(preferences.windowHeight),
+        preferences.updatedAtUtc,
     };
 }
 
@@ -822,6 +867,42 @@ std::optional<SerialProfile> NativeSessionStore::latestSerialProfile() const {
     std::optional<SerialProfile> latest;
     for (const Record& record : loadRecords(kSerialProfilesFile)) {
         latest = serialProfileFromRecord(record);
+    }
+    return latest;
+}
+
+bool NativeSessionStore::saveUiPreferences(UiPreferences preferences) {
+    if (!ensureOpen("保存界面偏好")) {
+        return false;
+    }
+    if (preferences.name.empty()) {
+        preferences.name = "default";
+    }
+    if (preferences.id <= 0) {
+        preferences.id = allocateId(kUiPreferencesFile);
+    }
+
+    std::vector<UiPreferences> allPreferences;
+    for (const Record& record : loadRecords(kUiPreferencesFile)) {
+        UiPreferences existing = uiPreferencesFromRecord(record);
+        if (existing.name != preferences.name) {
+            allPreferences.push_back(std::move(existing));
+        }
+    }
+    allPreferences.push_back(std::move(preferences));
+
+    std::vector<Record> records;
+    records.reserve(allPreferences.size());
+    for (const UiPreferences& item : allPreferences) {
+        records.push_back(recordFromUiPreferences(item));
+    }
+    return rewriteRecords(kUiPreferencesFile, records);
+}
+
+std::optional<UiPreferences> NativeSessionStore::latestUiPreferences() const {
+    std::optional<UiPreferences> latest;
+    for (const Record& record : loadRecords(kUiPreferencesFile)) {
+        latest = uiPreferencesFromRecord(record);
     }
     return latest;
 }

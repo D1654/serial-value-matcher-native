@@ -31,6 +31,15 @@ enum class NativeLogKind {
     Error,
 };
 
+struct NativeLogEntry {
+    NativeLogKind kind = NativeLogKind::System;
+    std::wstring timestamp;
+    std::wstring text;
+    std::wstring payloadPrefix;
+    std::vector<std::uint8_t> payload;
+    bool hasPayload = false;
+};
+
 class NativeMainWindow final {
 public:
     bool create(HINSTANCE instance);
@@ -53,6 +62,8 @@ private:
     void applySelectedHistory();
     void applyLatestSerialProfile();
     void saveCurrentSerialProfile();
+    void applyUiPreferences();
+    void saveUiPreferences();
     void toggleConnection();
     void connectSerial();
     void disconnectSerial();
@@ -74,6 +85,17 @@ private:
     void appendLog(NativeLogKind kind, const std::wstring& line);
     void appendPayloadLog(NativeLogKind kind, const std::vector<std::uint8_t>& payload);
     void clearLog();
+    void rebuildLogView();
+    void appendVisibleLogEntry(const NativeLogEntry& entry);
+    void appendVisibleLogText(NativeLogKind kind, const std::wstring& text);
+    void addLogEntry(NativeLogEntry entry);
+    std::wstring renderLogEntry(const NativeLogEntry& entry) const;
+    bool logEntryMatchesFilter(const NativeLogEntry& entry) const;
+    std::wstring visibleLogText() const;
+    void updateLogFilter();
+    void findNextLogMatch();
+    void copyVisibleLogToClipboard();
+    void exportVisibleLog();
     void setStatus(const std::wstring& text);
     void setSendModeStatus();
     std::wstring controlText(HWND control) const;
@@ -123,6 +145,11 @@ private:
     HWND lineEndingCombo_ = nullptr;
     HWND logFormatCombo_ = nullptr;
     HWND logEncodingCombo_ = nullptr;
+    HWND logFilterEdit_ = nullptr;
+    HWND logSearchEdit_ = nullptr;
+    HWND findLogButton_ = nullptr;
+    HWND copyLogButton_ = nullptr;
+    HWND exportLogButton_ = nullptr;
     HWND historyCombo_ = nullptr;
     HWND sendEdit_ = nullptr;
     HWND sendButton_ = nullptr;
@@ -160,6 +187,11 @@ private:
     bool receiveLogUsesRichEdit_ = false;
     bool showLogTimestamps_ = true;
     int logThemeIndex_ = 0;
+    std::deque<NativeLogEntry> logEntries_;
+    std::wstring logFilterText_;
+    std::wstring lastLogSearchText_;
+    std::size_t lastLogSearchOffset_ = 0;
+    std::size_t visibleLogChars_ = 0;
     Win32SerialPort serialPort_;
     native_storage::NativeSessionStore store_;
     std::vector<SerialPortDescriptor> availablePorts_;
