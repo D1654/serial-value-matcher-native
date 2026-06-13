@@ -106,6 +106,135 @@ COLORREF logColorForKind(NativeLogKind kind, int themeIndex) {
     return palette.normal;
 }
 
+struct NativeRect {
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+
+    int right() const {
+        return x + width;
+    }
+
+    int bottom() const {
+        return y + height;
+    }
+};
+
+struct SendControlLayout {
+    NativeRect modeLabel;
+    NativeRect modeCombo;
+    NativeRect encodingLabel;
+    NativeRect encodingCombo;
+    NativeRect lineEndingLabel;
+    NativeRect lineEndingCombo;
+    NativeRect historyLabel;
+    NativeRect historyCombo;
+};
+
+struct LogToolbarLayout {
+    NativeRect formatLabel;
+    NativeRect formatCombo;
+    NativeRect encodingLabel;
+    NativeRect encodingCombo;
+    NativeRect copyButton;
+    NativeRect exportButton;
+    NativeRect filterLabel;
+    NativeRect filterEdit;
+    NativeRect searchLabel;
+    NativeRect searchEdit;
+    NativeRect findButton;
+};
+
+bool rectIsValid(const NativeRect& rect) {
+    return rect.width > 0 && rect.height > 0;
+}
+
+bool sameRowAndAdjacent(const NativeRect& left, const NativeRect& right, int maxGap) {
+    return left.y == right.y
+        && left.height == right.height
+        && right.x >= left.right()
+        && right.x - left.right() <= maxGap;
+}
+
+SendControlLayout calculateSendControlLayout(int x, int y, int innerWidth, int row, int gap, int labelHeight) {
+    const int sendModeWidth = 116;
+    const int sendEncodingWidth = 82;
+    const int lineEndingWidth = 72;
+    const int historyWidth = std::max(96, innerWidth - sendModeWidth - sendEncodingWidth - lineEndingWidth - gap * 3);
+
+    SendControlLayout layout;
+    int cursor = x;
+    layout.modeLabel = {cursor, y, sendModeWidth, labelHeight};
+    layout.modeCombo = {cursor, y + labelHeight, sendModeWidth, row};
+    cursor += sendModeWidth + gap;
+    layout.encodingLabel = {cursor, y, sendEncodingWidth, labelHeight};
+    layout.encodingCombo = {cursor, y + labelHeight, sendEncodingWidth, row};
+    cursor += sendEncodingWidth + gap;
+    layout.lineEndingLabel = {cursor, y, lineEndingWidth, labelHeight};
+    layout.lineEndingCombo = {cursor, y + labelHeight, lineEndingWidth, row};
+    cursor += lineEndingWidth + gap;
+    layout.historyLabel = {cursor, y, historyWidth, labelHeight};
+    layout.historyCombo = {cursor, y + labelHeight, historyWidth, row};
+    return layout;
+}
+
+LogToolbarLayout calculateLogToolbarLayout(int x, int y, int innerWidth, int row, int gap, int labelWidth) {
+    const int formatWidth = 136;
+    const int encodingWidth = 76;
+    const int actionWidth = 58;
+    const int operationLabelWidth = 40;
+
+    LogToolbarLayout layout;
+    int cursor = x;
+    layout.formatLabel = {cursor, y + 6, labelWidth, 22};
+    cursor += labelWidth;
+    layout.formatCombo = {cursor, y, formatWidth, row};
+    cursor += formatWidth + gap;
+    layout.encodingLabel = {cursor, y + 6, labelWidth, 22};
+    cursor += labelWidth;
+    layout.encodingCombo = {cursor, y, encodingWidth, row};
+    layout.exportButton = {x + innerWidth - actionWidth, y, actionWidth, row};
+    layout.copyButton = {layout.exportButton.x - gap - actionWidth, y, actionWidth, row};
+
+    const int secondY = y + row + 6;
+    const int availableForInputs = innerWidth - operationLabelWidth * 2 - actionWidth - gap * 4;
+    const int filterWidth = std::max(120, availableForInputs / 2);
+    const int searchWidth = std::max(120, availableForInputs - filterWidth);
+    cursor = x;
+    layout.filterLabel = {cursor, secondY + 6, operationLabelWidth, 22};
+    cursor += operationLabelWidth;
+    layout.filterEdit = {cursor, secondY, filterWidth, row};
+    cursor += filterWidth + gap;
+    layout.searchLabel = {cursor, secondY + 6, operationLabelWidth, 22};
+    cursor += operationLabelWidth;
+    layout.searchEdit = {cursor, secondY, searchWidth, row};
+    cursor += searchWidth + gap;
+    layout.findButton = {cursor, secondY, actionWidth, row};
+    return layout;
+}
+
+bool logToolbarLayoutIsSane(int innerWidth) {
+    const LogToolbarLayout layout = calculateLogToolbarLayout(0, 0, innerWidth, 30, 8, 40);
+    return rectIsValid(layout.formatCombo)
+        && rectIsValid(layout.encodingCombo)
+        && rectIsValid(layout.filterEdit)
+        && rectIsValid(layout.searchEdit)
+        && rectIsValid(layout.findButton)
+        && layout.exportButton.right() <= innerWidth
+        && layout.findButton.right() <= innerWidth
+        && sameRowAndAdjacent(layout.searchEdit, layout.findButton, 8);
+}
+
+bool sendControlLayoutIsSane(int innerWidth) {
+    const SendControlLayout layout = calculateSendControlLayout(0, 0, innerWidth, 30, 8, 18);
+    return rectIsValid(layout.modeCombo)
+        && rectIsValid(layout.encodingCombo)
+        && rectIsValid(layout.lineEndingCombo)
+        && rectIsValid(layout.historyCombo)
+        && layout.historyCombo.right() <= innerWidth;
+}
+
 std::wstring bytesToHex(const std::vector<std::uint8_t>& bytes) {
     std::wostringstream output;
     output.setf(std::ios::uppercase);
@@ -776,6 +905,9 @@ bool NativeMainWindow::runSelfTest() {
     if (makeWin32DevicePath("COM10") != R"(\\.\COM10)") {
         return false;
     }
+    if (!logToolbarLayoutIsSane(554) || !sendControlLayoutIsSane(428)) {
+        return false;
+    }
 
     wchar_t tempPathBuffer[MAX_PATH] = {};
     if (GetTempPathW(MAX_PATH, tempPathBuffer) == 0) {
@@ -938,7 +1070,8 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             return 0;
         case IDC_LOG_FILTER_EDIT:
             if (HIWORD(wParam) == EN_CHANGE) {
-                updateLogFilter();
+                KillTimer(window_, IDT_LOG_FILTER);
+                SetTimer(window_, IDT_LOG_FILTER, 180, nullptr);
             }
             return 0;
         case IDC_LOG_SEARCH_EDIT:
@@ -1085,6 +1218,11 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             tryAutoReconnect();
             return 0;
         }
+        if (wParam == IDT_LOG_FILTER) {
+            KillTimer(window_, IDT_LOG_FILTER);
+            updateLogFilter();
+            return 0;
+        }
         break;
     case WM_CLOSE:
         saveUiPreferences();
@@ -1094,6 +1232,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         saveUiPreferences();
         KillTimer(window_, IDT_SERIAL_POLL);
         KillTimer(window_, IDT_RECONNECT);
+        KillTimer(window_, IDT_LOG_FILTER);
         disconnectSerial();
         if (ownsUiFont_ && uiFont_ != nullptr) {
             DeleteObject(uiFont_);
@@ -1209,16 +1348,24 @@ void NativeMainWindow::createControls() {
     autoReconnectCheck_ = CreateWindowExW(0, L"BUTTON", tx(T::AutoReconnectCheck), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_AUTO_RECONNECT_CHECK), instance_, nullptr);
     connectButton_ = CreateWindowExW(0, L"BUTTON", tx(T::ConnectButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_CONNECT_BUTTON), instance_, nullptr);
     disconnectButton_ = CreateWindowExW(0, L"BUTTON", tx(T::DisconnectButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_DISCONNECT_BUTTON), instance_, nullptr);
+    sendModeLabel_ = CreateWindowExW(0, L"STATIC", tx(T::SendModeLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     sendModeCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SEND_MODE_COMBO), instance_, nullptr);
+    sendEncodingLabel_ = CreateWindowExW(0, L"STATIC", tx(T::SendEncodingLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     textEncodingCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TEXT_ENCODING_COMBO), instance_, nullptr);
+    lineEndingLabel_ = CreateWindowExW(0, L"STATIC", tx(T::LineEndingLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     lineEndingCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LINE_ENDING_COMBO), instance_, nullptr);
+    sendHistoryLabel_ = CreateWindowExW(0, L"STATIC", tx(T::SendHistoryLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    logFormatLabel_ = CreateWindowExW(0, L"STATIC", tx(T::LogFormatLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     logFormatCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_FORMAT_COMBO), instance_, nullptr);
+    logEncodingLabel_ = CreateWindowExW(0, L"STATIC", tx(T::LogEncodingLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     logEncodingCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_ENCODING_COMBO), instance_, nullptr);
-    logFilterEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_FILTER_EDIT), instance_, nullptr);
-    logSearchEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_SEARCH_EDIT), instance_, nullptr);
-    findLogButton_ = CreateWindowExW(0, L"BUTTON", tx(T::FindButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_FIND_BUTTON), instance_, nullptr);
     copyLogButton_ = CreateWindowExW(0, L"BUTTON", tx(T::CopyLogButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_COPY_LOG_BUTTON), instance_, nullptr);
     exportLogButton_ = CreateWindowExW(0, L"BUTTON", tx(T::ExportLogButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_EXPORT_LOG_BUTTON), instance_, nullptr);
+    logFilterLabel_ = CreateWindowExW(0, L"STATIC", tx(T::LogFilterLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    logFilterEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_FILTER_EDIT), instance_, nullptr);
+    logSearchLabel_ = CreateWindowExW(0, L"STATIC", tx(T::LogSearchLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    logSearchEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_SEARCH_EDIT), instance_, nullptr);
+    findLogButton_ = CreateWindowExW(0, L"BUTTON", tx(T::FindButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_FIND_BUTTON), instance_, nullptr);
     historyCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_HISTORY_COMBO), instance_, nullptr);
     sendEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SEND_EDIT), instance_, nullptr);
     sendButton_ = CreateWindowExW(0, L"BUTTON", tx(T::SendButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SEND_BUTTON), instance_, nullptr);
@@ -1430,30 +1577,32 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int rightWidth = std::max(360, width - rightX - margin);
 
     const int sendY = contentY;
-    const int sendHeight = 128;
+    const int sendHeight = 150;
     MoveWindow(sendGroup_, margin, sendY, leftWidth, sendHeight, TRUE);
 
-    x = margin + groupPad;
-    y = sendY + 26;
-    const int sendModeWidth = 116;
-    const int sendEncodingWidth = 82;
-    const int lineEndingWidth = 72;
-    const int historyWidth = leftWidth - groupPad * 2 - sendModeWidth - sendEncodingWidth - lineEndingWidth - gap * 3;
-    MoveWindow(sendModeCombo_, x, y, sendModeWidth, 180, TRUE);
-    x += sendModeWidth + gap;
-    MoveWindow(textEncodingCombo_, x, y, sendEncodingWidth, 160, TRUE);
-    x += sendEncodingWidth + gap;
-    MoveWindow(lineEndingCombo_, x, y, lineEndingWidth, 160, TRUE);
-    x += lineEndingWidth + gap;
-    MoveWindow(historyCombo_, x, y, historyWidth, 200, TRUE);
+    const SendControlLayout sendLayout = calculateSendControlLayout(
+        margin + groupPad,
+        sendY + 24,
+        leftWidth - groupPad * 2,
+        row,
+        gap,
+        18);
+    MoveWindow(sendModeLabel_, sendLayout.modeLabel.x, sendLayout.modeLabel.y, sendLayout.modeLabel.width, sendLayout.modeLabel.height, TRUE);
+    MoveWindow(sendModeCombo_, sendLayout.modeCombo.x, sendLayout.modeCombo.y, sendLayout.modeCombo.width, 180, TRUE);
+    MoveWindow(sendEncodingLabel_, sendLayout.encodingLabel.x, sendLayout.encodingLabel.y, sendLayout.encodingLabel.width, sendLayout.encodingLabel.height, TRUE);
+    MoveWindow(textEncodingCombo_, sendLayout.encodingCombo.x, sendLayout.encodingCombo.y, sendLayout.encodingCombo.width, 160, TRUE);
+    MoveWindow(lineEndingLabel_, sendLayout.lineEndingLabel.x, sendLayout.lineEndingLabel.y, sendLayout.lineEndingLabel.width, sendLayout.lineEndingLabel.height, TRUE);
+    MoveWindow(lineEndingCombo_, sendLayout.lineEndingCombo.x, sendLayout.lineEndingCombo.y, sendLayout.lineEndingCombo.width, 160, TRUE);
+    MoveWindow(sendHistoryLabel_, sendLayout.historyLabel.x, sendLayout.historyLabel.y, sendLayout.historyLabel.width, sendLayout.historyLabel.height, TRUE);
+    MoveWindow(historyCombo_, sendLayout.historyCombo.x, sendLayout.historyCombo.y, sendLayout.historyCombo.width, 200, TRUE);
 
     x = margin + groupPad;
-    y = sendY + 62;
+    y = sendY + 82;
     const int sendEditWidth = leftWidth - groupPad * 2 - buttonWidth - gap;
     MoveWindow(sendEdit_, x, y, sendEditWidth, row, TRUE);
     MoveWindow(sendButton_, x + sendEditWidth + gap, y, buttonWidth, row, TRUE);
 
-    y = sendY + 96;
+    y = sendY + 116;
     MoveWindow(pauseScrollButton_, margin + groupPad, y, 104, 24, TRUE);
     MoveWindow(clearButton_, margin + groupPad + 104 + gap, y, smallButtonWidth, 24, TRUE);
 
@@ -1529,25 +1678,18 @@ void NativeMainWindow::layoutControls(int width, int height) {
     MoveWindow(logGroup_, rightX, contentY, rightWidth, contentHeight, TRUE);
     const int logInnerX = rightX + groupPad;
     const int logInnerWidth = rightWidth - groupPad * 2;
-    const int logActionWidth = 58;
-    const int logFormatWidth = 148;
-    const int logEncodingWidth = 76;
-    x = logInnerX;
-    y = contentY + 24;
-    MoveWindow(logFormatCombo_, x, y, logFormatWidth, 180, TRUE);
-    x += logFormatWidth + gap;
-    MoveWindow(logEncodingCombo_, x, y, logEncodingWidth, 160, TRUE);
-    x += logEncodingWidth + gap;
-    MoveWindow(findLogButton_, x, y, logActionWidth, row, TRUE);
-    x += logActionWidth + gap;
-    MoveWindow(copyLogButton_, x, y, logActionWidth, row, TRUE);
-    x += logActionWidth + gap;
-    MoveWindow(exportLogButton_, x, y, logActionWidth, row, TRUE);
-    y += 34;
-    const int logSearchWidth = std::max(120, (logInnerWidth - gap) / 2);
-    const int logFilterWidth = std::max(120, logInnerWidth - logSearchWidth - gap);
-    MoveWindow(logFilterEdit_, logInnerX, y, logFilterWidth, row, TRUE);
-    MoveWindow(logSearchEdit_, logInnerX + logFilterWidth + gap, y, logSearchWidth, row, TRUE);
+    const LogToolbarLayout logLayout = calculateLogToolbarLayout(logInnerX, contentY + 24, logInnerWidth, row, gap, 40);
+    MoveWindow(logFormatLabel_, logLayout.formatLabel.x, logLayout.formatLabel.y, logLayout.formatLabel.width, logLayout.formatLabel.height, TRUE);
+    MoveWindow(logFormatCombo_, logLayout.formatCombo.x, logLayout.formatCombo.y, logLayout.formatCombo.width, 180, TRUE);
+    MoveWindow(logEncodingLabel_, logLayout.encodingLabel.x, logLayout.encodingLabel.y, logLayout.encodingLabel.width, logLayout.encodingLabel.height, TRUE);
+    MoveWindow(logEncodingCombo_, logLayout.encodingCombo.x, logLayout.encodingCombo.y, logLayout.encodingCombo.width, 160, TRUE);
+    MoveWindow(copyLogButton_, logLayout.copyButton.x, logLayout.copyButton.y, logLayout.copyButton.width, logLayout.copyButton.height, TRUE);
+    MoveWindow(exportLogButton_, logLayout.exportButton.x, logLayout.exportButton.y, logLayout.exportButton.width, logLayout.exportButton.height, TRUE);
+    MoveWindow(logFilterLabel_, logLayout.filterLabel.x, logLayout.filterLabel.y, logLayout.filterLabel.width, logLayout.filterLabel.height, TRUE);
+    MoveWindow(logFilterEdit_, logLayout.filterEdit.x, logLayout.filterEdit.y, logLayout.filterEdit.width, logLayout.filterEdit.height, TRUE);
+    MoveWindow(logSearchLabel_, logLayout.searchLabel.x, logLayout.searchLabel.y, logLayout.searchLabel.width, logLayout.searchLabel.height, TRUE);
+    MoveWindow(logSearchEdit_, logLayout.searchEdit.x, logLayout.searchEdit.y, logLayout.searchEdit.width, logLayout.searchEdit.height, TRUE);
+    MoveWindow(findLogButton_, logLayout.findButton.x, logLayout.findButton.y, logLayout.findButton.width, logLayout.findButton.height, TRUE);
     MoveWindow(receiveLog_, logInnerX, contentY + 96, logInnerWidth, contentHeight - 110, TRUE);
     MoveWindow(statusText_, margin, statusY, width - margin * 2, statusHeight, TRUE);
 }
@@ -1740,7 +1882,14 @@ void NativeMainWindow::saveUiPreferences() {
     preferences.windowWidth = windowRect.right - windowRect.left;
     preferences.windowHeight = windowRect.bottom - windowRect.top;
     preferences.updatedAtUtc = timestampText();
-    store_.saveUiPreferences(preferences);
+    if (!store_.saveUiPreferences(preferences)) {
+        if (!uiPreferenceSaveFailureShown_) {
+            uiPreferenceSaveFailureShown_ = true;
+            setStatus(uiString(T::UiPreferencesSaveFailedPrefix) + utf8ToWide(store_.lastErrorText()));
+        }
+        return;
+    }
+    uiPreferenceSaveFailureShown_ = false;
 }
 
 void NativeMainWindow::toggleConnection() {
@@ -1952,6 +2101,7 @@ void NativeMainWindow::appendPayloadLog(NativeLogKind kind, const std::vector<st
 void NativeMainWindow::clearLog() {
     logEntries_.clear();
     visibleLogChars_ = 0;
+    visibleLogLineCount_ = 0;
     SetWindowTextW(receiveLog_, L"");
     hiddenLogLineCount_ = 0;
     lastLogSearchOffset_ = 0;
@@ -1959,12 +2109,12 @@ void NativeMainWindow::clearLog() {
     setStatus(tx(T::ClearLogStatus));
 }
 
-void NativeMainWindow::rebuildLogView() {
+std::size_t NativeMainWindow::rebuildLogView() {
     if (receiveLog_ == nullptr) {
-        return;
+        return 0;
     }
 
-    std::vector<std::pair<NativeLogKind, std::wstring>> visibleLines;
+    std::deque<std::pair<NativeLogKind, std::wstring>> visibleLines;
     std::size_t visibleChars = 0;
     for (const NativeLogEntry& entry : logEntries_) {
         if (!logEntryMatchesFilter(entry)) {
@@ -1991,6 +2141,8 @@ void NativeMainWindow::rebuildLogView() {
     SendMessageW(receiveLog_, WM_SETREDRAW, TRUE, 0);
     InvalidateRect(receiveLog_, nullptr, TRUE);
     lastLogSearchOffset_ = 0;
+    visibleLogLineCount_ = visibleLines.size();
+    return visibleLogLineCount_;
 }
 
 void NativeMainWindow::appendVisibleLogEntry(const NativeLogEntry& entry) {
@@ -2036,6 +2188,7 @@ void NativeMainWindow::addLogEntry(NativeLogEntry entry) {
     const NativeLogEntry& latest = logEntries_.back();
     if (logEntryMatchesFilter(latest)) {
         appendVisibleLogEntry(latest);
+        ++visibleLogLineCount_;
         if (visibleLogChars_ > kMaxVisibleLogChars) {
             rebuildLogView();
         }
@@ -2074,13 +2227,7 @@ std::wstring NativeMainWindow::visibleLogText() const {
 
 void NativeMainWindow::updateLogFilter() {
     logFilterText_ = controlText(logFilterEdit_);
-    rebuildLogView();
-    std::size_t visibleCount = 0;
-    for (const NativeLogEntry& entry : logEntries_) {
-        if (logEntryMatchesFilter(entry)) {
-            ++visibleCount;
-        }
-    }
+    const std::size_t visibleCount = rebuildLogView();
     setStatus(uiString(T::LogFilterChangedPrefix) + std::to_wstring(visibleCount) + uiString(T::ChinesePeriod));
 }
 

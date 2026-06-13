@@ -85,7 +85,7 @@ private:
     void appendLog(NativeLogKind kind, const std::wstring& line);
     void appendPayloadLog(NativeLogKind kind, const std::vector<std::uint8_t>& payload);
     void clearLog();
-    void rebuildLogView();
+    std::size_t rebuildLogView();
     void appendVisibleLogEntry(const NativeLogEntry& entry);
     void appendVisibleLogText(NativeLogKind kind, const std::wstring& text);
     void addLogEntry(NativeLogEntry entry);
@@ -140,12 +140,20 @@ private:
     HWND autoReconnectCheck_ = nullptr;
     HWND connectButton_ = nullptr;
     HWND disconnectButton_ = nullptr;
+    HWND sendModeLabel_ = nullptr;
     HWND sendModeCombo_ = nullptr;
+    HWND sendEncodingLabel_ = nullptr;
     HWND textEncodingCombo_ = nullptr;
+    HWND lineEndingLabel_ = nullptr;
     HWND lineEndingCombo_ = nullptr;
+    HWND sendHistoryLabel_ = nullptr;
+    HWND logFormatLabel_ = nullptr;
     HWND logFormatCombo_ = nullptr;
+    HWND logEncodingLabel_ = nullptr;
     HWND logEncodingCombo_ = nullptr;
+    HWND logFilterLabel_ = nullptr;
     HWND logFilterEdit_ = nullptr;
+    HWND logSearchLabel_ = nullptr;
     HWND logSearchEdit_ = nullptr;
     HWND findLogButton_ = nullptr;
     HWND copyLogButton_ = nullptr;
@@ -192,6 +200,8 @@ private:
     std::wstring lastLogSearchText_;
     std::size_t lastLogSearchOffset_ = 0;
     std::size_t visibleLogChars_ = 0;
+    std::size_t visibleLogLineCount_ = 0;
+    bool uiPreferenceSaveFailureShown_ = false;
     Win32SerialPort serialPort_;
     native_storage::NativeSessionStore store_;
     std::vector<SerialPortDescriptor> availablePorts_;

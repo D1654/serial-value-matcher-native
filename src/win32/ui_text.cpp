@@ -37,6 +37,14 @@ const wchar_t* uiText(TextId id) {
     case TextId::SendGroup: return L"\u53D1\u9001\u63A7\u5236";
     case TextId::WorkflowGroup: return L"\u626B\u63CF\u4E0E\u5206\u6790\u5DE5\u4F5C\u6D41";
     case TextId::LogGroup: return L"\u901A\u4FE1\u65E5\u5FD7";
+    case TextId::SendModeLabel: return L"\u6A21\u5F0F";
+    case TextId::SendEncodingLabel: return L"\u7F16\u7801";
+    case TextId::LineEndingLabel: return L"\u884C\u5C3E";
+    case TextId::SendHistoryLabel: return L"\u5386\u53F2";
+    case TextId::LogFormatLabel: return L"\u663E\u793A";
+    case TextId::LogEncodingLabel: return L"\u7F16\u7801";
+    case TextId::LogFilterLabel: return L"\u8FC7\u6EE4";
+    case TextId::LogSearchLabel: return L"\u641C\u7D22";
     case TextId::LogFilterCue: return L"\u8FC7\u6EE4";
     case TextId::LogSearchCue: return L"\u641C\u7D22";
     case TextId::WorkflowHint: return L"\u6D41\u7A0B\uFF1A\u8FDE\u63A5\u8BBE\u5907 \u2192 \u626B\u63CF\u5BC4\u5B58\u5668 \u2192 \u751F\u6210\u5019\u9009 \u2192 \u9A8C\u8BC1\u89C4\u5219 \u2192 \u5BFC\u51FA\u62A5\u544A";
@@ -121,6 +129,7 @@ const wchar_t* uiText(TextId id) {
     case TextId::LogFindNotFoundPrefix: return L"\u672A\u627E\u5230\u65E5\u5FD7\u5173\u952E\u8BCD\uFF1A";
     case TextId::LogFindMatchedPrefix: return L"\u5DF2\u5B9A\u4F4D\u65E5\u5FD7\u5173\u952E\u8BCD\uFF1A";
     case TextId::UiPreferencesRestoredStatus: return L"\u5DF2\u6062\u590D\u754C\u9762\u504F\u597D\u3002";
+    case TextId::UiPreferencesSaveFailedPrefix: return L"\u754C\u9762\u504F\u597D\u4FDD\u5B58\u5931\u8D25\uFF1A";
     case TextId::ThemeDefaultMenu: return L"\u9ED8\u8BA4\u8272\u7CFB(&D)";
     case TextId::ThemeSoftMenu: return L"\u67D4\u548C\u8272\u7CFB(&S)";
     case TextId::ThemeHighContrastMenu: return L"\u9AD8\u5BF9\u6BD4\u8272\u7CFB(&H)";
