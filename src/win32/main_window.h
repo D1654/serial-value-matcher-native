@@ -88,6 +88,7 @@ private:
     std::size_t rebuildLogView();
     void appendVisibleLogEntry(const NativeLogEntry& entry);
     void appendVisibleLogText(NativeLogKind kind, const std::wstring& text);
+    void insertVisibleLogText(NativeLogKind kind, const std::wstring& text);
     void addLogEntry(NativeLogEntry entry);
     std::wstring renderLogEntry(const NativeLogEntry& entry) const;
     bool logEntryMatchesFilter(const NativeLogEntry& entry) const;
@@ -96,6 +97,11 @@ private:
     void findNextLogMatch();
     void copyVisibleLogToClipboard();
     void exportVisibleLog();
+    bool logIsAtBottom() const;
+    int currentLogFirstVisibleLine() const;
+    void restoreLogFirstVisibleLine(int firstVisibleLine);
+    void scrollLogToBottom();
+    void followLatestLog();
     void setStatus(const std::wstring& text);
     void setSendModeStatus();
     std::wstring controlText(HWND control) const;
@@ -213,6 +219,8 @@ private:
     std::string latestVerificationRunId_;
     bool waitingReconnect_ = false;
     bool scrollPaused_ = false;
+    bool logAutoFollow_ = true;
+    bool logHistoryReadNoticeShown_ = false;
     std::size_t hiddenLogLineCount_ = 0;
 };
 

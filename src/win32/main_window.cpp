@@ -42,6 +42,10 @@ constexpr std::size_t kMaxVisibleLogChars = 350000;
 constexpr std::size_t kMaxRenderedLogLineChars = 4096;
 constexpr UINT kCodePageGbk = 936;
 constexpr UINT kCodePageAscii = 20127;
+constexpr int kMinTrackWidth = 840;
+constexpr int kMinTrackHeight = 620;
+constexpr int kMinLayoutWidth = 820;
+constexpr int kMinLayoutHeight = 560;
 
 const wchar_t* tx(T id) {
     return uiText(id);
@@ -158,10 +162,11 @@ bool sameRowAndAdjacent(const NativeRect& left, const NativeRect& right, int max
 }
 
 SendControlLayout calculateSendControlLayout(int x, int y, int innerWidth, int row, int gap, int labelHeight) {
-    const int sendModeWidth = 116;
-    const int sendEncodingWidth = 82;
-    const int lineEndingWidth = 72;
-    const int historyWidth = std::max(96, innerWidth - sendModeWidth - sendEncodingWidth - lineEndingWidth - gap * 3);
+    const bool compact = innerWidth < 390;
+    const int sendModeWidth = compact ? 94 : 116;
+    const int sendEncodingWidth = compact ? 64 : 82;
+    const int lineEndingWidth = compact ? 54 : 72;
+    const int historyWidth = std::max(72, innerWidth - sendModeWidth - sendEncodingWidth - lineEndingWidth - gap * 3);
 
     SendControlLayout layout;
     int cursor = x;
@@ -180,33 +185,35 @@ SendControlLayout calculateSendControlLayout(int x, int y, int innerWidth, int r
 }
 
 LogToolbarLayout calculateLogToolbarLayout(int x, int y, int innerWidth, int row, int gap, int labelWidth) {
-    const int formatWidth = 136;
-    const int encodingWidth = 76;
-    const int actionWidth = 58;
-    const int operationLabelWidth = 40;
+    const bool compact = innerWidth < 430;
+    const int formatWidth = compact ? 110 : 136;
+    const int encodingWidth = compact ? 58 : 76;
+    const int actionWidth = compact ? 48 : 58;
+    const int operationLabelWidth = compact ? 34 : 40;
+    labelWidth = compact ? 34 : labelWidth;
 
     LogToolbarLayout layout;
     int cursor = x;
-    layout.formatLabel = {cursor, y + 6, labelWidth, 22};
+    layout.formatLabel = {cursor, y + 5, labelWidth, 22};
     cursor += labelWidth;
     layout.formatCombo = {cursor, y, formatWidth, row};
     cursor += formatWidth + gap;
-    layout.encodingLabel = {cursor, y + 6, labelWidth, 22};
+    layout.encodingLabel = {cursor, y + 5, labelWidth, 22};
     cursor += labelWidth;
     layout.encodingCombo = {cursor, y, encodingWidth, row};
     layout.exportButton = {x + innerWidth - actionWidth, y, actionWidth, row};
     layout.copyButton = {layout.exportButton.x - gap - actionWidth, y, actionWidth, row};
 
-    const int secondY = y + row + 6;
+    const int secondY = y + row + (compact ? 5 : 6);
     const int availableForInputs = innerWidth - operationLabelWidth * 2 - actionWidth - gap * 4;
-    const int filterWidth = std::max(120, availableForInputs / 2);
-    const int searchWidth = std::max(120, availableForInputs - filterWidth);
+    const int filterWidth = std::max(compact ? 82 : 120, availableForInputs / 2);
+    const int searchWidth = std::max(compact ? 82 : 120, availableForInputs - filterWidth);
     cursor = x;
-    layout.filterLabel = {cursor, secondY + 6, operationLabelWidth, 22};
+    layout.filterLabel = {cursor, secondY + 5, operationLabelWidth, 22};
     cursor += operationLabelWidth;
     layout.filterEdit = {cursor, secondY, filterWidth, row};
     cursor += filterWidth + gap;
-    layout.searchLabel = {cursor, secondY + 6, operationLabelWidth, 22};
+    layout.searchLabel = {cursor, secondY + 5, operationLabelWidth, 22};
     cursor += operationLabelWidth;
     layout.searchEdit = {cursor, secondY, searchWidth, row};
     cursor += searchWidth + gap;
@@ -215,7 +222,9 @@ LogToolbarLayout calculateLogToolbarLayout(int x, int y, int innerWidth, int row
 }
 
 bool logToolbarLayoutIsSane(int innerWidth) {
-    const LogToolbarLayout layout = calculateLogToolbarLayout(0, 0, innerWidth, 30, 8, 40);
+    const bool compact = innerWidth < 430;
+    const int gap = compact ? 5 : 8;
+    const LogToolbarLayout layout = calculateLogToolbarLayout(0, 0, innerWidth, compact ? 26 : 30, gap, compact ? 34 : 40);
     return rectIsValid(layout.formatCombo)
         && rectIsValid(layout.encodingCombo)
         && rectIsValid(layout.filterEdit)
@@ -223,11 +232,13 @@ bool logToolbarLayoutIsSane(int innerWidth) {
         && rectIsValid(layout.findButton)
         && layout.exportButton.right() <= innerWidth
         && layout.findButton.right() <= innerWidth
-        && sameRowAndAdjacent(layout.searchEdit, layout.findButton, 8);
+        && layout.encodingCombo.right() + gap <= layout.copyButton.x
+        && sameRowAndAdjacent(layout.searchEdit, layout.findButton, gap);
 }
 
 bool sendControlLayoutIsSane(int innerWidth) {
-    const SendControlLayout layout = calculateSendControlLayout(0, 0, innerWidth, 30, 8, 18);
+    const bool compact = innerWidth < 390;
+    const SendControlLayout layout = calculateSendControlLayout(0, 0, innerWidth, compact ? 26 : 30, compact ? 5 : 8, compact ? 16 : 18);
     return rectIsValid(layout.modeCombo)
         && rectIsValid(layout.encodingCombo)
         && rectIsValid(layout.lineEndingCombo)
@@ -905,7 +916,10 @@ bool NativeMainWindow::runSelfTest() {
     if (makeWin32DevicePath("COM10") != R"(\\.\COM10)") {
         return false;
     }
-    if (!logToolbarLayoutIsSane(554) || !sendControlLayoutIsSane(428)) {
+    if (!logToolbarLayoutIsSane(360)
+        || !logToolbarLayoutIsSane(554)
+        || !sendControlLayoutIsSane(320)
+        || !sendControlLayoutIsSane(428)) {
         return false;
     }
 
@@ -981,8 +995,8 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
     switch (message) {
     case WM_GETMINMAXINFO: {
         auto* minMax = reinterpret_cast<MINMAXINFO*>(lParam);
-        minMax->ptMinTrackSize.x = 1080;
-        minMax->ptMinTrackSize.y = 760;
+        minMax->ptMinTrackSize.x = kMinTrackWidth;
+        minMax->ptMinTrackSize.y = kMinTrackHeight;
         return 0;
     }
     case WM_CREATE:
@@ -1098,6 +1112,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             if (!scrollPaused_) {
                 rebuildLogView();
                 hiddenLogLineCount_ = 0;
+                followLatestLog();
             }
             setStatus(scrollPaused_ ? tx(T::PauseScrollStatus) : tx(T::ResumeScrollStatus));
             return 0;
@@ -1150,8 +1165,12 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             if (!scrollPaused_) {
                 rebuildLogView();
                 hiddenLogLineCount_ = 0;
+                followLatestLog();
             }
             setStatus(scrollPaused_ ? tx(T::PauseScrollStatus) : tx(T::ResumeScrollStatus));
+            return 0;
+        case IDM_TOOLS_FOLLOW_LATEST_LOG:
+            followLatestLog();
             return 0;
         case IDM_TOOLS_CLEAR_LOG:
             clearLog();
@@ -1271,6 +1290,7 @@ void NativeMainWindow::createMenus() {
 
     AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_SEND, tx(T::ToolsSendMenu));
     AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_PAUSE_SCROLL, tx(T::ToolsPauseScrollMenu));
+    AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_FOLLOW_LATEST_LOG, tx(T::ToolsFollowLatestLogMenu));
     AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_CLEAR_LOG, tx(T::ToolsClearLogMenu));
     AppendMenuW(toolsMenu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_FIND_LOG, tx(T::ToolsFindLogMenu));
@@ -1507,86 +1527,106 @@ void NativeMainWindow::populateSerialOptionControls() {
 }
 
 void NativeMainWindow::layoutControls(int width, int height) {
-    width = std::max(width, 1040);
-    height = std::max(height, 700);
+    width = std::max(width, kMinLayoutWidth);
+    height = std::max(height, kMinLayoutHeight);
 
-    const int margin = 12;
-    const int groupPad = 16;
-    const int row = 30;
-    const int gap = 8;
-    const int labelHeight = 22;
-    const int labelWidth = 56;
-    const int buttonWidth = 82;
-    const int smallButtonWidth = 74;
+    const bool compact = width < 1040 || height < 720;
+    const int margin = compact ? 8 : 12;
+    const int groupPad = compact ? 10 : 16;
+    const int row = compact ? 26 : 30;
+    const int gap = compact ? 5 : 8;
+    const int labelHeight = compact ? 18 : 22;
+    const int labelWidth = compact ? 48 : 56;
+    const int buttonWidth = compact ? 70 : 82;
+    const int smallButtonWidth = compact ? 60 : 74;
+    const int saveProfileWidth = compact ? 82 : 96;
+    const int autoReconnectWidth = compact ? 100 : 116;
 
     const int connectionX = margin;
     const int connectionY = margin;
     const int connectionWidth = width - margin * 2;
-    const int connectionHeight = 122;
+    const int connectionHeight = compact ? 104 : 122;
     MoveWindow(connectionGroup_, connectionX, connectionY, connectionWidth, connectionHeight, TRUE);
 
     int x = connectionX + groupPad;
-    int y = connectionY + 26;
+    int y = connectionY + (compact ? 22 : 26);
     const int actionsWidth = buttonWidth * 2 + gap;
     const int actionsX = connectionX + connectionWidth - groupPad - actionsWidth;
-    MoveWindow(portLabel_, x, y + 6, labelWidth, labelHeight, TRUE);
+    const int portComboWidth = std::max(
+        compact ? 160 : 220,
+        std::min(compact ? 220 : 360, actionsX - x - labelWidth - smallButtonWidth - saveProfileWidth - autoReconnectWidth - gap * 4));
+    MoveWindow(portLabel_, x, y + 5, labelWidth, labelHeight, TRUE);
     x += labelWidth;
-    MoveWindow(portCombo_, x, y, 360, 260, TRUE);
-    x += 360 + gap;
+    MoveWindow(portCombo_, x, y, portComboWidth, 240, TRUE);
+    x += portComboWidth + gap;
     MoveWindow(refreshButton_, x, y, smallButtonWidth, row, TRUE);
     x += smallButtonWidth + gap;
-    MoveWindow(saveProfileButton_, x, y, 96, row, TRUE);
-    x += 96 + gap;
-    MoveWindow(autoReconnectCheck_, x, y + 4, 116, 24, TRUE);
+    MoveWindow(saveProfileButton_, x, y, saveProfileWidth, row, TRUE);
+    x += saveProfileWidth + gap;
+    MoveWindow(autoReconnectCheck_, x, y + 3, autoReconnectWidth, row - 2, TRUE);
     MoveWindow(connectButton_, actionsX, y, buttonWidth, row, TRUE);
     MoveWindow(disconnectButton_, actionsX + buttonWidth + gap, y, buttonWidth, row, TRUE);
 
-    y = connectionY + 70;
+    y = connectionY + (compact ? 58 : 70);
     x = connectionX + groupPad;
-    MoveWindow(baudLabel_, x, y + 6, labelWidth, labelHeight, TRUE);
+    const int baudComboWidth = compact ? 90 : 104;
+    const int dataLabelWidth = compact ? 46 : 54;
+    const int dataComboWidth = compact ? 52 : 60;
+    const int parityLabelWidth = compact ? 38 : 42;
+    const int parityComboWidth = compact ? 82 : 92;
+    const int stopComboWidth = compact ? 58 : 66;
+    const int flowLabelWidth = compact ? 42 : 46;
+    const int flowComboWidth = compact ? 96 : 110;
+    const int signalCheckWidth = compact ? 46 : 52;
+    MoveWindow(baudLabel_, x, y + 5, labelWidth, labelHeight, TRUE);
     x += labelWidth;
-    MoveWindow(baudCombo_, x, y, 104, 220, TRUE);
-    x += 104 + gap;
-    MoveWindow(dataBitsLabel_, x, y + 6, 54, labelHeight, TRUE);
-    x += 54;
-    MoveWindow(dataBitsCombo_, x, y, 60, 160, TRUE);
-    x += 60 + gap;
-    MoveWindow(parityLabel_, x, y + 6, 42, labelHeight, TRUE);
-    x += 42;
-    MoveWindow(parityCombo_, x, y, 92, 180, TRUE);
-    x += 92 + gap;
-    MoveWindow(stopBitsLabel_, x, y + 6, labelWidth, labelHeight, TRUE);
+    MoveWindow(baudCombo_, x, y, baudComboWidth, 200, TRUE);
+    x += baudComboWidth + gap;
+    MoveWindow(dataBitsLabel_, x, y + 5, dataLabelWidth, labelHeight, TRUE);
+    x += dataLabelWidth;
+    MoveWindow(dataBitsCombo_, x, y, dataComboWidth, 150, TRUE);
+    x += dataComboWidth + gap;
+    MoveWindow(parityLabel_, x, y + 5, parityLabelWidth, labelHeight, TRUE);
+    x += parityLabelWidth;
+    MoveWindow(parityCombo_, x, y, parityComboWidth, 170, TRUE);
+    x += parityComboWidth + gap;
+    MoveWindow(stopBitsLabel_, x, y + 5, labelWidth, labelHeight, TRUE);
     x += labelWidth;
-    MoveWindow(stopBitsCombo_, x, y, 66, 160, TRUE);
-    x += 66 + gap;
-    MoveWindow(flowControlLabel_, x, y + 6, 46, labelHeight, TRUE);
-    x += 46;
-    MoveWindow(flowControlCombo_, x, y, 110, 180, TRUE);
-    x += 110 + gap;
-    MoveWindow(dtrCheck_, x, y + 4, 52, 24, TRUE);
-    x += 52 + gap;
-    MoveWindow(rtsCheck_, x, y + 4, 52, 24, TRUE);
+    MoveWindow(stopBitsCombo_, x, y, stopComboWidth, 150, TRUE);
+    x += stopComboWidth + gap;
+    MoveWindow(flowControlLabel_, x, y + 5, flowLabelWidth, labelHeight, TRUE);
+    x += flowLabelWidth;
+    MoveWindow(flowControlCombo_, x, y, flowComboWidth, 170, TRUE);
+    x += flowComboWidth + gap;
+    MoveWindow(dtrCheck_, x, y + 3, signalCheckWidth, row - 2, TRUE);
+    x += signalCheckWidth + gap;
+    MoveWindow(rtsCheck_, x, y + 3, signalCheckWidth, row - 2, TRUE);
 
-    const int statusHeight = 26;
+    const int statusHeight = compact ? 22 : 26;
     const int statusY = height - statusHeight - 4;
     const int contentY = connectionY + connectionHeight + 10;
-    const int contentHeight = std::max(360, statusY - contentY - 8);
-    const int leftWidth = 460;
-    const int columnGap = 10;
+    const int contentHeight = std::max(compact ? 350 : 360, statusY - contentY - 8);
+    const int columnGap = compact ? 8 : 10;
+    const int minRightWidth = compact ? 360 : 420;
+    const int minLeftWidth = compact ? 330 : 420;
+    int leftWidth = compact ? 370 : 460;
+    if (width - margin * 2 - columnGap - leftWidth < minRightWidth) {
+        leftWidth = std::max(minLeftWidth, width - margin * 2 - columnGap - minRightWidth);
+    }
     const int rightX = margin + leftWidth + columnGap;
-    const int rightWidth = std::max(360, width - rightX - margin);
+    const int rightWidth = std::max(minRightWidth, width - rightX - margin);
 
     const int sendY = contentY;
-    const int sendHeight = 150;
+    const int sendHeight = compact ? 130 : 150;
     MoveWindow(sendGroup_, margin, sendY, leftWidth, sendHeight, TRUE);
 
     const SendControlLayout sendLayout = calculateSendControlLayout(
         margin + groupPad,
-        sendY + 24,
+        sendY + (compact ? 20 : 24),
         leftWidth - groupPad * 2,
         row,
         gap,
-        18);
+        compact ? 16 : 18);
     MoveWindow(sendModeLabel_, sendLayout.modeLabel.x, sendLayout.modeLabel.y, sendLayout.modeLabel.width, sendLayout.modeLabel.height, TRUE);
     MoveWindow(sendModeCombo_, sendLayout.modeCombo.x, sendLayout.modeCombo.y, sendLayout.modeCombo.width, 180, TRUE);
     MoveWindow(sendEncodingLabel_, sendLayout.encodingLabel.x, sendLayout.encodingLabel.y, sendLayout.encodingLabel.width, sendLayout.encodingLabel.height, TRUE);
@@ -1597,88 +1637,97 @@ void NativeMainWindow::layoutControls(int width, int height) {
     MoveWindow(historyCombo_, sendLayout.historyCombo.x, sendLayout.historyCombo.y, sendLayout.historyCombo.width, 200, TRUE);
 
     x = margin + groupPad;
-    y = sendY + 82;
+    y = sendY + (compact ? 70 : 82);
     const int sendEditWidth = leftWidth - groupPad * 2 - buttonWidth - gap;
     MoveWindow(sendEdit_, x, y, sendEditWidth, row, TRUE);
     MoveWindow(sendButton_, x + sendEditWidth + gap, y, buttonWidth, row, TRUE);
 
-    y = sendY + 116;
-    MoveWindow(pauseScrollButton_, margin + groupPad, y, 104, 24, TRUE);
-    MoveWindow(clearButton_, margin + groupPad + 104 + gap, y, smallButtonWidth, 24, TRUE);
+    y = sendY + (compact ? 100 : 116);
+    const int pauseButtonWidth = compact ? 92 : 104;
+    MoveWindow(pauseScrollButton_, margin + groupPad, y, pauseButtonWidth, row - 4, TRUE);
+    MoveWindow(clearButton_, margin + groupPad + pauseButtonWidth + gap, y, smallButtonWidth, row - 4, TRUE);
 
     const int workflowY = sendY + sendHeight + 10;
-    const int workflowHeight = std::max(320, contentHeight - sendHeight - 10);
+    const int workflowHeight = std::max(compact ? 278 : 320, contentHeight - sendHeight - 10);
     MoveWindow(workflowGroup_, margin, workflowY, leftWidth, workflowHeight, TRUE);
 
     const int innerX = margin + groupPad;
     const int innerWidth = leftWidth - groupPad * 2;
-    y = workflowY + 26;
-    MoveWindow(workflowHint_, innerX, y, innerWidth, 24, TRUE);
-
-    y += 32;
+    y = workflowY + (compact ? 22 : 26);
+    ShowWindow(workflowHint_, compact ? SW_HIDE : SW_SHOW);
+    if (!compact) {
+        MoveWindow(workflowHint_, innerX, y, innerWidth, 24, TRUE);
+        y += 32;
+    }
     MoveWindow(scanSectionLabel_, innerX, y, innerWidth, labelHeight, TRUE);
-    y += 24;
+    y += compact ? 20 : 24;
     x = innerX;
-    MoveWindow(scanSlaveLabel_, x, y + 6, 42, labelHeight, TRUE);
-    x += 42;
-    MoveWindow(scanSlaveEdit_, x, y, 50, row, TRUE);
-    x += 50 + gap;
-    MoveWindow(scanFunctionLabel_, x, y + 6, 42, labelHeight, TRUE);
-    x += 42;
+    const int shortLabelWidth = compact ? 36 : 42;
+    MoveWindow(scanSlaveLabel_, x, y + 5, shortLabelWidth, labelHeight, TRUE);
+    x += shortLabelWidth;
+    MoveWindow(scanSlaveEdit_, x, y, compact ? 44 : 50, row, TRUE);
+    x += (compact ? 44 : 50) + gap;
+    MoveWindow(scanFunctionLabel_, x, y + 5, shortLabelWidth, labelHeight, TRUE);
+    x += shortLabelWidth;
     MoveWindow(scanFunctionCombo_, x, y, innerWidth - (x - innerX), 180, TRUE);
 
-    y += 36;
+    y += compact ? 31 : 36;
     x = innerX;
-    MoveWindow(scanStartLabel_, x, y + 6, 70, labelHeight, TRUE);
-    x += 70;
-    MoveWindow(scanStartEdit_, x, y, 72, row, TRUE);
-    x += 72 + gap;
-    MoveWindow(scanEndLabel_, x, y + 6, 70, labelHeight, TRUE);
-    x += 70;
-    MoveWindow(scanEndEdit_, x, y, 72, row, TRUE);
+    const int addressLabelWidth = compact ? 56 : 70;
+    const int addressEditWidth = compact ? 60 : 72;
+    MoveWindow(scanStartLabel_, x, y + 5, addressLabelWidth, labelHeight, TRUE);
+    x += addressLabelWidth;
+    MoveWindow(scanStartEdit_, x, y, addressEditWidth, row, TRUE);
+    x += addressEditWidth + gap;
+    MoveWindow(scanEndLabel_, x, y + 5, addressLabelWidth, labelHeight, TRUE);
+    x += addressLabelWidth;
+    MoveWindow(scanEndEdit_, x, y, addressEditWidth, row, TRUE);
 
-    y += 36;
-    MoveWindow(modbusButton_, innerX + innerWidth - 140, y, 140, row, TRUE);
-    y += 42;
+    y += compact ? 31 : 36;
+    MoveWindow(modbusButton_, innerX + innerWidth - (compact ? 122 : 140), y, compact ? 122 : 140, row, TRUE);
+    y += compact ? 35 : 42;
     MoveWindow(analysisSectionLabel_, innerX, y, innerWidth, labelHeight, TRUE);
-    y += 24;
+    y += compact ? 20 : 24;
     x = innerX;
-    MoveWindow(targetStatic_, x, y + 6, 38, labelHeight, TRUE);
-    x += 38;
-    MoveWindow(targetLabelEdit_, x, y, 126, row, TRUE);
-    x += 126 + gap;
-    MoveWindow(targetValueStatic_, x, y + 6, 58, labelHeight, TRUE);
-    x += 58;
+    MoveWindow(targetStatic_, x, y + 5, compact ? 34 : 38, labelHeight, TRUE);
+    x += compact ? 34 : 38;
+    MoveWindow(targetLabelEdit_, x, y, compact ? 88 : 126, row, TRUE);
+    x += (compact ? 88 : 126) + gap;
+    MoveWindow(targetValueStatic_, x, y + 5, compact ? 50 : 58, labelHeight, TRUE);
+    x += compact ? 50 : 58;
     MoveWindow(targetValueEdit_, x, y, innerX + innerWidth - x, row, TRUE);
 
-    y += 36;
+    y += compact ? 31 : 36;
     x = innerX;
-    MoveWindow(targetUnitStatic_, x, y + 6, 38, labelHeight, TRUE);
-    x += 38;
-    MoveWindow(targetUnitEdit_, x, y, 126, row, TRUE);
-    x += 126 + gap;
-    MoveWindow(toleranceStatic_, x, y + 6, 42, labelHeight, TRUE);
-    x += 42;
+    MoveWindow(targetUnitStatic_, x, y + 5, compact ? 34 : 38, labelHeight, TRUE);
+    x += compact ? 34 : 38;
+    MoveWindow(targetUnitEdit_, x, y, compact ? 88 : 126, row, TRUE);
+    x += (compact ? 88 : 126) + gap;
+    MoveWindow(toleranceStatic_, x, y + 5, shortLabelWidth, labelHeight, TRUE);
+    x += shortLabelWidth;
     MoveWindow(toleranceEdit_, x, y, innerX + innerWidth - x, row, TRUE);
 
-    y += 36;
+    y += compact ? 31 : 36;
     x = innerX;
-    MoveWindow(candidateStatic_, x, y + 6, 42, labelHeight, TRUE);
-    x += 42;
+    MoveWindow(candidateStatic_, x, y + 5, shortLabelWidth, labelHeight, TRUE);
+    x += shortLabelWidth;
     MoveWindow(candidateCombo_, x, y, innerX + innerWidth - x, 220, TRUE);
 
-    y += 40;
+    y += compact ? 34 : 40;
     x = innerX;
-    MoveWindow(analysisButton_, x, y, 112, row, TRUE);
-    x += 112 + gap;
-    MoveWindow(ruleVerifyButton_, x, y, 100, row, TRUE);
-    x += 100 + gap;
-    MoveWindow(exportReportButton_, x, y, 100, row, TRUE);
+    const int analysisButtonWidth = compact ? 92 : 112;
+    const int ruleButtonWidth = compact ? 86 : 100;
+    const int exportButtonWidth = compact ? 86 : 100;
+    MoveWindow(analysisButton_, x, y, analysisButtonWidth, row, TRUE);
+    x += analysisButtonWidth + gap;
+    MoveWindow(ruleVerifyButton_, x, y, ruleButtonWidth, row, TRUE);
+    x += ruleButtonWidth + gap;
+    MoveWindow(exportReportButton_, x, y, exportButtonWidth, row, TRUE);
 
     MoveWindow(logGroup_, rightX, contentY, rightWidth, contentHeight, TRUE);
     const int logInnerX = rightX + groupPad;
     const int logInnerWidth = rightWidth - groupPad * 2;
-    const LogToolbarLayout logLayout = calculateLogToolbarLayout(logInnerX, contentY + 24, logInnerWidth, row, gap, 40);
+    const LogToolbarLayout logLayout = calculateLogToolbarLayout(logInnerX, contentY + (compact ? 20 : 24), logInnerWidth, row, gap, compact ? 34 : 40);
     MoveWindow(logFormatLabel_, logLayout.formatLabel.x, logLayout.formatLabel.y, logLayout.formatLabel.width, logLayout.formatLabel.height, TRUE);
     MoveWindow(logFormatCombo_, logLayout.formatCombo.x, logLayout.formatCombo.y, logLayout.formatCombo.width, 180, TRUE);
     MoveWindow(logEncodingLabel_, logLayout.encodingLabel.x, logLayout.encodingLabel.y, logLayout.encodingLabel.width, logLayout.encodingLabel.height, TRUE);
@@ -1690,7 +1739,8 @@ void NativeMainWindow::layoutControls(int width, int height) {
     MoveWindow(logSearchLabel_, logLayout.searchLabel.x, logLayout.searchLabel.y, logLayout.searchLabel.width, logLayout.searchLabel.height, TRUE);
     MoveWindow(logSearchEdit_, logLayout.searchEdit.x, logLayout.searchEdit.y, logLayout.searchEdit.width, logLayout.searchEdit.height, TRUE);
     MoveWindow(findLogButton_, logLayout.findButton.x, logLayout.findButton.y, logLayout.findButton.width, logLayout.findButton.height, TRUE);
-    MoveWindow(receiveLog_, logInnerX, contentY + 96, logInnerWidth, contentHeight - 110, TRUE);
+    const int logContentY = std::max(logLayout.filterEdit.bottom(), logLayout.findButton.bottom()) + (compact ? 8 : 10);
+    MoveWindow(receiveLog_, logInnerX, logContentY, logInnerWidth, std::max(120, contentY + contentHeight - logContentY - groupPad), TRUE);
     MoveWindow(statusText_, margin, statusY, width - margin * 2, statusHeight, TRUE);
 }
 
@@ -2106,6 +2156,8 @@ void NativeMainWindow::clearLog() {
     hiddenLogLineCount_ = 0;
     lastLogSearchOffset_ = 0;
     lastLogSearchText_.clear();
+    logAutoFollow_ = true;
+    logHistoryReadNoticeShown_ = false;
     setStatus(tx(T::ClearLogStatus));
 }
 
@@ -2114,6 +2166,7 @@ std::size_t NativeMainWindow::rebuildLogView() {
         return 0;
     }
 
+    const int firstVisibleLine = currentLogFirstVisibleLine();
     std::deque<std::pair<NativeLogKind, std::wstring>> visibleLines;
     std::size_t visibleChars = 0;
     for (const NativeLogEntry& entry : logEntries_) {
@@ -2136,12 +2189,17 @@ std::size_t NativeMainWindow::rebuildLogView() {
     SetWindowTextW(receiveLog_, L"");
     visibleLogChars_ = 0;
     for (const auto& line : visibleLines) {
-        appendVisibleLogText(line.first, line.second);
+        insertVisibleLogText(line.first, line.second);
     }
     SendMessageW(receiveLog_, WM_SETREDRAW, TRUE, 0);
     InvalidateRect(receiveLog_, nullptr, TRUE);
     lastLogSearchOffset_ = 0;
     visibleLogLineCount_ = visibleLines.size();
+    if (logAutoFollow_) {
+        scrollLogToBottom();
+    } else {
+        restoreLogFirstVisibleLine(firstVisibleLine);
+    }
     return visibleLogLineCount_;
 }
 
@@ -2150,6 +2208,34 @@ void NativeMainWindow::appendVisibleLogEntry(const NativeLogEntry& entry) {
 }
 
 void NativeMainWindow::appendVisibleLogText(NativeLogKind kind, const std::wstring& text) {
+    if (receiveLog_ == nullptr) {
+        return;
+    }
+    const bool atBottom = logIsAtBottom();
+    if (atBottom) {
+        logAutoFollow_ = true;
+        logHistoryReadNoticeShown_ = false;
+    }
+    const bool shouldFollow = logAutoFollow_ && atBottom;
+    const int firstVisibleLine = currentLogFirstVisibleLine();
+    DWORD selectionStart = 0;
+    DWORD selectionEnd = 0;
+    SendMessageW(receiveLog_, EM_GETSEL, reinterpret_cast<WPARAM>(&selectionStart), reinterpret_cast<LPARAM>(&selectionEnd));
+    insertVisibleLogText(kind, text);
+    if (shouldFollow) {
+        scrollLogToBottom();
+        return;
+    }
+    logAutoFollow_ = false;
+    restoreLogFirstVisibleLine(firstVisibleLine);
+    SendMessageW(receiveLog_, EM_SETSEL, selectionStart, selectionEnd);
+    if (!logHistoryReadNoticeShown_) {
+        setStatus(tx(T::LogHistoryReadStatus));
+        logHistoryReadNoticeShown_ = true;
+    }
+}
+
+void NativeMainWindow::insertVisibleLogText(NativeLogKind kind, const std::wstring& text) {
     if (receiveLog_ == nullptr) {
         return;
     }
@@ -2257,8 +2343,67 @@ void NativeMainWindow::findNextLogMatch() {
 
     SendMessageW(receiveLog_, EM_SETSEL, static_cast<WPARAM>(position), static_cast<LPARAM>(position + needle.size()));
     SendMessageW(receiveLog_, EM_SCROLLCARET, 0, 0);
+    logAutoFollow_ = false;
+    logHistoryReadNoticeShown_ = true;
     lastLogSearchOffset_ = position + needle.size();
     setStatus(uiString(T::LogFindMatchedPrefix) + needle + uiString(T::ChinesePeriod));
+}
+
+bool NativeMainWindow::logIsAtBottom() const {
+    if (receiveLog_ == nullptr) {
+        return true;
+    }
+
+    SCROLLINFO scrollInfo = {};
+    scrollInfo.cbSize = sizeof(scrollInfo);
+    scrollInfo.fMask = SIF_PAGE | SIF_POS | SIF_RANGE;
+    if (!GetScrollInfo(receiveLog_, SB_VERT, &scrollInfo)) {
+        return true;
+    }
+
+    const int page = scrollInfo.nPage > 0 ? static_cast<int>(scrollInfo.nPage) : 1;
+    return scrollInfo.nPos + page >= scrollInfo.nMax - 1;
+}
+
+int NativeMainWindow::currentLogFirstVisibleLine() const {
+    if (receiveLog_ == nullptr) {
+        return 0;
+    }
+    const LRESULT line = SendMessageW(receiveLog_, EM_GETFIRSTVISIBLELINE, 0, 0);
+    return line < 0 ? 0 : static_cast<int>(line);
+}
+
+void NativeMainWindow::restoreLogFirstVisibleLine(int firstVisibleLine) {
+    if (receiveLog_ == nullptr) {
+        return;
+    }
+    const int currentFirstLine = currentLogFirstVisibleLine();
+    const int delta = firstVisibleLine - currentFirstLine;
+    if (delta != 0) {
+        SendMessageW(receiveLog_, EM_LINESCROLL, 0, delta);
+    }
+}
+
+void NativeMainWindow::scrollLogToBottom() {
+    if (receiveLog_ == nullptr) {
+        return;
+    }
+    SendMessageW(receiveLog_, EM_SETSEL, static_cast<WPARAM>(-1), static_cast<LPARAM>(-1));
+    SendMessageW(receiveLog_, EM_SCROLLCARET, 0, 0);
+    SendMessageW(receiveLog_, WM_VSCROLL, SB_BOTTOM, 0);
+}
+
+void NativeMainWindow::followLatestLog() {
+    if (scrollPaused_) {
+        scrollPaused_ = false;
+        SetWindowTextW(pauseScrollButton_, tx(T::PauseScrollButton));
+        hiddenLogLineCount_ = 0;
+        rebuildLogView();
+    }
+    logAutoFollow_ = true;
+    logHistoryReadNoticeShown_ = false;
+    scrollLogToBottom();
+    setStatus(tx(T::FollowLatestLogStatus));
 }
 
 void NativeMainWindow::copyVisibleLogToClipboard() {

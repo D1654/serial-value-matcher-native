@@ -18,6 +18,7 @@ const wchar_t* uiText(TextId id) {
     case TextId::SerialAutoReconnectMenu: return L"\u5207\u6362\u81EA\u52A8\u91CD\u8FDE(&A)";
     case TextId::ToolsSendMenu: return L"\u53D1\u9001(&E)";
     case TextId::ToolsPauseScrollMenu: return L"\u6682\u505C/\u6062\u590D\u6EDA\u52A8(&P)";
+    case TextId::ToolsFollowLatestLogMenu: return L"\u8DDF\u968F\u6700\u65B0\u65E5\u5FD7(&N)";
     case TextId::ToolsClearLogMenu: return L"\u6E05\u7A7A\u63A5\u6536\u533A(&L)";
     case TextId::ToolsCopyLogMenu: return L"\u590D\u5236\u53EF\u89C1\u65E5\u5FD7(&C)";
     case TextId::ToolsExportLogMenu: return L"\u5BFC\u51FA\u53EF\u89C1\u65E5\u5FD7(&G)";
@@ -156,6 +157,8 @@ const wchar_t* uiText(TextId id) {
     case TextId::SendHistoryRestored: return L"\u5DF2\u6062\u590D\u53D1\u9001\u5386\u53F2\u7684\u5185\u5BB9\u3001\u6A21\u5F0F\u3001\u884C\u5C3E\u548C\u53D1\u9001\u7F16\u7801\u3002";
     case TextId::PauseScrollStatus: return L"\u5DF2\u6682\u505C\u6EDA\u52A8\uFF1A\u4ECD\u7EE7\u7EED\u63A5\u6536\u548C\u5199\u5165 native \u5B58\u50A8\u3002";
     case TextId::ResumeScrollStatus: return L"\u5DF2\u6062\u590D\u6EDA\u52A8\u3002";
+    case TextId::FollowLatestLogStatus: return L"\u5DF2\u8DDF\u968F\u6700\u65B0\u901A\u4FE1\u65E5\u5FD7\u3002";
+    case TextId::LogHistoryReadStatus: return L"\u6B63\u5728\u56DE\u770B\u5386\u53F2\u65E5\u5FD7\uFF0C\u65B0\u65E5\u5FD7\u4ECD\u7EE7\u7EED\u8FFD\u52A0\uFF1B\u6EDA\u52A8\u5230\u5E95\u90E8\u6216\u4F7F\u7528\u201C\u8DDF\u968F\u6700\u65B0\u65E5\u5FD7\u201D\u6062\u590D\u8DDF\u968F\u3002";
     case TextId::AutoReconnectEnabled: return L"\u5DF2\u5F00\u542F\u81EA\u52A8\u91CD\u8FDE\u3002";
     case TextId::AutoReconnectDisabled: return L"\u5DF2\u5173\u95ED\u81EA\u52A8\u91CD\u8FDE\u3002";
     case TextId::RefreshedPortsPrefix: return L"\u5DF2\u5237\u65B0\u4E32\u53E3\u5217\u8868\uFF0C\u5171 ";
