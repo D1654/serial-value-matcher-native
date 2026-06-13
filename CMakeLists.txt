@@ -23,6 +23,10 @@ if(SVM_BUILD_WIN32_APP AND NOT WIN32)
     message(FATAL_ERROR "SVM_BUILD_WIN32_APP can only be enabled on Windows.")
 endif()
 
+if(SVM_BUILD_WIN32_APP)
+    enable_language(RC)
+endif()
+
 if(MSVC AND SVM_BUILD_WIN32_APP)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
@@ -113,6 +117,21 @@ if(SVM_BUILD_WIN32_APP)
         )
         target_compile_options(svm-native-win32 PRIVATE /O1 /GL)
         target_link_options(svm-native-win32 PRIVATE /OPT:REF /OPT:ICF /LTCG)
+    elseif(MINGW)
+        target_compile_options(svm-native-win32 PRIVATE
+            -Os
+            -ffunction-sections
+            -fdata-sections
+            -finput-charset=UTF-8
+            -fexec-charset=UTF-8
+        )
+        target_link_options(svm-native-win32 PRIVATE
+            -municode
+            -static
+            -static-libgcc
+            -static-libstdc++
+            -Wl,--gc-sections
+        )
     endif()
 
     install(TARGETS svm-native-win32

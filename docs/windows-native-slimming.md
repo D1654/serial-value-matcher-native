@@ -86,6 +86,15 @@ SVM_BUILD_WIN32_APP=ON
 
 该配置只应在 Windows 上启用，目标是生成 `svm-native-win32.exe` 并通过 `--self-test` 做非交互验证。
 
+Debian 本地也可用 MinGW 交叉构建同一 Win32 native 目标，用于快速调试和静态检查：
+
+```bash
+scripts/build-windows-native-mingw.sh
+scripts/package-windows-native-mingw.sh
+```
+
+本地 MinGW 包是工程诊断产物，不替代 GitHub Actions MSVC 正式包。详细流程见 `docs/windows-native-local-debug.md`。
+
 ## 发布规则
 
 Qt baseline 包允许包含 Qt DLL，并必须生成体积摘要：

@@ -27,6 +27,7 @@ build.ninja
 /.review/
 /.agents/
 /.codex/
+__pycache__/
 
 # Runtime data and logs
 *.db

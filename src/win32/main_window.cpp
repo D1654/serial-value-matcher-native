@@ -150,6 +150,31 @@ struct LogToolbarLayout {
     NativeRect findButton;
 };
 
+struct MainLayoutProbe {
+    int requestedWidth = 0;
+    int requestedHeight = 0;
+    int width = 0;
+    int height = 0;
+    bool compact = false;
+    bool forcedSmall = false;
+    int margin = 0;
+    int groupPad = 0;
+    int row = 0;
+    int connectionWidth = 0;
+    int connectionHeight = 0;
+    int statusY = 0;
+    int contentY = 0;
+    int contentHeight = 0;
+    int leftWidth = 0;
+    int rightWidth = 0;
+    int sendHeight = 0;
+    int workflowY = 0;
+    int workflowHeight = 0;
+    int sendInnerWidth = 0;
+    int logInnerWidth = 0;
+    int logContentHeight = 0;
+};
+
 bool rectIsValid(const NativeRect& rect) {
     return rect.width > 0 && rect.height > 0;
 }
@@ -244,6 +269,79 @@ bool sendControlLayoutIsSane(int innerWidth) {
         && rectIsValid(layout.lineEndingCombo)
         && rectIsValid(layout.historyCombo)
         && layout.historyCombo.right() <= innerWidth;
+}
+
+MainLayoutProbe calculateMainLayoutProbe(int requestedWidth, int requestedHeight) {
+    MainLayoutProbe probe;
+    probe.requestedWidth = requestedWidth;
+    probe.requestedHeight = requestedHeight;
+    probe.width = std::max(requestedWidth, kMinLayoutWidth);
+    probe.height = std::max(requestedHeight, kMinLayoutHeight);
+    probe.forcedSmall = requestedWidth < kMinLayoutWidth || requestedHeight < kMinLayoutHeight;
+    probe.compact = probe.width < 1040 || probe.height < 720;
+    probe.margin = probe.compact ? 8 : 12;
+    probe.groupPad = probe.compact ? 10 : 16;
+    probe.row = probe.compact ? 26 : 30;
+
+    probe.connectionWidth = probe.width - probe.margin * 2;
+    probe.connectionHeight = probe.compact ? 104 : 122;
+    const int statusHeight = probe.compact ? 22 : 26;
+    probe.statusY = probe.height - statusHeight - 4;
+    probe.contentY = probe.margin + probe.connectionHeight + 10;
+    probe.contentHeight = std::max(probe.compact ? 350 : 360, probe.statusY - probe.contentY - 8);
+
+    const int columnGap = probe.compact ? 8 : 10;
+    const int minRightWidth = probe.compact ? 360 : 420;
+    const int minLeftWidth = probe.compact ? 330 : 420;
+    probe.leftWidth = probe.compact ? 370 : 460;
+    if (probe.width - probe.margin * 2 - columnGap - probe.leftWidth < minRightWidth) {
+        probe.leftWidth = std::max(minLeftWidth, probe.width - probe.margin * 2 - columnGap - minRightWidth);
+    }
+    const int rightX = probe.margin + probe.leftWidth + columnGap;
+    probe.rightWidth = std::max(minRightWidth, probe.width - rightX - probe.margin);
+
+    probe.sendHeight = probe.compact ? 130 : 150;
+    probe.workflowY = probe.contentY + probe.sendHeight + 10;
+    probe.workflowHeight = std::max(probe.compact ? 278 : 320, probe.contentHeight - probe.sendHeight - 10);
+    probe.sendInnerWidth = probe.leftWidth - probe.groupPad * 2;
+    probe.logInnerWidth = probe.rightWidth - probe.groupPad * 2;
+
+    const int gap = probe.compact ? 5 : 8;
+    const LogToolbarLayout logLayout = calculateLogToolbarLayout(0, 0, probe.logInnerWidth, probe.row, gap, probe.compact ? 34 : 40);
+    const int logContentY = std::max(logLayout.filterEdit.bottom(), logLayout.findButton.bottom()) + (probe.compact ? 8 : 10);
+    probe.logContentHeight = std::max(120, probe.contentHeight - logContentY - probe.groupPad);
+    return probe;
+}
+
+bool mainLayoutProbeHasStableGeometry(const MainLayoutProbe& probe) {
+    return probe.width >= kMinLayoutWidth
+        && probe.height >= kMinLayoutHeight
+        && probe.connectionWidth > 0
+        && probe.contentY > probe.margin
+        && probe.contentHeight > 0
+        && probe.leftWidth > 0
+        && probe.rightWidth > 0
+        && probe.sendInnerWidth > 0
+        && probe.logInnerWidth > 0
+        && probe.workflowHeight > 0
+        && probe.logContentHeight > 0
+        && sendControlLayoutIsSane(probe.sendInnerWidth)
+        && logToolbarLayoutIsSane(probe.logInnerWidth);
+}
+
+bool mainLayoutProbeSupportsFullInteraction(const MainLayoutProbe& probe) {
+    return !probe.forcedSmall
+        && mainLayoutProbeHasStableGeometry(probe)
+        && probe.workflowY + probe.workflowHeight <= probe.statusY
+        && probe.contentY + probe.contentHeight <= probe.statusY;
+}
+
+bool mainLayoutProbeIsStableAtSize(int width, int height) {
+    return mainLayoutProbeHasStableGeometry(calculateMainLayoutProbe(width, height));
+}
+
+bool mainLayoutProbeIsFullyUsableAtSize(int width, int height) {
+    return mainLayoutProbeSupportsFullInteraction(calculateMainLayoutProbe(width, height));
 }
 
 std::wstring bytesToHex(const std::vector<std::uint8_t>& bytes) {
@@ -919,7 +1017,14 @@ bool NativeMainWindow::runSelfTest() {
     if (!logToolbarLayoutIsSane(360)
         || !logToolbarLayoutIsSane(554)
         || !sendControlLayoutIsSane(320)
-        || !sendControlLayoutIsSane(428)) {
+        || !sendControlLayoutIsSane(428)
+        || !mainLayoutProbeIsFullyUsableAtSize(kMinTrackWidth, kMinTrackHeight)
+        || !mainLayoutProbeIsFullyUsableAtSize(1040, 720)
+        || !mainLayoutProbeIsFullyUsableAtSize(1366, 768)
+        || !mainLayoutProbeIsStableAtSize(640, 400)
+        || !mainLayoutProbeIsStableAtSize(480, 320)
+        || !mainLayoutProbeIsStableAtSize(320, 240)
+        || !mainLayoutProbeIsStableAtSize(1, 1)) {
         return false;
     }
 
