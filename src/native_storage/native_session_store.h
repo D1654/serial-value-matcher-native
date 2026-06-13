@@ -25,6 +25,7 @@ struct SendHistoryEntry {
     std::string content;
     int payloadMode = 0;
     int lineEnding = 0;
+    int textEncodingCodePage = 65001;
     std::string sentAtUtc;
 };
 

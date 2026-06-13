@@ -58,6 +58,7 @@ void sendHistoryAndProfilesKeepLatestRecords() {
     first.content = "AT+测试";
     first.payloadMode = 0;
     first.lineEnding = 1;
+    first.textEncodingCodePage = 65001;
     first.sentAtUtc = "2026-06-12T10:00:00Z";
     assert(store.saveSendHistory(first, 2));
 
@@ -69,14 +70,17 @@ void sendHistoryAndProfilesKeepLatestRecords() {
     second.content = "010300000001";
     second.payloadMode = 1;
     second.lineEnding = 0;
+    second.textEncodingCodePage = 936;
     second.sentAtUtc = "2026-06-12T10:02:00Z";
     assert(store.saveSendHistory(second, 2));
 
     const auto history = store.recentSendHistory(10);
     assert(history.size() == 2);
     assert(history[0].content == "010300000001");
+    assert(history[0].textEncodingCodePage == 936);
     assert(history[1].content == "AT+测试");
     assert(history[1].sentAtUtc == "2026-06-12T10:01:00Z");
+    assert(history[1].textEncodingCodePage == 65001);
 
     svm::native_storage::SerialProfile profile;
     profile.name = "default";

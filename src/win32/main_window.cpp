@@ -777,6 +777,7 @@ bool NativeMainWindow::runSelfTest() {
     history.content = "AT+\xE6\xB5\x8B\xE8\xAF\x95";
     history.payloadMode = 0;
     history.lineEnding = 0;
+    history.textEncodingCodePage = CP_UTF8;
     history.sentAtUtc = timestampText();
 
     const bool ok = store.appendRawEvent(event)
@@ -871,6 +872,16 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
                 setStatus(tx(T::LogFormatChanged));
             }
             return 0;
+        case IDC_LOG_ENCODING_COMBO:
+            if (HIWORD(wParam) == CBN_SELCHANGE) {
+                setStatus(tx(T::LogEncodingChanged));
+            }
+            return 0;
+        case IDC_SEND_MODE_COMBO:
+            if (HIWORD(wParam) == CBN_SELCHANGE) {
+                setSendModeStatus();
+            }
+            return 0;
         case IDC_SAVE_PROFILE_BUTTON:
             saveCurrentSerialProfile();
             return 0;
@@ -954,6 +965,11 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             applyLogTheme(2);
             setStatus(tx(T::ThemeHighContrastStatus));
             return 0;
+        case IDM_VIEW_SHOW_TIMESTAMPS:
+            showLogTimestamps_ = !showLogTimestamps_;
+            updateLogTimestampMenu();
+            setStatus(showLogTimestamps_ ? tx(T::LogTimestampsEnabledStatus) : tx(T::LogTimestampsDisabledStatus));
+            return 0;
         case IDM_HELP_ABOUT:
             showAbout();
             return 0;
@@ -1025,6 +1041,8 @@ void NativeMainWindow::createMenus() {
     AppendMenuW(viewMenu, MF_STRING, IDM_VIEW_THEME_DEFAULT, tx(T::ThemeDefaultMenu));
     AppendMenuW(viewMenu, MF_STRING, IDM_VIEW_THEME_SOFT, tx(T::ThemeSoftMenu));
     AppendMenuW(viewMenu, MF_STRING, IDM_VIEW_THEME_HIGH_CONTRAST, tx(T::ThemeHighContrastMenu));
+    AppendMenuW(viewMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(viewMenu, MF_STRING, IDM_VIEW_SHOW_TIMESTAMPS, tx(T::ShowLogTimestampsMenu));
 
     AppendMenuW(helpMenu, MF_STRING, IDM_HELP_ABOUT, tx(T::HelpAboutMenu));
 
@@ -1035,6 +1053,7 @@ void NativeMainWindow::createMenus() {
     AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(viewMenu), tx(T::ViewMenu));
     AppendMenuW(menu_, MF_POPUP, reinterpret_cast<UINT_PTR>(helpMenu), tx(T::HelpMenu));
     SetMenu(window_, menu_);
+    updateLogTimestampMenu();
 }
 
 void NativeMainWindow::createControls() {
@@ -1089,6 +1108,7 @@ void NativeMainWindow::createControls() {
     textEncodingCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TEXT_ENCODING_COMBO), instance_, nullptr);
     lineEndingCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LINE_ENDING_COMBO), instance_, nullptr);
     logFormatCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_FORMAT_COMBO), instance_, nullptr);
+    logEncodingCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_ENCODING_COMBO), instance_, nullptr);
     historyCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_HISTORY_COMBO), instance_, nullptr);
     sendEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SEND_EDIT), instance_, nullptr);
     sendButton_ = CreateWindowExW(0, L"BUTTON", tx(T::SendButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SEND_BUTTON), instance_, nullptr);
@@ -1188,9 +1208,9 @@ void NativeMainWindow::populateSerialOptionControls() {
     selectComboData(flowControlCombo_, static_cast<LPARAM>(SerialFlowControl::None));
 
     addComboItem(sendModeCombo_, tx(T::TextMode), 0);
-    addComboItem(sendModeCombo_, tx(T::HexMode), 1);
-    addComboItem(sendModeCombo_, tx(T::DecimalMode), 2);
-    addComboItem(sendModeCombo_, tx(T::BinaryMode), 3);
+    addComboItem(sendModeCombo_, tx(T::HexByteStreamMode), 1);
+    addComboItem(sendModeCombo_, tx(T::DecimalByteStreamMode), 2);
+    addComboItem(sendModeCombo_, tx(T::BinaryByteStreamMode), 3);
     selectComboData(sendModeCombo_, 0);
 
     addComboItem(textEncodingCombo_, tx(T::Utf8Encoding), CP_UTF8);
@@ -1211,6 +1231,12 @@ void NativeMainWindow::populateSerialOptionControls() {
     addComboItem(logFormatCombo_, tx(T::LogFormatText), 3);
     addComboItem(logFormatCombo_, tx(T::LogFormatHexText), 4);
     selectComboData(logFormatCombo_, 0);
+
+    addComboItem(logEncodingCombo_, tx(T::Utf8Encoding), CP_UTF8);
+    addComboItem(logEncodingCombo_, tx(T::GbkEncoding), kCodePageGbk);
+    addComboItem(logEncodingCombo_, tx(T::AnsiEncoding), CP_ACP);
+    addComboItem(logEncodingCombo_, tx(T::AsciiEncoding), kCodePageAscii);
+    selectComboData(logEncodingCombo_, CP_UTF8);
 
     addComboItem(scanFunctionCombo_, tx(T::Fc03Holding), 3);
     addComboItem(scanFunctionCombo_, tx(T::Fc04Input), 4);
@@ -1296,13 +1322,16 @@ void NativeMainWindow::layoutControls(int width, int height) {
 
     x = margin + groupPad;
     y = sendY + 26;
-    const int historyWidth = leftWidth - groupPad * 2 - 80 - 82 - 88 - gap * 3;
-    MoveWindow(sendModeCombo_, x, y, 80, 160, TRUE);
-    x += 80 + gap;
-    MoveWindow(textEncodingCombo_, x, y, 82, 160, TRUE);
-    x += 82 + gap;
-    MoveWindow(lineEndingCombo_, x, y, 88, 160, TRUE);
-    x += 88 + gap;
+    const int sendModeWidth = 116;
+    const int sendEncodingWidth = 82;
+    const int lineEndingWidth = 72;
+    const int historyWidth = leftWidth - groupPad * 2 - sendModeWidth - sendEncodingWidth - lineEndingWidth - gap * 3;
+    MoveWindow(sendModeCombo_, x, y, sendModeWidth, 180, TRUE);
+    x += sendModeWidth + gap;
+    MoveWindow(textEncodingCombo_, x, y, sendEncodingWidth, 160, TRUE);
+    x += sendEncodingWidth + gap;
+    MoveWindow(lineEndingCombo_, x, y, lineEndingWidth, 160, TRUE);
+    x += lineEndingWidth + gap;
     MoveWindow(historyCombo_, x, y, historyWidth, 200, TRUE);
 
     x = margin + groupPad;
@@ -1386,6 +1415,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
 
     MoveWindow(logGroup_, rightX, contentY, rightWidth, contentHeight, TRUE);
     MoveWindow(logFormatCombo_, rightX + groupPad, contentY + 24, 164, 180, TRUE);
+    MoveWindow(logEncodingCombo_, rightX + groupPad + 164 + gap, contentY + 24, 82, 160, TRUE);
     MoveWindow(receiveLog_, rightX + groupPad, contentY + 58, rightWidth - groupPad * 2, contentHeight - 72, TRUE);
     MoveWindow(statusText_, margin, statusY, width - margin * 2, statusHeight, TRUE);
 }
@@ -1424,11 +1454,16 @@ void NativeMainWindow::refreshPorts() {
 
 void NativeMainWindow::refreshSendHistory() {
     SendMessageW(historyCombo_, CB_RESETCONTENT, 0, 0);
+    sendHistoryEntries_.clear();
     SendMessageW(historyCombo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(tx(T::SendHistory)));
     if (store_.isOpen()) {
-        const auto history = store_.recentSendHistory(30);
-        for (const native_storage::SendHistoryEntry& item : history) {
-            SendMessageW(historyCombo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(utf8ToWide(item.content).c_str()));
+        sendHistoryEntries_ = store_.recentSendHistory(30);
+        for (std::size_t index = 0; index < sendHistoryEntries_.size(); ++index) {
+            const native_storage::SendHistoryEntry& item = sendHistoryEntries_[index];
+            const LRESULT comboIndex = SendMessageW(historyCombo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(utf8ToWide(item.content).c_str()));
+            if (comboIndex >= 0) {
+                SendMessageW(historyCombo_, CB_SETITEMDATA, static_cast<WPARAM>(comboIndex), static_cast<LPARAM>(index + 1));
+            }
         }
     }
     SendMessageW(historyCombo_, CB_SETCURSEL, 0, 0);
@@ -1439,7 +1474,22 @@ void NativeMainWindow::applySelectedHistory() {
     if (index <= 0) {
         return;
     }
-    setControlText(sendEdit_, controlText(historyCombo_));
+    const LRESULT itemData = SendMessageW(historyCombo_, CB_GETITEMDATA, static_cast<WPARAM>(index), 0);
+    if (itemData <= 0) {
+        setControlText(sendEdit_, controlText(historyCombo_));
+        return;
+    }
+    const std::size_t historyIndex = static_cast<std::size_t>(itemData - 1);
+    if (historyIndex >= sendHistoryEntries_.size()) {
+        return;
+    }
+
+    const native_storage::SendHistoryEntry& history = sendHistoryEntries_[historyIndex];
+    setControlText(sendEdit_, utf8ToWide(history.content));
+    selectComboData(sendModeCombo_, history.payloadMode);
+    selectComboData(lineEndingCombo_, history.lineEnding);
+    selectComboData(textEncodingCombo_, history.textEncodingCodePage);
+    setStatus(tx(T::SendHistoryRestored));
 }
 
 void NativeMainWindow::applyLatestSerialProfile() {
@@ -1583,6 +1633,7 @@ void NativeMainWindow::sendPayload() {
         history.content = wideToUtf8(controlText(sendEdit_));
         history.payloadMode = static_cast<int>(selectedComboData(sendModeCombo_, 0));
         history.lineEnding = static_cast<int>(selectedComboData(lineEndingCombo_, 0));
+        history.textEncodingCodePage = static_cast<int>(selectedTextCodePage());
         history.sentAtUtc = timestampText();
         store_.saveSendHistory(history);
         refreshSendHistory();
@@ -1680,7 +1731,9 @@ void NativeMainWindow::appendLog(NativeLogKind kind, const std::wstring& line) {
     if (GetWindowTextLengthW(receiveLog_) > static_cast<int>(kMaxLogChars)) {
         SetWindowTextW(receiveLog_, tx(T::LogLimitReset));
     }
-    const std::wstring text = L"[" + localClockText() + L"] " + sanitizeLogText(line) + L"\r\n";
+    const std::wstring text = (showLogTimestamps_ ? (L"[" + localClockText() + L"] ") : std::wstring())
+        + sanitizeLogText(line)
+        + L"\r\n";
     SendMessageW(receiveLog_, EM_SETSEL, static_cast<WPARAM>(-1), static_cast<LPARAM>(-1));
     if (receiveLogUsesRichEdit_) {
         CHARFORMAT2W format = {};
@@ -1727,6 +1780,24 @@ void NativeMainWindow::setStatus(const std::wstring& text) {
     SetWindowTextW(statusText_, text.c_str());
 }
 
+void NativeMainWindow::setSendModeStatus() {
+    const int mode = static_cast<int>(selectedComboData(sendModeCombo_, 0));
+    switch (mode) {
+    case 1:
+        setStatus(tx(T::SendModeHexStatus));
+        break;
+    case 2:
+        setStatus(tx(T::SendModeDecimalStatus));
+        break;
+    case 3:
+        setStatus(tx(T::SendModeBinaryStatus));
+        break;
+    default:
+        setStatus(tx(T::SendModeTextStatus));
+        break;
+    }
+}
+
 std::wstring NativeMainWindow::controlText(HWND control) const {
     const int length = GetWindowTextLengthW(control);
     std::wstring text(static_cast<std::size_t>(length) + 1, L'\0');
@@ -1766,9 +1837,9 @@ std::wstring NativeMainWindow::formatPayloadForLog(const std::vector<std::uint8_
     case 2:
         return bytesToBinary(payload);
     case 3:
-        return decodeBytesToText(payload, selectedTextCodePage());
+        return decodeBytesToText(payload, selectedLogCodePage());
     case 4:
-        return bytesToHex(payload) + L" | " + decodeBytesToText(payload, selectedTextCodePage());
+        return bytesToHex(payload) + L" | " + decodeBytesToText(payload, selectedLogCodePage());
     default:
         return bytesToHex(payload);
     }
@@ -1776,6 +1847,10 @@ std::wstring NativeMainWindow::formatPayloadForLog(const std::vector<std::uint8_
 
 unsigned int NativeMainWindow::selectedTextCodePage() const {
     return static_cast<unsigned int>(selectedComboData(textEncodingCombo_, CP_UTF8));
+}
+
+unsigned int NativeMainWindow::selectedLogCodePage() const {
+    return static_cast<unsigned int>(selectedComboData(logEncodingCombo_, CP_UTF8));
 }
 
 std::string NativeMainWindow::selectedPortName() const {
@@ -1877,6 +1952,17 @@ void NativeMainWindow::applyLogTheme(int themeIndex) {
     format.crTextColor = palette.normal;
     SendMessageW(receiveLog_, EM_SETCHARFORMAT, SCF_DEFAULT, reinterpret_cast<LPARAM>(&format));
     InvalidateRect(receiveLog_, nullptr, TRUE);
+}
+
+void NativeMainWindow::updateLogTimestampMenu() {
+    if (menu_ == nullptr) {
+        return;
+    }
+    HMENU viewMenu = GetSubMenu(menu_, 4);
+    CheckMenuItem(
+        viewMenu != nullptr ? viewMenu : menu_,
+        IDM_VIEW_SHOW_TIMESTAMPS,
+        MF_BYCOMMAND | (showLogTimestamps_ ? MF_CHECKED : MF_UNCHECKED));
 }
 
 void NativeMainWindow::runModbusScan() {

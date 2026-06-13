@@ -75,16 +75,19 @@ private:
     void appendPayloadLog(NativeLogKind kind, const std::vector<std::uint8_t>& payload);
     void clearLog();
     void setStatus(const std::wstring& text);
+    void setSendModeStatus();
     std::wstring controlText(HWND control) const;
     void setControlText(HWND control, const std::wstring& text);
     std::vector<std::uint8_t> payloadFromInput(std::wstring* errorText) const;
     std::wstring formatPayloadForLog(const std::vector<std::uint8_t>& payload) const;
     unsigned int selectedTextCodePage() const;
+    unsigned int selectedLogCodePage() const;
     std::string selectedPortName() const;
     SerialOpenOptions currentOpenOptions() const;
     void applySerialLineControl(WORD controlId);
     void updateRtsControlState();
     void applyLogTheme(int themeIndex);
+    void updateLogTimestampMenu();
     std::filesystem::path defaultStoreDirectory() const;
     void saveRawEvent(std::string direction, const std::vector<std::uint8_t>& payload);
 
@@ -119,6 +122,7 @@ private:
     HWND textEncodingCombo_ = nullptr;
     HWND lineEndingCombo_ = nullptr;
     HWND logFormatCombo_ = nullptr;
+    HWND logEncodingCombo_ = nullptr;
     HWND historyCombo_ = nullptr;
     HWND sendEdit_ = nullptr;
     HWND sendButton_ = nullptr;
@@ -154,10 +158,12 @@ private:
     HMODULE richEditModule_ = nullptr;
     bool ownsUiFont_ = false;
     bool receiveLogUsesRichEdit_ = false;
+    bool showLogTimestamps_ = true;
     int logThemeIndex_ = 0;
     Win32SerialPort serialPort_;
     native_storage::NativeSessionStore store_;
     std::vector<SerialPortDescriptor> availablePorts_;
+    std::vector<native_storage::SendHistoryEntry> sendHistoryEntries_;
     std::string sessionId_ = "win32-native-session";
     std::optional<SerialOpenOptions> lastOpenOptions_;
     std::string reconnectPortName_;

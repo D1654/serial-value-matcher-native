@@ -255,6 +255,9 @@ SendHistoryEntry sendHistoryFromRecord(const NativeSessionStore::Record& record)
     entry.payloadMode = toInt(record[2]);
     entry.lineEnding = toInt(record[3]);
     entry.sentAtUtc = record[4];
+    if (record.size() >= 6) {
+        entry.textEncodingCodePage = toInt(record[5]);
+    }
     return entry;
 }
 
@@ -265,6 +268,7 @@ NativeSessionStore::Record recordFromSendHistory(const SendHistoryEntry& entry) 
         toString(entry.payloadMode),
         toString(entry.lineEnding),
         entry.sentAtUtc,
+        toString(entry.textEncodingCodePage),
     };
 }
 
@@ -757,7 +761,8 @@ bool NativeSessionStore::saveSendHistory(SendHistoryEntry entry, int limit) {
         SendHistoryEntry existing = sendHistoryFromRecord(record);
         if (existing.content == entry.content
             && existing.payloadMode == entry.payloadMode
-            && existing.lineEnding == entry.lineEnding) {
+            && existing.lineEnding == entry.lineEnding
+            && existing.textEncodingCodePage == entry.textEncodingCodePage) {
             continue;
         }
         entries.push_back(std::move(existing));
