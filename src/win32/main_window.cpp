@@ -2175,6 +2175,10 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int pageBackgroundBottom = tabsY + std::min<LONG>(tabsHeight, tabDisplayRect.bottom);
     const int pageW = std::max(1, pageRight - pageX);
     const bool pageHasRoom = pageBottom > pageY;
+    const int labelOffsetY = std::max(0, (row - labelHeight) / 2);
+    const int checkOffsetY = std::max(0, (row - 16) / 2);
+    const int progressOffsetY = compact ? 3 : 4;
+    const int progressHeight = compact ? 14 : 16;
     MoveWindow(
         workPageBackground_,
         pageBackgroundX,
@@ -2220,8 +2224,8 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int timedCheckWidth = compact ? 48 : 54;
     const int periodLabelWidth = compact ? 58 : 64;
     const int periodEditWidth = compact ? 60 : 68;
-    MoveWindow(timedSendCheck_, timedX, timedY + 2, timedCheckWidth, row - 2, TRUE);
-    MoveWindow(timedPeriodLabel_, timedX + timedCheckWidth + gap, timedY + 4, periodLabelWidth, labelHeight, TRUE);
+    MoveWindow(timedSendCheck_, timedX, timedY + checkOffsetY, timedCheckWidth, 16, TRUE);
+    MoveWindow(timedPeriodLabel_, timedX + timedCheckWidth + gap, timedY + labelOffsetY, periodLabelWidth, labelHeight, TRUE);
     MoveWindow(timedPeriodEdit_, timedX + timedCheckWidth + gap + periodLabelWidth, timedY, periodEditWidth, row, TRUE);
 
     int quickColumns = 2;
@@ -2255,7 +2259,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int fileStopWidth = compact ? 44 : 50;
     const bool fileFirstRowVisible = y + row <= pageBottom && pageW >= fileLabelWidth + browseWidth + fileSendWidth + fileStopWidth + gap * 4 + 24;
     const int filePathWidth = std::max(1, pageW - fileLabelWidth - browseWidth - fileSendWidth - fileStopWidth - gap * 4);
-    MoveWindow(filePathLabel_, x, y + 5, fileLabelWidth, labelHeight, TRUE);
+    MoveWindow(filePathLabel_, x, y + labelOffsetY, fileLabelWidth, labelHeight, TRUE);
     x += fileLabelWidth;
     MoveWindow(filePathEdit_, x, y, filePathWidth, row, TRUE);
     x += filePathWidth + gap;
@@ -2269,11 +2273,11 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int delayLabelWidth = compact ? 60 : 68;
     const int delayComboWidth = compact ? 66 : 74;
     const bool fileSecondRowVisible = y + row <= pageBottom;
-    MoveWindow(fileDelayLabel_, x, y + 5, delayLabelWidth, labelHeight, TRUE);
+    MoveWindow(fileDelayLabel_, x, y + labelOffsetY, delayLabelWidth, labelHeight, TRUE);
     x += delayLabelWidth;
     MoveWindow(fileDelayCombo_, x, y, delayComboWidth, 160, TRUE);
     x += delayComboWidth + gap;
-    MoveWindow(fileProgress_, x, y + 4, std::max(1, pageX + pageW - x), compact ? 14 : 16, TRUE);
+    MoveWindow(fileProgress_, x, y + progressOffsetY, std::max(1, pageX + pageW - x), progressHeight, TRUE);
 
     ShowWindow(workflowHint_, SW_HIDE);
     y = contentY;
@@ -2294,32 +2298,31 @@ void NativeMainWindow::layoutControls(int width, int height) {
         + gap * 7;
     const int scanFunctionWidth = std::max(1, std::min(compact ? 148 : 166, pageW - fixedScanRowWidth));
     const bool scanParameterRowVisible = y + row <= pageBottom;
-    MoveWindow(scanSlaveLabel_, x, y + 5, shortLabelWidth, labelHeight, TRUE);
+    MoveWindow(scanSlaveLabel_, x, y + labelOffsetY, shortLabelWidth, labelHeight, TRUE);
     x += shortLabelWidth + gap;
     MoveWindow(scanSlaveEdit_, x, y, scanSlaveEditWidth, row, TRUE);
     x += scanSlaveEditWidth + gap;
-    MoveWindow(scanFunctionLabel_, x, y + 5, scanFunctionLabelWidth, labelHeight, TRUE);
+    MoveWindow(scanFunctionLabel_, x, y + labelOffsetY, scanFunctionLabelWidth, labelHeight, TRUE);
     x += scanFunctionLabelWidth + gap;
     MoveWindow(scanFunctionCombo_, x, y, scanFunctionWidth, 160, TRUE);
     x += scanFunctionWidth + gap;
-    MoveWindow(scanStartLabel_, x, y + 5, addressLabelWidth, labelHeight, TRUE);
+    MoveWindow(scanStartLabel_, x, y + labelOffsetY, addressLabelWidth, labelHeight, TRUE);
     x += addressLabelWidth + gap;
     MoveWindow(scanStartEdit_, x, y, addressEditWidth, row, TRUE);
     x += addressEditWidth + gap;
-    MoveWindow(scanEndLabel_, x, y + 5, addressLabelWidth, labelHeight, TRUE);
+    MoveWindow(scanEndLabel_, x, y + labelOffsetY, addressLabelWidth, labelHeight, TRUE);
     x += addressLabelWidth + gap;
     MoveWindow(scanEndEdit_, x, y, addressEditWidth, row, TRUE);
 
     y += row + gap;
     x = pageX;
-    const int progressHeight = compact ? 14 : 16;
     const int progressLabelWidth = compact ? 32 : 36;
     const int progressTextWidth = std::max(1, std::min(compact ? 126 : 148, pageW / 3));
     const int progressBarWidth = std::max(1, pageW - progressLabelWidth - progressTextWidth - gap * 2);
     const bool scanProgressRowVisible = y + progressHeight <= pageBottom && pageW >= 180;
     MoveWindow(modbusProgressLabel_, x, y, progressLabelWidth, progressHeight, TRUE);
     x += progressLabelWidth + gap;
-    MoveWindow(modbusProgress_, x, y + 2, progressBarWidth, progressHeight - 3, TRUE);
+    MoveWindow(modbusProgress_, x, y + 1, progressBarWidth, std::max(1, progressHeight - 2), TRUE);
     x += progressBarWidth + gap;
     MoveWindow(modbusProgressText_, x, y, progressTextWidth, progressHeight, TRUE);
 
@@ -2393,7 +2396,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int settingsComboWidth = compact ? 68 : 78;
     const int pauseButtonWidth = compact ? 78 : 88;
     const bool settingsRowVisible = y + row <= pageBottom;
-    MoveWindow(logCacheLabel_, x, y + 5, settingsLabelWidth, labelHeight, TRUE);
+    MoveWindow(logCacheLabel_, x, y + labelOffsetY, settingsLabelWidth, labelHeight, TRUE);
     x += settingsLabelWidth;
     MoveWindow(logCacheCombo_, x, y, settingsComboWidth, 260, TRUE);
     x += settingsComboWidth + gap;
