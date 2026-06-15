@@ -13,6 +13,8 @@
 #include "core/report_core.h"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <commctrl.h>
 #include <commdlg.h>
@@ -23,6 +25,7 @@
 #include <ctime>
 #include <cwctype>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <string_view>
 #include <utility>
@@ -37,15 +40,20 @@ namespace modbus_core = ::svm::core::modbus;
 namespace report_core = ::svm::core::report;
 
 constexpr wchar_t kWindowClassName[] = L"SvmNativeMainWindow";
-constexpr std::size_t kMaxLogEntries = 2000;
-constexpr std::size_t kMaxVisibleLogChars = 350000;
+constexpr std::size_t kMinLogVisibleChars = 200000;
+constexpr std::size_t kMaxLogVisibleChars = 100000000;
+constexpr std::size_t kMaxLogEntryLimit = 200000;
 constexpr std::size_t kMaxRenderedLogLineChars = 4096;
 constexpr UINT kCodePageGbk = 936;
 constexpr UINT kCodePageAscii = 20127;
-constexpr int kMinTrackWidth = 840;
-constexpr int kMinTrackHeight = 620;
-constexpr int kMinLayoutWidth = 820;
-constexpr int kMinLayoutHeight = 560;
+constexpr int kMinTrackWidth = 760;
+constexpr int kMinTrackHeight = 520;
+constexpr int kMinLayoutWidth = 760;
+constexpr int kMinLayoutHeight = 500;
+constexpr UINT kModbusScanDoneMessage = WM_APP + 14;
+constexpr UINT kModbusScanProgressMessage = WM_APP + 15;
+constexpr int kFileSendChunkBytes = 1024;
+constexpr std::size_t kDefaultLogVisibleChars = 350000;
 
 const wchar_t* tx(T id) {
     return uiText(id);
@@ -60,6 +68,24 @@ struct NativeLogPalette {
     COLORREF modbusTx = RGB(138, 82, 0);
     COLORREF modbusRx = RGB(108, 72, 145);
     COLORREF error = RGB(176, 38, 38);
+};
+
+struct ScopedWindowRedraw {
+    explicit ScopedWindowRedraw(HWND window)
+        : window_(window) {
+        if (window_ != nullptr) {
+            SendMessageW(window_, WM_SETREDRAW, FALSE, 0);
+        }
+    }
+
+    ~ScopedWindowRedraw() {
+        if (window_ != nullptr) {
+            SendMessageW(window_, WM_SETREDRAW, TRUE, 0);
+            RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN);
+        }
+    }
+
+    HWND window_ = nullptr;
 };
 
 NativeLogPalette logPalette(int themeIndex) {
@@ -175,6 +201,77 @@ struct MainLayoutProbe {
     int logContentHeight = 0;
 };
 
+struct NativeUiMetrics {
+    bool compact = false;
+    bool tight = false;
+    int margin = 0;
+    int row = 0;
+    int gap = 0;
+    int labelHeight = 0;
+    int titleHeight = 0;
+    int statusHeight = 0;
+    int sideGap = 0;
+    int smallButtonWidth = 0;
+    int desiredSideWidth = 0;
+    int minSideWidth = 0;
+    int desiredWorkHeight = 0;
+    int minimumLogHeight = 0;
+    int logActionWidth = 0;
+};
+
+NativeUiMetrics nativeUiMetricsForSize(int width, int height) {
+    NativeUiMetrics metrics;
+    metrics.compact = width < 1040 || height < 720;
+    metrics.tight = width < 860;
+    metrics.margin = metrics.tight ? 3 : (metrics.compact ? 4 : 6);
+    metrics.row = metrics.compact ? 22 : 23;
+    metrics.gap = metrics.tight ? 2 : (metrics.compact ? 3 : 4);
+    metrics.labelHeight = metrics.compact ? 15 : 16;
+    metrics.titleHeight = metrics.compact ? 16 : 18;
+    metrics.statusHeight = metrics.compact ? 20 : 22;
+    metrics.sideGap = metrics.tight ? 4 : (metrics.compact ? 5 : 6);
+    metrics.smallButtonWidth = metrics.tight ? 44 : (metrics.compact ? 48 : 52);
+    metrics.desiredSideWidth = metrics.tight ? 150 : (metrics.compact ? 154 : 170);
+    metrics.minSideWidth = metrics.tight ? 112 : 140;
+    metrics.desiredWorkHeight = metrics.tight ? 144 : (metrics.compact ? 150 : 162);
+    metrics.minimumLogHeight = metrics.compact ? 150 : 210;
+    metrics.logActionWidth = metrics.compact ? 38 : 42;
+    return metrics;
+}
+
+HFONT createClassicUiFont() {
+    NONCLIENTMETRICSW metrics = {};
+    metrics.cbSize = sizeof(metrics);
+    if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, metrics.cbSize, &metrics, 0) != FALSE) {
+        LOGFONTW font = metrics.lfMessageFont;
+        if (font.lfHeight == 0 || font.lfHeight < -12) {
+            font.lfHeight = -12;
+        } else if (font.lfHeight > 12) {
+            font.lfHeight = 12;
+        }
+        font.lfWidth = 0;
+        font.lfWeight = FW_NORMAL;
+        font.lfQuality = CLEARTYPE_QUALITY;
+        return CreateFontIndirectW(&font);
+    }
+
+    return CreateFontW(
+        -12,
+        0,
+        0,
+        0,
+        FW_NORMAL,
+        FALSE,
+        FALSE,
+        FALSE,
+        DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY,
+        DEFAULT_PITCH | FF_DONTCARE,
+        L"MS Shell Dlg 2");
+}
+
 bool rectIsValid(const NativeRect& rect) {
     return rect.width > 0 && rect.height > 0;
 }
@@ -186,12 +283,28 @@ bool sameRowAndAdjacent(const NativeRect& left, const NativeRect& right, int max
         && right.x - left.right() <= maxGap;
 }
 
+void showControl(HWND control, bool visible) {
+    if (control == nullptr) {
+        return;
+    }
+    const bool currentlyVisible = IsWindowVisible(control) != FALSE;
+    if (currentlyVisible != visible) {
+        ShowWindow(control, visible ? SW_SHOWNA : SW_HIDE);
+    }
+}
+
+void enableControl(HWND control, bool enabled) {
+    if (control != nullptr) {
+        EnableWindow(control, enabled ? TRUE : FALSE);
+    }
+}
+
 SendControlLayout calculateSendControlLayout(int x, int y, int innerWidth, int row, int gap, int labelHeight) {
     const bool compact = innerWidth < 390;
-    const int sendModeWidth = compact ? 94 : 116;
-    const int sendEncodingWidth = compact ? 64 : 82;
-    const int lineEndingWidth = compact ? 54 : 72;
-    const int historyWidth = std::max(72, innerWidth - sendModeWidth - sendEncodingWidth - lineEndingWidth - gap * 3);
+    const int sendModeWidth = compact ? 90 : 110;
+    const int sendEncodingWidth = compact ? 58 : 70;
+    const int lineEndingWidth = compact ? 50 : 64;
+    const int historyWidth = std::max(68, innerWidth - sendModeWidth - sendEncodingWidth - lineEndingWidth - gap * 3);
 
     SendControlLayout layout;
     int cursor = x;
@@ -209,47 +322,42 @@ SendControlLayout calculateSendControlLayout(int x, int y, int innerWidth, int r
     return layout;
 }
 
-LogToolbarLayout calculateLogToolbarLayout(int x, int y, int innerWidth, int row, int gap, int labelWidth) {
-    const bool compact = innerWidth < 430;
-    const int formatWidth = compact ? 110 : 136;
-    const int encodingWidth = compact ? 58 : 76;
-    const int actionWidth = compact ? 48 : 58;
-    const int operationLabelWidth = compact ? 34 : 40;
-    labelWidth = compact ? 34 : labelWidth;
+LogToolbarLayout calculateLogToolbarLayout(int x, int y, int innerWidth, int row, int gap, int preferredActionWidth) {
+    const bool compact = innerWidth < 620;
+    const int usableWidth = std::max(7, innerWidth - gap * 6);
+    const int formatWidth = std::max(1, std::min(compact ? 110 : 120, usableWidth * 25 / 100));
+    const int encodingWidth = std::max(1, std::min(compact ? 54 : 64, usableWidth * 12 / 100));
+    const int actionBudget = std::max(1, (usableWidth - formatWidth - encodingWidth - 2) / 3);
+    const int actionWidth = std::max(1, std::min(preferredActionWidth, actionBudget));
+    const int variableWidth = std::max(2, usableWidth - formatWidth - encodingWidth - actionWidth * 3);
+    const int searchWidth = std::clamp(variableWidth / 3, 1, variableWidth - 1);
+    const int filterWidth = variableWidth - searchWidth;
 
     LogToolbarLayout layout;
     int cursor = x;
-    layout.formatLabel = {cursor, y + 5, labelWidth, 22};
-    cursor += labelWidth;
+    layout.formatLabel = {x, y, 0, 0};
     layout.formatCombo = {cursor, y, formatWidth, row};
     cursor += formatWidth + gap;
-    layout.encodingLabel = {cursor, y + 5, labelWidth, 22};
-    cursor += labelWidth;
+    layout.encodingLabel = {cursor, y, 0, 0};
     layout.encodingCombo = {cursor, y, encodingWidth, row};
-    layout.exportButton = {x + innerWidth - actionWidth, y, actionWidth, row};
-    layout.copyButton = {layout.exportButton.x - gap - actionWidth, y, actionWidth, row};
-
-    const int secondY = y + row + (compact ? 5 : 6);
-    const int availableForInputs = innerWidth - operationLabelWidth * 2 - actionWidth - gap * 4;
-    const int filterWidth = std::max(compact ? 82 : 120, availableForInputs / 2);
-    const int searchWidth = std::max(compact ? 82 : 120, availableForInputs - filterWidth);
-    cursor = x;
-    layout.filterLabel = {cursor, secondY + 5, operationLabelWidth, 22};
-    cursor += operationLabelWidth;
-    layout.filterEdit = {cursor, secondY, filterWidth, row};
+    cursor += encodingWidth + gap;
+    layout.filterLabel = {cursor, y, 0, 0};
+    layout.filterEdit = {cursor, y, filterWidth, row};
     cursor += filterWidth + gap;
-    layout.searchLabel = {cursor, secondY + 5, operationLabelWidth, 22};
-    cursor += operationLabelWidth;
-    layout.searchEdit = {cursor, secondY, searchWidth, row};
+    layout.searchLabel = {cursor, y, 0, 0};
+    layout.searchEdit = {cursor, y, searchWidth, row};
     cursor += searchWidth + gap;
-    layout.findButton = {cursor, secondY, actionWidth, row};
+    layout.findButton = {cursor, y, actionWidth, row};
+    cursor += actionWidth + gap;
+    layout.copyButton = {cursor, y, actionWidth, row};
+    cursor += actionWidth + gap;
+    layout.exportButton = {cursor, y, actionWidth, row};
     return layout;
 }
 
 bool logToolbarLayoutIsSane(int innerWidth) {
-    const bool compact = innerWidth < 430;
-    const int gap = compact ? 5 : 8;
-    const LogToolbarLayout layout = calculateLogToolbarLayout(0, 0, innerWidth, compact ? 26 : 30, gap, compact ? 34 : 40);
+    const NativeUiMetrics metrics = nativeUiMetricsForSize(innerWidth + 260, 520);
+    const LogToolbarLayout layout = calculateLogToolbarLayout(0, 0, innerWidth, metrics.row, metrics.gap, metrics.logActionWidth);
     return rectIsValid(layout.formatCombo)
         && rectIsValid(layout.encodingCombo)
         && rectIsValid(layout.filterEdit)
@@ -257,18 +365,29 @@ bool logToolbarLayoutIsSane(int innerWidth) {
         && rectIsValid(layout.findButton)
         && layout.exportButton.right() <= innerWidth
         && layout.findButton.right() <= innerWidth
-        && layout.encodingCombo.right() + gap <= layout.copyButton.x
-        && sameRowAndAdjacent(layout.searchEdit, layout.findButton, gap);
+        && layout.encodingCombo.right() + metrics.gap <= layout.filterEdit.x
+        && sameRowAndAdjacent(layout.filterEdit, layout.searchEdit, metrics.gap)
+        && sameRowAndAdjacent(layout.searchEdit, layout.findButton, metrics.gap);
 }
 
 bool sendControlLayoutIsSane(int innerWidth) {
-    const bool compact = innerWidth < 390;
-    const SendControlLayout layout = calculateSendControlLayout(0, 0, innerWidth, compact ? 26 : 30, compact ? 5 : 8, compact ? 16 : 18);
+    const NativeUiMetrics metrics = nativeUiMetricsForSize(innerWidth + 260, 520);
+    const SendControlLayout layout = calculateSendControlLayout(0, 0, innerWidth, metrics.row, metrics.gap, metrics.labelHeight);
     return rectIsValid(layout.modeCombo)
         && rectIsValid(layout.encodingCombo)
         && rectIsValid(layout.lineEndingCombo)
         && rectIsValid(layout.historyCombo)
         && layout.historyCombo.right() <= innerWidth;
+}
+
+std::wstring formatLogCacheLimit(std::size_t charLimit) {
+    if (charLimit >= 1000000 && charLimit % 1000000 == 0) {
+        return std::to_wstring(charLimit / 1000000) + L"M";
+    }
+    if (charLimit >= 1000 && charLimit % 1000 == 0) {
+        return std::to_wstring(charLimit / 1000) + L"K";
+    }
+    return std::to_wstring(charLimit);
 }
 
 MainLayoutProbe calculateMainLayoutProbe(int requestedWidth, int requestedHeight) {
@@ -278,38 +397,29 @@ MainLayoutProbe calculateMainLayoutProbe(int requestedWidth, int requestedHeight
     probe.width = std::max(requestedWidth, kMinLayoutWidth);
     probe.height = std::max(requestedHeight, kMinLayoutHeight);
     probe.forcedSmall = requestedWidth < kMinLayoutWidth || requestedHeight < kMinLayoutHeight;
-    probe.compact = probe.width < 1040 || probe.height < 720;
-    probe.margin = probe.compact ? 8 : 12;
-    probe.groupPad = probe.compact ? 10 : 16;
-    probe.row = probe.compact ? 26 : 30;
+    const NativeUiMetrics metrics = nativeUiMetricsForSize(probe.width, probe.height);
+    probe.compact = metrics.compact;
+    probe.margin = metrics.margin;
+    probe.groupPad = 0;
+    probe.row = metrics.row;
 
-    probe.connectionWidth = probe.width - probe.margin * 2;
-    probe.connectionHeight = probe.compact ? 104 : 122;
-    const int statusHeight = probe.compact ? 22 : 26;
-    probe.statusY = probe.height - statusHeight - 4;
-    probe.contentY = probe.margin + probe.connectionHeight + 10;
-    probe.contentHeight = std::max(probe.compact ? 350 : 360, probe.statusY - probe.contentY - 8);
+    probe.statusY = probe.height - metrics.statusHeight - 4;
+    probe.rightWidth = metrics.desiredSideWidth;
+    probe.leftWidth = std::max(360, probe.width - probe.margin * 2 - metrics.sideGap - probe.rightWidth);
+    probe.connectionWidth = probe.rightWidth;
+    probe.connectionHeight = std::max(240, probe.statusY - probe.margin);
+    probe.contentY = probe.margin;
+    probe.contentHeight = std::max(280, probe.statusY - probe.margin);
 
-    const int columnGap = probe.compact ? 8 : 10;
-    const int minRightWidth = probe.compact ? 360 : 420;
-    const int minLeftWidth = probe.compact ? 330 : 420;
-    probe.leftWidth = probe.compact ? 370 : 460;
-    if (probe.width - probe.margin * 2 - columnGap - probe.leftWidth < minRightWidth) {
-        probe.leftWidth = std::max(minLeftWidth, probe.width - probe.margin * 2 - columnGap - minRightWidth);
-    }
-    const int rightX = probe.margin + probe.leftWidth + columnGap;
-    probe.rightWidth = std::max(minRightWidth, probe.width - rightX - probe.margin);
-
-    probe.sendHeight = probe.compact ? 130 : 150;
-    probe.workflowY = probe.contentY + probe.sendHeight + 10;
-    probe.workflowHeight = std::max(probe.compact ? 278 : 320, probe.contentHeight - probe.sendHeight - 10);
+    probe.sendHeight = metrics.desiredWorkHeight;
+    probe.workflowY = probe.margin;
+    probe.workflowHeight = std::max(150, probe.contentHeight - probe.sendHeight - metrics.sideGap);
     probe.sendInnerWidth = probe.leftWidth - probe.groupPad * 2;
-    probe.logInnerWidth = probe.rightWidth - probe.groupPad * 2;
+    probe.logInnerWidth = probe.leftWidth - probe.groupPad * 2;
 
-    const int gap = probe.compact ? 5 : 8;
-    const LogToolbarLayout logLayout = calculateLogToolbarLayout(0, 0, probe.logInnerWidth, probe.row, gap, probe.compact ? 34 : 40);
-    const int logContentY = std::max(logLayout.filterEdit.bottom(), logLayout.findButton.bottom()) + (probe.compact ? 8 : 10);
-    probe.logContentHeight = std::max(120, probe.contentHeight - logContentY - probe.groupPad);
+    const LogToolbarLayout logLayout = calculateLogToolbarLayout(0, 0, probe.logInnerWidth, probe.row, metrics.gap, metrics.logActionWidth);
+    const int logContentY = std::max(logLayout.filterEdit.bottom(), logLayout.findButton.bottom()) + (probe.compact ? 5 : 6);
+    probe.logContentHeight = std::max(120, probe.workflowHeight - logContentY - probe.groupPad);
     return probe;
 }
 
@@ -317,7 +427,7 @@ bool mainLayoutProbeHasStableGeometry(const MainLayoutProbe& probe) {
     return probe.width >= kMinLayoutWidth
         && probe.height >= kMinLayoutHeight
         && probe.connectionWidth > 0
-        && probe.contentY > probe.margin
+        && probe.contentY >= probe.margin
         && probe.contentHeight > 0
         && probe.leftWidth > 0
         && probe.rightWidth > 0
@@ -342,6 +452,18 @@ bool mainLayoutProbeIsStableAtSize(int width, int height) {
 
 bool mainLayoutProbeIsFullyUsableAtSize(int width, int height) {
     return mainLayoutProbeSupportsFullInteraction(calculateMainLayoutProbe(width, height));
+}
+
+void writeSelfTestTrace(const char* message) {
+    char path[MAX_PATH] = {};
+    const DWORD length = GetEnvironmentVariableA("SVM_NATIVE_SELF_TEST_LOG", path, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) {
+        return;
+    }
+    std::ofstream output(path, std::ios::app);
+    if (output) {
+        output << message << '\n';
+    }
 }
 
 std::wstring bytesToHex(const std::vector<std::uint8_t>& bytes) {
@@ -685,6 +807,25 @@ void addControlFont(HWND control, HFONT font) {
     }
 }
 
+bool hasWindowClass(HWND control, const wchar_t* expectedClassName) {
+    wchar_t className[32] = {};
+    if (control == nullptr || GetClassNameW(control, className, static_cast<int>(sizeof(className) / sizeof(className[0]))) == 0) {
+        return false;
+    }
+    return lstrcmpiW(className, expectedClassName) == 0;
+}
+
+void applyClassicControlChrome(HWND control) {
+    if (control == nullptr) {
+        return;
+    }
+    if (hasWindowClass(control, L"Edit") || hasWindowClass(control, L"RICHEDIT50W")) {
+        SendMessageW(control, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(2, 2));
+    } else if (hasWindowClass(control, L"ComboBox")) {
+        SendMessageW(control, CB_SETMINVISIBLE, 10, 0);
+    }
+}
+
 void addComboItem(HWND combo, const wchar_t* text, LPARAM data) {
     const LRESULT index = SendMessageW(combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text));
     if (index >= 0) {
@@ -820,17 +961,13 @@ int textToInt(HWND control, int fallback) {
     return end != text.c_str() ? static_cast<int>(value) : fallback;
 }
 
-double textToDouble(HWND control, double fallback, bool* ok = nullptr) {
+double textToDoubleText(const std::wstring& text, double fallback, bool* ok = nullptr) {
     if (ok != nullptr) {
         *ok = false;
     }
-    const int length = GetWindowTextLengthW(control);
-    if (length <= 0) {
+    if (text.empty()) {
         return fallback;
     }
-    std::wstring text(static_cast<std::size_t>(length) + 1, L'\0');
-    GetWindowTextW(control, text.data(), length + 1);
-    text.resize(static_cast<std::size_t>(length));
     wchar_t* end = nullptr;
     const double value = std::wcstod(text.c_str(), &end);
     if (end == text.c_str()) {
@@ -846,6 +983,20 @@ double textToDouble(HWND control, double fallback, bool* ok = nullptr) {
         return value;
     }
     return fallback;
+}
+
+double textToDouble(HWND control, double fallback, bool* ok = nullptr) {
+    const int length = GetWindowTextLengthW(control);
+    if (length <= 0) {
+        if (ok != nullptr) {
+            *ok = false;
+        }
+        return fallback;
+    }
+    std::wstring text(static_cast<std::size_t>(length) + 1, L'\0');
+    GetWindowTextW(control, text.data(), length + 1);
+    text.resize(static_cast<std::size_t>(length));
+    return textToDoubleText(text, fallback, ok);
 }
 
 std::string timestampIdText() {
@@ -946,6 +1097,30 @@ std::wstring ruleDisplayName(const native_storage::MatchCandidateRecord& candida
 
 } // namespace
 
+struct NativeMainWindow::ModbusWorkerResult {
+    native_storage::ScanExecutionRecord execution;
+    std::vector<native_storage::RawIoEvent> rawEvents;
+    std::vector<NativeLogEntry> logEntries;
+    std::string errorMessage;
+    bool serialFailed = false;
+    bool cancelled = false;
+};
+
+struct NativeMainWindow::ModbusWorkerProgress {
+    std::size_t completedBlocks = 0;
+    std::size_t totalBlocks = 0;
+    std::size_t successBlocks = 0;
+    std::size_t failedBlocks = 0;
+    std::size_t observations = 0;
+};
+
+struct NativeMainWindow::ModbusWorkerContext {
+    NativeMainWindow* owner = nullptr;
+    modbus_core::ScanPlan plan;
+    native_storage::ScanExecutionRecord execution;
+    std::string scanSessionId;
+};
+
 bool NativeMainWindow::create(HINSTANCE instance) {
     instance_ = instance;
 
@@ -964,7 +1139,7 @@ bool NativeMainWindow::create(HINSTANCE instance) {
         0,
         kWindowClassName,
         tx(T::WindowTitle),
-        WS_OVERLAPPEDWINDOW,
+        WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
         1220,
@@ -991,6 +1166,10 @@ int NativeMainWindow::runMessageLoop() {
 }
 
 bool NativeMainWindow::runSelfTest() {
+    const auto fail = [](const char* step) {
+        writeSelfTestTrace(step);
+        return false;
+    };
     const std::wstring expectedChinese = {
         static_cast<wchar_t>(0x4E32),
         static_cast<wchar_t>(0x53E3),
@@ -1003,41 +1182,61 @@ bool NativeMainWindow::runSelfTest() {
     if (std::wstring(tx(T::SelfTestText)) != expectedChinese
         || utf8ToWide(kExpectedUtf8) != expectedChinese
         || wideToUtf8(expectedChinese) != kExpectedUtf8) {
-        return false;
+        return fail("unicode-roundtrip");
     }
 
     SerialOpenOptions options;
     options.portName = "COM1";
     if (!validateSerialOpenOptions(options).ok) {
-        return false;
+        return fail("serial-options");
     }
     if (makeWin32DevicePath("COM10") != R"(\\.\COM10)") {
-        return false;
+        return fail("serial-device-path");
     }
-    if (!logToolbarLayoutIsSane(360)
-        || !logToolbarLayoutIsSane(554)
-        || !sendControlLayoutIsSane(320)
-        || !sendControlLayoutIsSane(428)
-        || !mainLayoutProbeIsFullyUsableAtSize(kMinTrackWidth, kMinTrackHeight)
-        || !mainLayoutProbeIsFullyUsableAtSize(1040, 720)
-        || !mainLayoutProbeIsFullyUsableAtSize(1366, 768)
-        || !mainLayoutProbeIsStableAtSize(640, 400)
-        || !mainLayoutProbeIsStableAtSize(480, 320)
-        || !mainLayoutProbeIsStableAtSize(320, 240)
-        || !mainLayoutProbeIsStableAtSize(1, 1)) {
-        return false;
+    if (!logToolbarLayoutIsSane(360)) {
+        return fail("log-toolbar-360");
+    }
+    if (!logToolbarLayoutIsSane(554)) {
+        return fail("log-toolbar-554");
+    }
+    if (!sendControlLayoutIsSane(320)) {
+        return fail("send-layout-320");
+    }
+    if (!sendControlLayoutIsSane(428)) {
+        return fail("send-layout-428");
+    }
+    if (!mainLayoutProbeIsFullyUsableAtSize(kMinTrackWidth, kMinTrackHeight)) {
+        return fail("main-layout-min");
+    }
+    if (!mainLayoutProbeIsFullyUsableAtSize(1040, 720)) {
+        return fail("main-layout-1040x720");
+    }
+    if (!mainLayoutProbeIsFullyUsableAtSize(1366, 768)) {
+        return fail("main-layout-1366x768");
+    }
+    if (!mainLayoutProbeIsStableAtSize(640, 400)) {
+        return fail("main-layout-640x400");
+    }
+    if (!mainLayoutProbeIsStableAtSize(480, 320)) {
+        return fail("main-layout-480x320");
+    }
+    if (!mainLayoutProbeIsStableAtSize(320, 240)) {
+        return fail("main-layout-320x240");
+    }
+    if (!mainLayoutProbeIsStableAtSize(1, 1)) {
+        return fail("main-layout-1x1");
     }
 
     wchar_t tempPathBuffer[MAX_PATH] = {};
     if (GetTempPathW(MAX_PATH, tempPathBuffer) == 0) {
-        return false;
+        return fail("temp-path");
     }
 
     const auto storePath = std::filesystem::path(tempPathBuffer) / L"svm-native-win32-self-test";
     std::filesystem::remove_all(storePath);
     native_storage::NativeSessionStore store;
     if (!store.open(storePath)) {
-        return false;
+        return fail("store-open");
     }
 
     native_storage::RawIoEvent event;
@@ -1070,15 +1269,33 @@ bool NativeMainWindow::runSelfTest() {
     preferences.showLogTimestamps = false;
     preferences.updatedAtUtc = timestampText();
 
-    const bool ok = store.appendRawEvent(event)
-        && store.rawEventCount() == 1
-        && store.saveSerialProfile(profile)
-        && store.latestSerialProfile().has_value()
-        && store.saveSendHistory(history)
-        && !store.recentSendHistory(1).empty()
-        && store.saveUiPreferences(preferences)
-        && store.latestUiPreferences().has_value();
+    bool ok = true;
+    const auto storageFail = [&](const char* step) {
+        ok = false;
+        writeSelfTestTrace(step);
+    };
+    if (!store.appendRawEvent(event)) {
+        storageFail("storage-append-raw-event");
+    } else if (store.rawEventCount() != 1) {
+        storageFail("storage-raw-event-count");
+    } else if (!store.saveSerialProfile(profile)) {
+        storageFail("storage-save-profile");
+    } else if (!store.latestSerialProfile().has_value()) {
+        storageFail("storage-read-profile");
+    } else if (!store.saveSendHistory(history)) {
+        storageFail("storage-save-history");
+    } else if (store.recentSendHistory(1).empty()) {
+        storageFail("storage-read-history");
+    } else if (!store.saveUiPreferences(preferences)) {
+        storageFail("storage-save-preferences");
+    } else if (!store.latestUiPreferences().has_value()) {
+        storageFail("storage-read-preferences");
+    }
     std::filesystem::remove_all(storePath);
+    if (!ok) {
+        return false;
+    }
+    writeSelfTestTrace("ok");
     return ok;
 }
 
@@ -1122,12 +1339,47 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             latestVerificationRunId_ = verificationRun->verificationRunId;
         }
         SetTimer(window_, IDT_SERIAL_POLL, 50, nullptr);
+        SetTimer(window_, IDT_STATUS_CLOCK, 1000, nullptr);
         return 0;
     case WM_SIZE:
         layoutControls(LOWORD(lParam), HIWORD(lParam));
         return 0;
-    case WM_COMMAND:
-        switch (LOWORD(wParam)) {
+    case WM_NOTIFY: {
+        const auto* notification = reinterpret_cast<NMHDR*>(lParam);
+        if (notification != nullptr && notification->idFrom == IDC_WORK_TABS && notification->code == TCN_SELCHANGE) {
+            RECT client = {};
+            GetClientRect(window_, &client);
+            layoutControls(client.right - client.left, client.bottom - client.top);
+            return 0;
+        }
+        break;
+    }
+    case WM_CTLCOLOREDIT: {
+        HWND editControl = reinterpret_cast<HWND>(lParam);
+        if (analysisPlaceholderActive(editControl)) {
+            HDC dc = reinterpret_cast<HDC>(wParam);
+            SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
+            SetBkColor(dc, GetSysColor(COLOR_WINDOW));
+            return reinterpret_cast<LRESULT>(GetSysColorBrush(COLOR_WINDOW));
+        }
+        break;
+    }
+    case WM_COMMAND: {
+        const WORD commandId = LOWORD(wParam);
+        if (commandId >= IDC_QUICK_SEND_BUTTON_BASE && commandId < IDC_QUICK_SEND_BUTTON_BASE + quickSendButtons_.size()) {
+            if (HIWORD(wParam) == BN_CLICKED) {
+                sendQuickPayload(static_cast<std::size_t>(commandId - IDC_QUICK_SEND_BUTTON_BASE));
+            }
+            return 0;
+        }
+        if (commandId >= IDC_QUICK_SEND_EDIT_BASE && commandId < IDC_QUICK_SEND_EDIT_BASE + quickSendEdits_.size()) {
+            if (HIWORD(wParam) == EN_KILLFOCUS) {
+                saveUiPreferences();
+            }
+            return 0;
+        }
+
+        switch (commandId) {
         case IDC_REFRESH_BUTTON:
             refreshPorts();
             return 0;
@@ -1175,6 +1427,19 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
                 setStatus(tx(T::LogEncodingChanged));
             }
             return 0;
+        case IDC_LOG_CACHE_COMBO:
+            if (HIWORD(wParam) == CBN_SELCHANGE) {
+                applyLogCacheLimit(static_cast<std::size_t>(selectedComboData(logCacheCombo_, kDefaultLogVisibleChars)));
+                rebuildLogView();
+                saveUiPreferences();
+                std::wstring status = uiString(T::LogCacheChangedPrefix) + formatLogCacheLimit(logVisibleCharLimit_);
+                if (logVisibleCharLimit_ >= 50000000) {
+                    status += tx(T::LogCacheLargeSuffix);
+                }
+                status += tx(T::ChinesePeriod);
+                setStatus(status);
+            }
+            return 0;
         case IDC_SEND_MODE_COMBO:
             if (HIWORD(wParam) == CBN_SELCHANGE) {
                 saveUiPreferences();
@@ -1184,6 +1449,48 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         case IDC_TEXT_ENCODING_COMBO:
         case IDC_LINE_ENDING_COMBO:
             if (HIWORD(wParam) == CBN_SELCHANGE) {
+                saveUiPreferences();
+            }
+            return 0;
+        case IDC_TIMED_SEND_CHECK:
+            if (HIWORD(wParam) == BN_CLICKED) {
+                timedSendActive_ = SendMessageW(timedSendCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED;
+                updateTimedSendTimer();
+                saveUiPreferences();
+                setStatus(timedSendActive_ ? tx(T::TimedSendEnabledStatus) : tx(T::TimedSendDisabledStatus));
+            }
+            return 0;
+        case IDC_TIMED_PERIOD_EDIT:
+            if (HIWORD(wParam) == EN_CHANGE && timedSendActive_) {
+                updateTimedSendTimer();
+            } else if (HIWORD(wParam) == EN_KILLFOCUS) {
+                saveUiPreferences();
+            }
+            return 0;
+        case IDC_TARGET_LABEL_EDIT:
+        case IDC_TARGET_VALUE_EDIT:
+        case IDC_TARGET_UNIT_EDIT:
+            if (HIWORD(wParam) == EN_SETFOCUS) {
+                clearAnalysisPlaceholder(reinterpret_cast<HWND>(lParam));
+            } else if (HIWORD(wParam) == EN_KILLFOCUS) {
+                restoreAnalysisPlaceholder(reinterpret_cast<HWND>(lParam));
+            }
+            return 0;
+        case IDC_FILE_BROWSE_BUTTON:
+            browseFileSend();
+            return 0;
+        case IDC_FILE_SEND_BUTTON:
+            startFileSend();
+            return 0;
+        case IDC_FILE_STOP_BUTTON:
+            stopFileSend();
+            return 0;
+        case IDC_FILE_DELAY_COMBO:
+            if (HIWORD(wParam) == CBN_SELCHANGE) {
+                if (fileSendActive_) {
+                    KillTimer(window_, IDT_FILE_SEND);
+                    SetTimer(window_, IDT_FILE_SEND, static_cast<UINT>(std::max<int>(1, static_cast<int>(selectedComboData(fileDelayCombo_, 0)))), nullptr);
+                }
                 saveUiPreferences();
             }
             return 0;
@@ -1333,9 +1640,18 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             break;
         }
         break;
+    }
     case WM_TIMER:
         if (wParam == IDT_SERIAL_POLL) {
             pollSerial();
+            return 0;
+        }
+        if (wParam == IDT_TIMED_SEND) {
+            sendPayload();
+            return 0;
+        }
+        if (wParam == IDT_FILE_SEND) {
+            pumpFileSend();
             return 0;
         }
         if (wParam == IDT_RECONNECT) {
@@ -1347,8 +1663,25 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             updateLogFilter();
             return 0;
         }
+        if (wParam == IDT_STATUS_CLOCK) {
+            updateStatusSegments();
+            return 0;
+        }
         break;
+    case kModbusScanDoneMessage:
+        handleModbusScanDone(reinterpret_cast<ModbusWorkerResult*>(lParam));
+        return 0;
+    case kModbusScanProgressMessage:
+        handleModbusScanProgress(reinterpret_cast<ModbusWorkerProgress*>(lParam));
+        return 0;
     case WM_CLOSE:
+        stopFileSend({});
+        requestCancelModbusScan();
+        if (modbusScanThread_ != nullptr) {
+            WaitForSingleObject(modbusScanThread_, INFINITE);
+            CloseHandle(modbusScanThread_);
+            modbusScanThread_ = nullptr;
+        }
         saveUiPreferences();
         DestroyWindow(window_);
         return 0;
@@ -1357,6 +1690,16 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         KillTimer(window_, IDT_SERIAL_POLL);
         KillTimer(window_, IDT_RECONNECT);
         KillTimer(window_, IDT_LOG_FILTER);
+        KillTimer(window_, IDT_TIMED_SEND);
+        KillTimer(window_, IDT_FILE_SEND);
+        KillTimer(window_, IDT_STATUS_CLOCK);
+        stopFileSend({});
+        requestCancelModbusScan();
+        if (modbusScanThread_ != nullptr) {
+            WaitForSingleObject(modbusScanThread_, INFINITE);
+            CloseHandle(modbusScanThread_);
+            modbusScanThread_ = nullptr;
+        }
         disconnectSerial();
         if (ownsUiFont_ && uiFont_ != nullptr) {
             DeleteObject(uiFont_);
@@ -1426,21 +1769,7 @@ void NativeMainWindow::createMenus() {
 }
 
 void NativeMainWindow::createControls() {
-    uiFont_ = CreateFontW(
-        -14,
-        0,
-        0,
-        0,
-        FW_NORMAL,
-        FALSE,
-        FALSE,
-        FALSE,
-        DEFAULT_CHARSET,
-        OUT_DEFAULT_PRECIS,
-        CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY,
-        DEFAULT_PITCH | FF_DONTCARE,
-        L"Microsoft YaHei UI");
+    uiFont_ = createClassicUiFont();
     ownsUiFont_ = uiFont_ != nullptr;
     if (uiFont_ == nullptr) {
         uiFont_ = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
@@ -1453,6 +1782,10 @@ void NativeMainWindow::createControls() {
     sendGroup_ = CreateWindowExW(0, L"BUTTON", tx(T::SendGroup), WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     workflowGroup_ = CreateWindowExW(0, L"BUTTON", tx(T::WorkflowGroup), WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     logGroup_ = CreateWindowExW(0, L"BUTTON", tx(T::LogGroup), WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    serialPanelTitle_ = CreateWindowExW(0, L"STATIC", tx(T::ConnectionGroup), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    logPanelTitle_ = CreateWindowExW(0, L"STATIC", tx(T::LogGroup), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    workPanelTitle_ = CreateWindowExW(0, L"STATIC", tx(T::SendGroup), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    workTabs_ = CreateWindowExW(0, WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_WORK_TABS), instance_, nullptr);
     workflowHint_ = CreateWindowExW(0, L"STATIC", tx(T::WorkflowHint), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     portLabel_ = CreateWindowExW(0, L"STATIC", tx(T::PortLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     portCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_PORT_COMBO), instance_, nullptr);
@@ -1494,6 +1827,48 @@ void NativeMainWindow::createControls() {
     historyCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_HISTORY_COMBO), instance_, nullptr);
     sendEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SEND_EDIT), instance_, nullptr);
     sendButton_ = CreateWindowExW(0, L"BUTTON", tx(T::SendButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SEND_BUTTON), instance_, nullptr);
+    timedSendCheck_ = CreateWindowExW(0, L"BUTTON", tx(T::TimedSendCheck), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TIMED_SEND_CHECK), instance_, nullptr);
+    timedPeriodLabel_ = CreateWindowExW(0, L"STATIC", tx(T::TimedPeriodLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    timedPeriodEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"1000", WS_CHILD | WS_VISIBLE | ES_NUMBER | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TIMED_PERIOD_EDIT), instance_, nullptr);
+    for (std::size_t index = 0; index < quickSendEdits_.size(); ++index) {
+        quickSendEdits_[index] = CreateWindowExW(
+            WS_EX_CLIENTEDGE,
+            L"EDIT",
+            L"",
+            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+            0,
+            0,
+            0,
+            0,
+            window_,
+            reinterpret_cast<HMENU>(IDC_QUICK_SEND_EDIT_BASE + index),
+            instance_,
+            nullptr);
+        const std::wstring quickButtonText = std::wstring(L"\u53D1") + std::to_wstring(index + 1);
+        quickSendButtons_[index] = CreateWindowExW(
+            0,
+            L"BUTTON",
+            quickButtonText.c_str(),
+            WS_CHILD | WS_VISIBLE,
+            0,
+            0,
+            0,
+            0,
+            window_,
+            reinterpret_cast<HMENU>(IDC_QUICK_SEND_BUTTON_BASE + index),
+            instance_,
+            nullptr);
+    }
+    filePathLabel_ = CreateWindowExW(0, L"STATIC", tx(T::FilePathLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    filePathEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_FILE_PATH_EDIT), instance_, nullptr);
+    fileBrowseButton_ = CreateWindowExW(0, L"BUTTON", tx(T::FileBrowseButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_FILE_BROWSE_BUTTON), instance_, nullptr);
+    fileSendButton_ = CreateWindowExW(0, L"BUTTON", tx(T::FileSendButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_FILE_SEND_BUTTON), instance_, nullptr);
+    fileStopButton_ = CreateWindowExW(0, L"BUTTON", tx(T::FileStopButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_FILE_STOP_BUTTON), instance_, nullptr);
+    fileDelayLabel_ = CreateWindowExW(0, L"STATIC", tx(T::FileDelayLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    fileDelayCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_FILE_DELAY_COMBO), instance_, nullptr);
+    fileProgress_ = CreateWindowExW(0, PROGRESS_CLASSW, L"", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_FILE_PROGRESS), instance_, nullptr);
+    logCacheLabel_ = CreateWindowExW(0, L"STATIC", tx(T::LogCacheLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    logCacheCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_CACHE_COMBO), instance_, nullptr);
     pauseScrollButton_ = CreateWindowExW(0, L"BUTTON", tx(T::PauseScrollButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_PAUSE_SCROLL_BUTTON), instance_, nullptr);
     clearButton_ = CreateWindowExW(0, L"BUTTON", tx(T::ClearButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_CLEAR_BUTTON), instance_, nullptr);
     modbusButton_ = CreateWindowExW(0, L"BUTTON", tx(T::ModbusScanButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_MODBUS_BUTTON), instance_, nullptr);
@@ -1509,16 +1884,19 @@ void NativeMainWindow::createControls() {
     scanStartEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"0", WS_CHILD | WS_VISIBLE | ES_NUMBER, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SCAN_START_EDIT), instance_, nullptr);
     scanEndLabel_ = CreateWindowExW(0, L"STATIC", tx(T::ScanEndLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     scanEndEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"15", WS_CHILD | WS_VISIBLE | ES_NUMBER, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SCAN_END_EDIT), instance_, nullptr);
-    analysisSectionLabel_ = CreateWindowExW(0, L"STATIC", tx(T::AnalysisSectionLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
-    targetStatic_ = CreateWindowExW(0, L"STATIC", tx(T::TargetNameLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    modbusProgressLabel_ = CreateWindowExW(0, L"STATIC", tx(T::ModbusProgressLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    modbusProgress_ = CreateWindowExW(0, PROGRESS_CLASSW, L"", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_MODBUS_PROGRESS), instance_, nullptr);
+    modbusProgressText_ = CreateWindowExW(0, L"STATIC", L"0/0", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    analysisSectionLabel_ = CreateWindowExW(0, L"STATIC", tx(T::AnalysisSectionLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    targetStatic_ = CreateWindowExW(0, L"STATIC", tx(T::TargetNameLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     targetLabelEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", tx(T::TargetNameDefault), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TARGET_LABEL_EDIT), instance_, nullptr);
-    targetValueStatic_ = CreateWindowExW(0, L"STATIC", tx(T::TargetValueLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    targetValueStatic_ = CreateWindowExW(0, L"STATIC", tx(T::TargetValueLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     targetValueEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", tx(T::TargetValueDefault), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TARGET_VALUE_EDIT), instance_, nullptr);
-    targetUnitStatic_ = CreateWindowExW(0, L"STATIC", tx(T::TargetUnitLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    targetUnitStatic_ = CreateWindowExW(0, L"STATIC", tx(T::TargetUnitLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     targetUnitEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", tx(T::TargetUnitDefault), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TARGET_UNIT_EDIT), instance_, nullptr);
-    toleranceStatic_ = CreateWindowExW(0, L"STATIC", tx(T::ToleranceFieldLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    toleranceStatic_ = CreateWindowExW(0, L"STATIC", tx(T::ToleranceFieldLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     toleranceEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", tx(T::ToleranceDefault), WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TOLERANCE_EDIT), instance_, nullptr);
-    candidateStatic_ = CreateWindowExW(0, L"STATIC", tx(T::CandidateLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    candidateStatic_ = CreateWindowExW(0, L"STATIC", tx(T::CandidateLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     candidateCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_CANDIDATE_COMBO), instance_, nullptr);
     receiveLog_ = CreateWindowExW(
         WS_EX_CLIENTEDGE,
@@ -1552,14 +1930,30 @@ void NativeMainWindow::createControls() {
             nullptr);
     }
     statusText_ = CreateWindowExW(0, L"STATIC", tx(T::InitialStatus), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_STATUS_TEXT), instance_, nullptr);
+    txStatusText_ = CreateWindowExW(0, L"STATIC", L"TX 0 B", WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    rxStatusText_ = CreateWindowExW(0, L"STATIC", L"RX 0 B", WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    clockStatusText_ = CreateWindowExW(0, L"STATIC", L"--:--:--", WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     SendMessageW(logFilterEdit_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(tx(T::LogFilterCue)));
     SendMessageW(logSearchEdit_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(tx(T::LogSearchCue)));
-    SendMessageW(receiveLog_, EM_EXLIMITTEXT, 0, static_cast<LPARAM>(kMaxVisibleLogChars + kMaxRenderedLogLineChars));
+    initializeAnalysisPlaceholders();
+    SendMessageW(receiveLog_, EM_EXLIMITTEXT, 0, static_cast<LPARAM>(logVisibleCharLimit_ + kMaxRenderedLogLineChars));
+
+    for (const wchar_t* label : {tx(T::WorkbenchTabSingle), tx(T::WorkbenchTabQuick), tx(T::WorkbenchTabFile), tx(T::WorkbenchTabScan), tx(T::WorkbenchTabSettings)}) {
+        TCITEMW tab = {};
+        tab.mask = TCIF_TEXT;
+        tab.pszText = const_cast<wchar_t*>(label);
+        TabCtrl_InsertItem(workTabs_, TabCtrl_GetItemCount(workTabs_), &tab);
+    }
 
     populateSerialOptionControls();
     setDefaultFonts();
     applyLogTheme(0);
     updateRtsControlState();
+    enableControl(fileStopButton_, false);
+    updateFileSendProgress();
+    updateModbusScanProgress(0, 0, 0, 0, 0);
+    updateStatusSegments();
+    updateWorkbenchTab();
 }
 
 void NativeMainWindow::populateSerialOptionControls() {
@@ -1623,6 +2017,26 @@ void NativeMainWindow::populateSerialOptionControls() {
     addComboItem(logEncodingCombo_, tx(T::AsciiEncoding), kCodePageAscii);
     selectComboData(logEncodingCombo_, CP_UTF8);
 
+    addComboItem(logCacheCombo_, L"200K", 200000);
+    addComboItem(logCacheCombo_, L"350K", 350000);
+    addComboItem(logCacheCombo_, L"500K", 500000);
+    addComboItem(logCacheCombo_, L"1M", 1000000);
+    addComboItem(logCacheCombo_, L"2M", 2000000);
+    addComboItem(logCacheCombo_, L"5M", 5000000);
+    addComboItem(logCacheCombo_, L"10M", 10000000);
+    addComboItem(logCacheCombo_, L"20M", 20000000);
+    addComboItem(logCacheCombo_, L"50M", 50000000);
+    addComboItem(logCacheCombo_, L"100M", 100000000);
+    selectComboData(logCacheCombo_, static_cast<LPARAM>(kDefaultLogVisibleChars));
+
+    addComboItem(fileDelayCombo_, L"0 ms", 0);
+    addComboItem(fileDelayCombo_, L"1 ms", 1);
+    addComboItem(fileDelayCombo_, L"5 ms", 5);
+    addComboItem(fileDelayCombo_, L"10 ms", 10);
+    addComboItem(fileDelayCombo_, L"20 ms", 20);
+    addComboItem(fileDelayCombo_, L"50 ms", 50);
+    selectComboData(fileDelayCombo_, 0);
+
     addComboItem(scanFunctionCombo_, tx(T::Fc03Holding), 3);
     addComboItem(scanFunctionCombo_, tx(T::Fc04Input), 4);
     selectComboData(scanFunctionCombo_, 3);
@@ -1632,226 +2046,572 @@ void NativeMainWindow::populateSerialOptionControls() {
 }
 
 void NativeMainWindow::layoutControls(int width, int height) {
-    width = std::max(width, kMinLayoutWidth);
-    height = std::max(height, kMinLayoutHeight);
+    width = std::max(width, 1);
+    height = std::max(height, 1);
 
-    const bool compact = width < 1040 || height < 720;
-    const int margin = compact ? 8 : 12;
-    const int groupPad = compact ? 10 : 16;
-    const int row = compact ? 26 : 30;
-    const int gap = compact ? 5 : 8;
-    const int labelHeight = compact ? 18 : 22;
-    const int labelWidth = compact ? 48 : 56;
-    const int buttonWidth = compact ? 70 : 82;
-    const int smallButtonWidth = compact ? 60 : 74;
-    const int saveProfileWidth = compact ? 82 : 96;
-    const int autoReconnectWidth = compact ? 100 : 116;
+    const NativeUiMetrics metrics = nativeUiMetricsForSize(width, height);
+    const bool compact = metrics.compact;
+    const bool tight = metrics.tight;
+    const int margin = metrics.margin;
+    const int row = metrics.row;
+    const int gap = metrics.gap;
+    const int labelHeight = metrics.labelHeight;
+    const int smallButtonWidth = metrics.smallButtonWidth;
+    const int titleHeight = metrics.titleHeight;
 
-    const int connectionX = margin;
-    const int connectionY = margin;
-    const int connectionWidth = width - margin * 2;
-    const int connectionHeight = compact ? 104 : 122;
-    MoveWindow(connectionGroup_, connectionX, connectionY, connectionWidth, connectionHeight, TRUE);
+    const int statusHeight = metrics.statusHeight;
+    const int statusY = std::max(margin, height - statusHeight - 4);
+    const int sideGap = metrics.sideGap;
+    const int availableWidth = std::max(1, width - margin * 2);
+    const int desiredSideWidth = metrics.desiredSideWidth;
+    const int maxSideWidth = std::min(desiredSideWidth, std::max(1, availableWidth - 80));
+    const int minSideWidth = std::min(metrics.minSideWidth, maxSideWidth);
+    const int sideWidth = std::clamp(std::min(desiredSideWidth, availableWidth / 4), minSideWidth, maxSideWidth);
+    const int sideX = width - margin - sideWidth;
+    const int mainX = margin;
+    const int mainWidth = std::max(1, sideX - sideGap - mainX);
+    const int contentHeight = std::max(1, statusY - margin);
 
-    int x = connectionX + groupPad;
-    int y = connectionY + (compact ? 22 : 26);
-    const int actionsWidth = buttonWidth * 2 + gap;
-    const int actionsX = connectionX + connectionWidth - groupPad - actionsWidth;
-    const int portComboWidth = std::max(
-        compact ? 160 : 220,
-        std::min(compact ? 220 : 360, actionsX - x - labelWidth - smallButtonWidth - saveProfileWidth - autoReconnectWidth - gap * 4));
-    MoveWindow(portLabel_, x, y + 5, labelWidth, labelHeight, TRUE);
-    x += labelWidth;
-    MoveWindow(portCombo_, x, y, portComboWidth, 240, TRUE);
-    x += portComboWidth + gap;
-    MoveWindow(refreshButton_, x, y, smallButtonWidth, row, TRUE);
-    x += smallButtonWidth + gap;
-    MoveWindow(saveProfileButton_, x, y, saveProfileWidth, row, TRUE);
-    x += saveProfileWidth + gap;
-    MoveWindow(autoReconnectCheck_, x, y + 3, autoReconnectWidth, row - 2, TRUE);
-    MoveWindow(connectButton_, actionsX, y, buttonWidth, row, TRUE);
-    MoveWindow(disconnectButton_, actionsX + buttonWidth + gap, y, buttonWidth, row, TRUE);
-
-    y = connectionY + (compact ? 58 : 70);
-    x = connectionX + groupPad;
-    const int baudComboWidth = compact ? 90 : 104;
-    const int dataLabelWidth = compact ? 46 : 54;
-    const int dataComboWidth = compact ? 52 : 60;
-    const int parityLabelWidth = compact ? 38 : 42;
-    const int parityComboWidth = compact ? 82 : 92;
-    const int stopComboWidth = compact ? 58 : 66;
-    const int flowLabelWidth = compact ? 42 : 46;
-    const int flowComboWidth = compact ? 96 : 110;
-    const int signalCheckWidth = compact ? 46 : 52;
-    MoveWindow(baudLabel_, x, y + 5, labelWidth, labelHeight, TRUE);
-    x += labelWidth;
-    MoveWindow(baudCombo_, x, y, baudComboWidth, 200, TRUE);
-    x += baudComboWidth + gap;
-    MoveWindow(dataBitsLabel_, x, y + 5, dataLabelWidth, labelHeight, TRUE);
-    x += dataLabelWidth;
-    MoveWindow(dataBitsCombo_, x, y, dataComboWidth, 150, TRUE);
-    x += dataComboWidth + gap;
-    MoveWindow(parityLabel_, x, y + 5, parityLabelWidth, labelHeight, TRUE);
-    x += parityLabelWidth;
-    MoveWindow(parityCombo_, x, y, parityComboWidth, 170, TRUE);
-    x += parityComboWidth + gap;
-    MoveWindow(stopBitsLabel_, x, y + 5, labelWidth, labelHeight, TRUE);
-    x += labelWidth;
-    MoveWindow(stopBitsCombo_, x, y, stopComboWidth, 150, TRUE);
-    x += stopComboWidth + gap;
-    MoveWindow(flowControlLabel_, x, y + 5, flowLabelWidth, labelHeight, TRUE);
-    x += flowLabelWidth;
-    MoveWindow(flowControlCombo_, x, y, flowComboWidth, 170, TRUE);
-    x += flowComboWidth + gap;
-    MoveWindow(dtrCheck_, x, y + 3, signalCheckWidth, row - 2, TRUE);
-    x += signalCheckWidth + gap;
-    MoveWindow(rtsCheck_, x, y + 3, signalCheckWidth, row - 2, TRUE);
-
-    const int statusHeight = compact ? 22 : 26;
-    const int statusY = height - statusHeight - 4;
-    const int contentY = connectionY + connectionHeight + 10;
-    const int contentHeight = std::max(compact ? 350 : 360, statusY - contentY - 8);
-    const int columnGap = compact ? 8 : 10;
-    const int minRightWidth = compact ? 360 : 420;
-    const int minLeftWidth = compact ? 330 : 420;
-    int leftWidth = compact ? 370 : 460;
-    if (width - margin * 2 - columnGap - leftWidth < minRightWidth) {
-        leftWidth = std::max(minLeftWidth, width - margin * 2 - columnGap - minRightWidth);
+    int activeTab = static_cast<int>(TabCtrl_GetCurSel(workTabs_));
+    if (activeTab < 0) {
+        activeTab = 0;
     }
-    const int rightX = margin + leftWidth + columnGap;
-    const int rightWidth = std::max(minRightWidth, width - rightX - margin);
 
-    const int sendY = contentY;
-    const int sendHeight = compact ? 130 : 150;
-    MoveWindow(sendGroup_, margin, sendY, leftWidth, sendHeight, TRUE);
+    const int desiredWorkHeight = metrics.desiredWorkHeight;
+    const int minimumLogHeight = metrics.minimumLogHeight;
+    const int maximumWorkHeight = std::max(84, contentHeight - minimumLogHeight - sideGap);
+    const int workHeight = std::max(84, std::min(desiredWorkHeight, maximumWorkHeight));
+    const int logY = margin;
+    const int logHeight = std::max(1, statusY - logY - workHeight - sideGap);
+    const int sendY = logY + logHeight + sideGap;
+    const int sendHeight = std::max(1, statusY - sendY - 2);
 
-    const SendControlLayout sendLayout = calculateSendControlLayout(
-        margin + groupPad,
-        sendY + (compact ? 20 : 24),
-        leftWidth - groupPad * 2,
-        row,
-        gap,
-        compact ? 16 : 18);
-    MoveWindow(sendModeLabel_, sendLayout.modeLabel.x, sendLayout.modeLabel.y, sendLayout.modeLabel.width, sendLayout.modeLabel.height, TRUE);
-    MoveWindow(sendModeCombo_, sendLayout.modeCombo.x, sendLayout.modeCombo.y, sendLayout.modeCombo.width, 180, TRUE);
-    MoveWindow(sendEncodingLabel_, sendLayout.encodingLabel.x, sendLayout.encodingLabel.y, sendLayout.encodingLabel.width, sendLayout.encodingLabel.height, TRUE);
-    MoveWindow(textEncodingCombo_, sendLayout.encodingCombo.x, sendLayout.encodingCombo.y, sendLayout.encodingCombo.width, 160, TRUE);
-    MoveWindow(lineEndingLabel_, sendLayout.lineEndingLabel.x, sendLayout.lineEndingLabel.y, sendLayout.lineEndingLabel.width, sendLayout.lineEndingLabel.height, TRUE);
-    MoveWindow(lineEndingCombo_, sendLayout.lineEndingCombo.x, sendLayout.lineEndingCombo.y, sendLayout.lineEndingCombo.width, 160, TRUE);
-    MoveWindow(sendHistoryLabel_, sendLayout.historyLabel.x, sendLayout.historyLabel.y, sendLayout.historyLabel.width, sendLayout.historyLabel.height, TRUE);
-    MoveWindow(historyCombo_, sendLayout.historyCombo.x, sendLayout.historyCombo.y, sendLayout.historyCombo.width, 200, TRUE);
+    showControl(connectionGroup_, false);
+    showControl(sendGroup_, false);
+    showControl(workflowGroup_, false);
+    showControl(logGroup_, false);
 
-    x = margin + groupPad;
-    y = sendY + (compact ? 70 : 82);
-    const int sendEditWidth = leftWidth - groupPad * 2 - buttonWidth - gap;
+    MoveWindow(serialPanelTitle_, sideX, margin, sideWidth, titleHeight, TRUE);
+    int x = sideX;
+    int y = margin + titleHeight + gap;
+    const int sideInnerWidth = std::max(1, sideWidth);
+    const int sideLabelWidth = compact ? 44 : 48;
+    const int sideControlWidth = std::max(1, sideInnerWidth - sideLabelWidth - gap);
+
+    showControl(portLabel_, false);
+    MoveWindow(portCombo_, x, y, sideInnerWidth, 180, TRUE);
+    y += row + gap;
+    MoveWindow(refreshButton_, x, y, (sideInnerWidth - gap) / 2, row, TRUE);
+    MoveWindow(saveProfileButton_, x + (sideInnerWidth + gap) / 2, y, (sideInnerWidth - gap) / 2, row, TRUE);
+    y += row + gap;
+
+    const auto moveSidePair = [&](HWND label, HWND control, int comboDropHeight) {
+        MoveWindow(label, x, y + 4, sideLabelWidth, labelHeight, TRUE);
+        MoveWindow(control, x + sideLabelWidth + gap, y, sideControlWidth, comboDropHeight, TRUE);
+        y += row + gap;
+    };
+    moveSidePair(baudLabel_, baudCombo_, 180);
+    moveSidePair(stopBitsLabel_, stopBitsCombo_, 140);
+    moveSidePair(dataBitsLabel_, dataBitsCombo_, 140);
+    moveSidePair(parityLabel_, parityCombo_, 150);
+    moveSidePair(flowControlLabel_, flowControlCombo_, 150);
+
+    MoveWindow(connectButton_, x, y, sideInnerWidth, row, TRUE);
+    showControl(disconnectButton_, false);
+    y += row + gap;
+    MoveWindow(dtrCheck_, x, y + 2, sideInnerWidth / 2, row - 2, TRUE);
+    MoveWindow(rtsCheck_, x + sideInnerWidth / 2, y + 2, sideInnerWidth / 2, row - 2, TRUE);
+    y += row;
+    MoveWindow(autoReconnectCheck_, x, y + 2, sideInnerWidth, row - 2, TRUE);
+
+    const int logTitleWidth = compact ? 52 : 58;
+    const bool showLogTitle = mainWidth >= 520;
+    showControl(logPanelTitle_, showLogTitle);
+    if (showLogTitle) {
+        MoveWindow(logPanelTitle_, mainX, logY + 2, logTitleWidth, titleHeight, TRUE);
+    }
+    const int toolbarX = showLogTitle ? mainX + logTitleWidth + gap : mainX;
+    const int toolbarWidth = std::max(1, mainWidth - (showLogTitle ? logTitleWidth + gap : 0));
+    const LogToolbarLayout logLayout = calculateLogToolbarLayout(toolbarX, logY, toolbarWidth, row, gap, metrics.logActionWidth);
+    showControl(logFormatLabel_, false);
+    showControl(logEncodingLabel_, false);
+    showControl(logFilterLabel_, false);
+    showControl(logSearchLabel_, false);
+    MoveWindow(logFormatCombo_, logLayout.formatCombo.x, logLayout.formatCombo.y, logLayout.formatCombo.width, 150, TRUE);
+    MoveWindow(logEncodingCombo_, logLayout.encodingCombo.x, logLayout.encodingCombo.y, logLayout.encodingCombo.width, 140, TRUE);
+    MoveWindow(copyLogButton_, logLayout.copyButton.x, logLayout.copyButton.y, logLayout.copyButton.width, logLayout.copyButton.height, TRUE);
+    MoveWindow(exportLogButton_, logLayout.exportButton.x, logLayout.exportButton.y, logLayout.exportButton.width, logLayout.exportButton.height, TRUE);
+    MoveWindow(logFilterEdit_, logLayout.filterEdit.x, logLayout.filterEdit.y, logLayout.filterEdit.width, logLayout.filterEdit.height, TRUE);
+    MoveWindow(logSearchEdit_, logLayout.searchEdit.x, logLayout.searchEdit.y, logLayout.searchEdit.width, logLayout.searchEdit.height, TRUE);
+    MoveWindow(findLogButton_, logLayout.findButton.x, logLayout.findButton.y, logLayout.findButton.width, logLayout.findButton.height, TRUE);
+    const int logContentY = std::max(logLayout.exportButton.bottom(), logLayout.findButton.bottom()) + (compact ? 5 : 6);
+    MoveWindow(receiveLog_, mainX, logContentY, mainWidth, std::max(1, logY + logHeight - logContentY), TRUE);
+
+    showControl(workPanelTitle_, false);
+    const int workInnerX = mainX;
+    const int workInnerWidth = mainWidth;
+    const int tabsY = sendY;
+    const int tabsHeight = std::max(84, sendHeight);
+    MoveWindow(workTabs_, workInnerX, tabsY, workInnerWidth, tabsHeight, TRUE);
+
+    RECT tabDisplayRect = {0, 0, workInnerWidth, tabsHeight};
+    TabCtrl_AdjustRect(workTabs_, FALSE, &tabDisplayRect);
+    const int pageInset = compact ? 3 : 4;
+    const int pageX = workInnerX + std::max(0L, tabDisplayRect.left) + pageInset;
+    const int pageY = tabsY + std::max(0L, tabDisplayRect.top) + pageInset;
+    const int pageRight = workInnerX + std::min<LONG>(workInnerWidth, tabDisplayRect.right) - pageInset;
+    const int pageBottom = tabsY + std::min<LONG>(tabsHeight, tabDisplayRect.bottom) - pageInset;
+    const int pageW = std::max(1, pageRight - pageX);
+    const bool pageHasRoom = pageBottom > pageY;
+    const bool showSingleSendFormatRow = pageHasRoom && activeTab == 0 && pageY + row <= pageBottom;
+
+    showControl(sendModeLabel_, false);
+    showControl(sendEncodingLabel_, false);
+    showControl(lineEndingLabel_, false);
+    showControl(sendHistoryLabel_, false);
+
+    const int formatGapCount = pageW >= 380 ? 3 : 2;
+    const int formatAvailable = std::max(3, pageW - gap * formatGapCount);
+    const bool showHistoryCombo = showSingleSendFormatRow && pageW >= 380;
+    const int modeWidth = std::max(1, std::min(compact ? 104 : 118, formatAvailable * 35 / 100));
+    const int encodingWidth = std::max(1, std::min(compact ? 62 : 70, formatAvailable * 19 / 100));
+    const int lineEndingWidth = std::max(1, std::min(compact ? 62 : 70, formatAvailable * 19 / 100));
+    const int historyWidth = std::max(1, formatAvailable - modeWidth - encodingWidth - lineEndingWidth);
+    x = pageX;
+    y = pageY;
+    MoveWindow(sendModeCombo_, x, y, modeWidth, 150, TRUE);
+    x += modeWidth + gap;
+    MoveWindow(textEncodingCombo_, x, y, encodingWidth, 140, TRUE);
+    x += encodingWidth + gap;
+    MoveWindow(lineEndingCombo_, x, y, lineEndingWidth, 140, TRUE);
+    x += lineEndingWidth + gap;
+    MoveWindow(historyCombo_, x, y, historyWidth, 160, TRUE);
+
+    const int contentY = showSingleSendFormatRow ? (pageY + row + gap) : pageY;
+
+    x = pageX;
+    y = contentY;
+    const int sendButtonWidth = std::max(1, std::min(compact ? 54 : 60, pageW / 6));
+    const int sendEditWidth = std::max(1, pageW - sendButtonWidth - gap);
     MoveWindow(sendEdit_, x, y, sendEditWidth, row, TRUE);
-    MoveWindow(sendButton_, x + sendEditWidth + gap, y, buttonWidth, row, TRUE);
+    MoveWindow(sendButton_, x + sendEditWidth + gap, y, sendButtonWidth, row, TRUE);
+    const bool sendContentVisible = y + row <= pageBottom && pageW >= 96;
+    const int timedX = pageX;
+    const int timedY = y + row + gap;
+    const int timedCheckWidth = compact ? 48 : 54;
+    const int periodLabelWidth = compact ? 58 : 64;
+    const int periodEditWidth = compact ? 60 : 68;
+    MoveWindow(timedSendCheck_, timedX, timedY + 2, timedCheckWidth, row - 2, TRUE);
+    MoveWindow(timedPeriodLabel_, timedX + timedCheckWidth + gap, timedY + 4, periodLabelWidth, labelHeight, TRUE);
+    MoveWindow(timedPeriodEdit_, timedX + timedCheckWidth + gap + periodLabelWidth, timedY, periodEditWidth, row, TRUE);
 
-    y = sendY + (compact ? 100 : 116);
-    const int pauseButtonWidth = compact ? 92 : 104;
-    MoveWindow(pauseScrollButton_, margin + groupPad, y, pauseButtonWidth, row - 4, TRUE);
-    MoveWindow(clearButton_, margin + groupPad + pauseButtonWidth + gap, y, smallButtonWidth, row - 4, TRUE);
-
-    const int workflowY = sendY + sendHeight + 10;
-    const int workflowHeight = std::max(compact ? 278 : 320, contentHeight - sendHeight - 10);
-    MoveWindow(workflowGroup_, margin, workflowY, leftWidth, workflowHeight, TRUE);
-
-    const int innerX = margin + groupPad;
-    const int innerWidth = leftWidth - groupPad * 2;
-    y = workflowY + (compact ? 22 : 26);
-    ShowWindow(workflowHint_, compact ? SW_HIDE : SW_SHOW);
-    if (!compact) {
-        MoveWindow(workflowHint_, innerX, y, innerWidth, 24, TRUE);
-        y += 32;
+    int quickColumns = 2;
+    if (pageW >= 620) {
+        quickColumns = 5;
+    } else if (pageW >= 480) {
+        quickColumns = 4;
+    } else if (pageW >= 340) {
+        quickColumns = 3;
     }
-    MoveWindow(scanSectionLabel_, innerX, y, innerWidth, labelHeight, TRUE);
-    y += compact ? 20 : 24;
-    x = innerX;
-    const int shortLabelWidth = compact ? 36 : 42;
-    MoveWindow(scanSlaveLabel_, x, y + 5, shortLabelWidth, labelHeight, TRUE);
-    x += shortLabelWidth;
-    MoveWindow(scanSlaveEdit_, x, y, compact ? 44 : 50, row, TRUE);
-    x += (compact ? 44 : 50) + gap;
-    MoveWindow(scanFunctionLabel_, x, y + 5, shortLabelWidth, labelHeight, TRUE);
-    x += shortLabelWidth;
-    MoveWindow(scanFunctionCombo_, x, y, innerWidth - (x - innerX), 180, TRUE);
+    const int quickColumnWidth = std::max(1, (pageW - gap * (quickColumns - 1)) / quickColumns);
+    const int quickButtonWidth = std::max(1, std::min(compact ? 32 : 36, quickColumnWidth / 2));
+    const int quickSlotHeight = row + gap;
+    std::array<bool, 10> quickSlotVisible = {};
+    for (std::size_t index = 0; index < quickSendEdits_.size(); ++index) {
+        const int column = static_cast<int>(index % quickColumns);
+        const int slotRow = static_cast<int>(index / quickColumns);
+        const int slotX = pageX + column * (quickColumnWidth + gap);
+        const int slotY = contentY + slotRow * quickSlotHeight;
+        const int editWidth = std::max(1, quickColumnWidth - quickButtonWidth - gap);
+        quickSlotVisible[index] = slotY + row <= pageBottom && quickColumnWidth > quickButtonWidth + gap;
+        MoveWindow(quickSendEdits_[index], slotX, slotY, editWidth, row, TRUE);
+        MoveWindow(quickSendButtons_[index], slotX + editWidth + gap, slotY, quickButtonWidth, row, TRUE);
+    }
 
-    y += compact ? 31 : 36;
-    x = innerX;
-    const int addressLabelWidth = compact ? 56 : 70;
-    const int addressEditWidth = compact ? 60 : 72;
+    x = pageX;
+    y = contentY;
+    const int fileLabelWidth = compact ? 30 : 34;
+    const int browseWidth = compact ? 44 : 50;
+    const int fileSendWidth = compact ? 68 : 76;
+    const int fileStopWidth = compact ? 44 : 50;
+    const bool fileFirstRowVisible = y + row <= pageBottom && pageW >= fileLabelWidth + browseWidth + fileSendWidth + fileStopWidth + gap * 4 + 24;
+    const int filePathWidth = std::max(1, pageW - fileLabelWidth - browseWidth - fileSendWidth - fileStopWidth - gap * 4);
+    MoveWindow(filePathLabel_, x, y + 5, fileLabelWidth, labelHeight, TRUE);
+    x += fileLabelWidth;
+    MoveWindow(filePathEdit_, x, y, filePathWidth, row, TRUE);
+    x += filePathWidth + gap;
+    MoveWindow(fileBrowseButton_, x, y, browseWidth, row, TRUE);
+    x += browseWidth + gap;
+    MoveWindow(fileSendButton_, x, y, fileSendWidth, row, TRUE);
+    x += fileSendWidth + gap;
+    MoveWindow(fileStopButton_, x, y, fileStopWidth, row, TRUE);
+    y += row + gap;
+    x = pageX;
+    const int delayLabelWidth = compact ? 60 : 68;
+    const int delayComboWidth = compact ? 66 : 74;
+    const bool fileSecondRowVisible = y + row <= pageBottom;
+    MoveWindow(fileDelayLabel_, x, y + 5, delayLabelWidth, labelHeight, TRUE);
+    x += delayLabelWidth;
+    MoveWindow(fileDelayCombo_, x, y, delayComboWidth, 160, TRUE);
+    x += delayComboWidth + gap;
+    MoveWindow(fileProgress_, x, y + 4, std::max(1, pageX + pageW - x), compact ? 14 : 16, TRUE);
+
+    ShowWindow(workflowHint_, SW_HIDE);
+    y = contentY;
+    const bool scanSectionVisible = y + labelHeight <= pageBottom;
+    MoveWindow(scanSectionLabel_, pageX, y, pageW, labelHeight, TRUE);
+    y += labelHeight + gap;
+    x = pageX;
+    const int shortLabelWidth = compact ? 28 : 32;
+    const int scanSlaveEditWidth = compact ? 34 : 40;
+    const int addressLabelWidth = compact ? 42 : 48;
+    const int addressEditWidth = compact ? 46 : 52;
+    const int scanFunctionLabelWidth = compact ? 32 : 36;
+    const int fixedScanRowWidth =
+        shortLabelWidth + scanSlaveEditWidth
+        + scanFunctionLabelWidth
+        + addressLabelWidth + addressEditWidth
+        + addressLabelWidth + addressEditWidth
+        + gap * 7;
+    const int scanFunctionWidth = std::max(1, std::min(compact ? 148 : 166, pageW - fixedScanRowWidth));
+    const bool scanParameterRowVisible = y + row <= pageBottom;
+    MoveWindow(scanSlaveLabel_, x, y + 5, shortLabelWidth, labelHeight, TRUE);
+    x += shortLabelWidth + gap;
+    MoveWindow(scanSlaveEdit_, x, y, scanSlaveEditWidth, row, TRUE);
+    x += scanSlaveEditWidth + gap;
+    MoveWindow(scanFunctionLabel_, x, y + 5, scanFunctionLabelWidth, labelHeight, TRUE);
+    x += scanFunctionLabelWidth + gap;
+    MoveWindow(scanFunctionCombo_, x, y, scanFunctionWidth, 160, TRUE);
+    x += scanFunctionWidth + gap;
     MoveWindow(scanStartLabel_, x, y + 5, addressLabelWidth, labelHeight, TRUE);
-    x += addressLabelWidth;
+    x += addressLabelWidth + gap;
     MoveWindow(scanStartEdit_, x, y, addressEditWidth, row, TRUE);
     x += addressEditWidth + gap;
     MoveWindow(scanEndLabel_, x, y + 5, addressLabelWidth, labelHeight, TRUE);
-    x += addressLabelWidth;
+    x += addressLabelWidth + gap;
     MoveWindow(scanEndEdit_, x, y, addressEditWidth, row, TRUE);
 
-    y += compact ? 31 : 36;
-    MoveWindow(modbusButton_, innerX + innerWidth - (compact ? 122 : 140), y, compact ? 122 : 140, row, TRUE);
-    y += compact ? 35 : 42;
-    MoveWindow(analysisSectionLabel_, innerX, y, innerWidth, labelHeight, TRUE);
-    y += compact ? 20 : 24;
-    x = innerX;
-    MoveWindow(targetStatic_, x, y + 5, compact ? 34 : 38, labelHeight, TRUE);
-    x += compact ? 34 : 38;
-    MoveWindow(targetLabelEdit_, x, y, compact ? 88 : 126, row, TRUE);
-    x += (compact ? 88 : 126) + gap;
-    MoveWindow(targetValueStatic_, x, y + 5, compact ? 50 : 58, labelHeight, TRUE);
-    x += compact ? 50 : 58;
-    MoveWindow(targetValueEdit_, x, y, innerX + innerWidth - x, row, TRUE);
+    y += row + gap;
+    x = pageX;
+    const int progressHeight = compact ? 14 : 16;
+    const int progressLabelWidth = compact ? 32 : 36;
+    const int progressTextWidth = std::max(1, std::min(compact ? 126 : 148, pageW / 3));
+    const int progressBarWidth = std::max(1, pageW - progressLabelWidth - progressTextWidth - gap * 2);
+    const bool scanProgressRowVisible = y + progressHeight <= pageBottom && pageW >= 180;
+    MoveWindow(modbusProgressLabel_, x, y, progressLabelWidth, progressHeight, TRUE);
+    x += progressLabelWidth + gap;
+    MoveWindow(modbusProgress_, x, y + 2, progressBarWidth, progressHeight - 3, TRUE);
+    x += progressBarWidth + gap;
+    MoveWindow(modbusProgressText_, x, y, progressTextWidth, progressHeight, TRUE);
 
-    y += compact ? 31 : 36;
-    x = innerX;
-    MoveWindow(targetUnitStatic_, x, y + 5, compact ? 34 : 38, labelHeight, TRUE);
-    x += compact ? 34 : 38;
-    MoveWindow(targetUnitEdit_, x, y, compact ? 88 : 126, row, TRUE);
-    x += (compact ? 88 : 126) + gap;
-    MoveWindow(toleranceStatic_, x, y + 5, shortLabelWidth, labelHeight, TRUE);
-    x += shortLabelWidth;
-    MoveWindow(toleranceEdit_, x, y, innerX + innerWidth - x, row, TRUE);
+    y += progressHeight + gap;
+    x = pageX;
+    const bool scanTargetRowVisible = y + row <= pageBottom;
+    const bool showScanAnalysisLabel = pageW >= 700;
+    const int analysisSectionWidth = showScanAnalysisLabel ? (compact ? 72 : 84) : 0;
+    const int targetNameLabelWidth = compact ? 42 : 48;
+    const int targetNameEditWidth = std::max(1, std::min(compact ? 80 : 94, pageW / 8));
+    const int targetValueLabelWidth = compact ? 42 : 48;
+    const int targetValueEditWidth = std::max(1, std::min(compact ? 72 : 86, pageW / 8));
+    const int targetUnitLabelWidth = compact ? 28 : 32;
+    const int targetUnitEditWidth = std::max(1, std::min(compact ? 56 : 68, pageW / 8));
+    const int toleranceLabelWidth = compact ? 28 : 32;
+    const int toleranceEditWidth = std::max(1, pageW
+        - analysisSectionWidth
+        - targetNameLabelWidth - targetNameEditWidth
+        - targetValueLabelWidth - targetValueEditWidth
+        - targetUnitLabelWidth - targetUnitEditWidth
+        - toleranceLabelWidth
+        - gap * 3);
+    MoveWindow(analysisSectionLabel_, x, y, std::max(1, analysisSectionWidth), row, TRUE);
+    x += analysisSectionWidth;
+    MoveWindow(targetStatic_, x, y, targetNameLabelWidth, row, TRUE);
+    x += targetNameLabelWidth;
+    MoveWindow(targetLabelEdit_, x, y, targetNameEditWidth, row, TRUE);
+    x += targetNameEditWidth + gap;
+    MoveWindow(targetValueStatic_, x, y, targetValueLabelWidth, row, TRUE);
+    x += targetValueLabelWidth;
+    MoveWindow(targetValueEdit_, x, y, targetValueEditWidth, row, TRUE);
+    x += targetValueEditWidth + gap;
+    MoveWindow(targetUnitStatic_, x, y, targetUnitLabelWidth, row, TRUE);
+    x += targetUnitLabelWidth;
+    MoveWindow(targetUnitEdit_, x, y, targetUnitEditWidth, row, TRUE);
+    x += targetUnitEditWidth + gap;
+    MoveWindow(toleranceStatic_, x, y, toleranceLabelWidth, row, TRUE);
+    x += toleranceLabelWidth;
+    MoveWindow(toleranceEdit_, x, y, toleranceEditWidth, row, TRUE);
 
-    y += compact ? 31 : 36;
-    x = innerX;
-    MoveWindow(candidateStatic_, x, y + 5, shortLabelWidth, labelHeight, TRUE);
-    x += shortLabelWidth;
-    MoveWindow(candidateCombo_, x, y, innerX + innerWidth - x, 220, TRUE);
-
-    y += compact ? 34 : 40;
-    x = innerX;
-    const int analysisButtonWidth = compact ? 92 : 112;
-    const int ruleButtonWidth = compact ? 86 : 100;
-    const int exportButtonWidth = compact ? 86 : 100;
+    y += row + gap;
+    x = pageX;
+    const bool scanCandidateRowVisible = y + row <= pageBottom;
+    const int candidateLabelWidth = compact ? 32 : 36;
+    const int modbusButtonWidth = compact ? 90 : 102;
+    const int analysisButtonWidth = compact ? 66 : 76;
+    const int ruleButtonWidth = compact ? 66 : 76;
+    const int exportButtonWidth = compact ? 66 : 76;
+    const int candidateWidth = std::max(1, pageW
+        - candidateLabelWidth
+        - modbusButtonWidth
+        - analysisButtonWidth
+        - ruleButtonWidth
+        - exportButtonWidth
+        - gap * 5);
+    MoveWindow(candidateStatic_, x, y, candidateLabelWidth, row, TRUE);
+    x += candidateLabelWidth;
+    MoveWindow(candidateCombo_, x, y, candidateWidth, 180, TRUE);
+    x += candidateWidth + gap;
+    MoveWindow(modbusButton_, x, y, modbusButtonWidth, row, TRUE);
+    x += modbusButtonWidth + gap;
     MoveWindow(analysisButton_, x, y, analysisButtonWidth, row, TRUE);
     x += analysisButtonWidth + gap;
     MoveWindow(ruleVerifyButton_, x, y, ruleButtonWidth, row, TRUE);
     x += ruleButtonWidth + gap;
     MoveWindow(exportReportButton_, x, y, exportButtonWidth, row, TRUE);
 
-    MoveWindow(logGroup_, rightX, contentY, rightWidth, contentHeight, TRUE);
-    const int logInnerX = rightX + groupPad;
-    const int logInnerWidth = rightWidth - groupPad * 2;
-    const LogToolbarLayout logLayout = calculateLogToolbarLayout(logInnerX, contentY + (compact ? 20 : 24), logInnerWidth, row, gap, compact ? 34 : 40);
-    MoveWindow(logFormatLabel_, logLayout.formatLabel.x, logLayout.formatLabel.y, logLayout.formatLabel.width, logLayout.formatLabel.height, TRUE);
-    MoveWindow(logFormatCombo_, logLayout.formatCombo.x, logLayout.formatCombo.y, logLayout.formatCombo.width, 180, TRUE);
-    MoveWindow(logEncodingLabel_, logLayout.encodingLabel.x, logLayout.encodingLabel.y, logLayout.encodingLabel.width, logLayout.encodingLabel.height, TRUE);
-    MoveWindow(logEncodingCombo_, logLayout.encodingCombo.x, logLayout.encodingCombo.y, logLayout.encodingCombo.width, 160, TRUE);
-    MoveWindow(copyLogButton_, logLayout.copyButton.x, logLayout.copyButton.y, logLayout.copyButton.width, logLayout.copyButton.height, TRUE);
-    MoveWindow(exportLogButton_, logLayout.exportButton.x, logLayout.exportButton.y, logLayout.exportButton.width, logLayout.exportButton.height, TRUE);
-    MoveWindow(logFilterLabel_, logLayout.filterLabel.x, logLayout.filterLabel.y, logLayout.filterLabel.width, logLayout.filterLabel.height, TRUE);
-    MoveWindow(logFilterEdit_, logLayout.filterEdit.x, logLayout.filterEdit.y, logLayout.filterEdit.width, logLayout.filterEdit.height, TRUE);
-    MoveWindow(logSearchLabel_, logLayout.searchLabel.x, logLayout.searchLabel.y, logLayout.searchLabel.width, logLayout.searchLabel.height, TRUE);
-    MoveWindow(logSearchEdit_, logLayout.searchEdit.x, logLayout.searchEdit.y, logLayout.searchEdit.width, logLayout.searchEdit.height, TRUE);
-    MoveWindow(findLogButton_, logLayout.findButton.x, logLayout.findButton.y, logLayout.findButton.width, logLayout.findButton.height, TRUE);
-    const int logContentY = std::max(logLayout.filterEdit.bottom(), logLayout.findButton.bottom()) + (compact ? 8 : 10);
-    MoveWindow(receiveLog_, logInnerX, logContentY, logInnerWidth, std::max(120, contentY + contentHeight - logContentY - groupPad), TRUE);
-    MoveWindow(statusText_, margin, statusY, width - margin * 2, statusHeight, TRUE);
+    y = contentY;
+    x = pageX;
+    const int settingsLabelWidth = compact ? 58 : 66;
+    const int settingsComboWidth = compact ? 68 : 78;
+    const int pauseButtonWidth = compact ? 78 : 88;
+    const bool settingsRowVisible = y + row <= pageBottom;
+    MoveWindow(logCacheLabel_, x, y + 5, settingsLabelWidth, labelHeight, TRUE);
+    x += settingsLabelWidth;
+    MoveWindow(logCacheCombo_, x, y, settingsComboWidth, 260, TRUE);
+    x += settingsComboWidth + gap;
+    MoveWindow(pauseScrollButton_, x, y, pauseButtonWidth, row, TRUE);
+    x += pauseButtonWidth + gap;
+    MoveWindow(clearButton_, x, y, smallButtonWidth, row, TRUE);
+
+    if (pageBottom <= pageY) {
+        ShowWindow(workTabs_, SW_HIDE);
+    } else {
+        ShowWindow(workTabs_, SW_SHOW);
+    }
+    hideWorkbenchTabControls();
+    activeTab = static_cast<int>(TabCtrl_GetCurSel(workTabs_));
+    if (activeTab == 0) {
+        const bool timedVisible = timedY + row <= pageBottom && pageW >= 230;
+        showControl(sendModeCombo_, showSingleSendFormatRow);
+        showControl(textEncodingCombo_, showSingleSendFormatRow);
+        showControl(lineEndingCombo_, showSingleSendFormatRow);
+        showControl(historyCombo_, showHistoryCombo);
+        showControl(sendEdit_, sendContentVisible);
+        showControl(sendButton_, sendContentVisible);
+        showControl(timedSendCheck_, timedVisible);
+        showControl(timedPeriodLabel_, timedVisible);
+        showControl(timedPeriodEdit_, timedVisible);
+    } else if (activeTab == 1) {
+        for (std::size_t index = 0; index < quickSendEdits_.size(); ++index) {
+            showControl(quickSendEdits_[index], quickSlotVisible[index]);
+            showControl(quickSendButtons_[index], quickSlotVisible[index]);
+        }
+    } else if (activeTab == 2) {
+        showControl(filePathLabel_, fileFirstRowVisible);
+        showControl(filePathEdit_, fileFirstRowVisible);
+        showControl(fileBrowseButton_, fileFirstRowVisible);
+        showControl(fileSendButton_, fileFirstRowVisible);
+        showControl(fileStopButton_, fileFirstRowVisible);
+        showControl(fileDelayLabel_, fileSecondRowVisible);
+        showControl(fileDelayCombo_, fileSecondRowVisible);
+        showControl(fileProgress_, fileSecondRowVisible);
+    } else if (activeTab == 3) {
+        showControl(scanSectionLabel_, scanSectionVisible);
+        showControl(scanSlaveLabel_, scanParameterRowVisible);
+        showControl(scanSlaveEdit_, scanParameterRowVisible);
+        showControl(scanFunctionLabel_, scanParameterRowVisible);
+        showControl(scanFunctionCombo_, scanParameterRowVisible);
+        showControl(scanStartLabel_, scanParameterRowVisible);
+        showControl(scanStartEdit_, scanParameterRowVisible);
+        showControl(scanEndLabel_, scanParameterRowVisible);
+        showControl(scanEndEdit_, scanParameterRowVisible);
+        showControl(modbusProgressLabel_, scanProgressRowVisible);
+        showControl(modbusProgress_, scanProgressRowVisible);
+        showControl(modbusProgressText_, scanProgressRowVisible);
+        showControl(analysisSectionLabel_, scanTargetRowVisible && showScanAnalysisLabel);
+        showControl(targetStatic_, scanTargetRowVisible);
+        showControl(targetLabelEdit_, scanTargetRowVisible);
+        showControl(targetValueStatic_, scanTargetRowVisible);
+        showControl(targetValueEdit_, scanTargetRowVisible);
+        showControl(targetUnitStatic_, scanTargetRowVisible);
+        showControl(targetUnitEdit_, scanTargetRowVisible);
+        showControl(toleranceStatic_, scanTargetRowVisible);
+        showControl(toleranceEdit_, scanTargetRowVisible);
+        showControl(candidateStatic_, scanCandidateRowVisible);
+        showControl(candidateCombo_, scanCandidateRowVisible);
+        showControl(modbusButton_, scanCandidateRowVisible);
+        showControl(analysisButton_, scanCandidateRowVisible);
+        showControl(ruleVerifyButton_, scanCandidateRowVisible);
+        showControl(exportReportButton_, scanCandidateRowVisible);
+    } else if (activeTab == 4) {
+        showControl(logCacheLabel_, settingsRowVisible);
+        showControl(logCacheCombo_, settingsRowVisible);
+        showControl(pauseScrollButton_, settingsRowVisible);
+        showControl(clearButton_, settingsRowVisible);
+    }
+    RECT workRect = {workInnerX, tabsY, workInnerX + workInnerWidth, tabsY + tabsHeight};
+    RedrawWindow(window_, &workRect, nullptr, RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN);
+    const int clockWidth = compact ? 78 : 88;
+    const int counterWidth = compact ? 76 : 86;
+    int statusRight = width - margin;
+    const bool showClock = width >= 560;
+    const bool showCounters = width >= 470;
+    showControl(clockStatusText_, showClock);
+    showControl(rxStatusText_, showCounters);
+    showControl(txStatusText_, showCounters);
+    if (showClock) {
+        MoveWindow(clockStatusText_, statusRight - clockWidth, statusY, clockWidth, statusHeight, TRUE);
+        statusRight -= clockWidth + gap;
+    }
+    if (showCounters) {
+        MoveWindow(rxStatusText_, statusRight - counterWidth, statusY, counterWidth, statusHeight, TRUE);
+        statusRight -= counterWidth + gap;
+        MoveWindow(txStatusText_, statusRight - counterWidth, statusY, counterWidth, statusHeight, TRUE);
+        statusRight -= counterWidth + gap;
+    }
+    MoveWindow(statusText_, margin, statusY, std::max(1, statusRight - margin), statusHeight, TRUE);
 }
 
 void NativeMainWindow::setDefaultFonts() {
     for (HWND child = GetWindow(window_, GW_CHILD); child != nullptr; child = GetWindow(child, GW_HWNDNEXT)) {
         addControlFont(child, uiFont_);
+        applyClassicControlChrome(child);
+    }
+}
+
+void NativeMainWindow::hideWorkbenchTabControls() {
+    for (HWND control : {
+             sendModeCombo_,
+             textEncodingCombo_,
+             lineEndingCombo_,
+             historyCombo_,
+             sendEdit_,
+             sendButton_,
+             timedSendCheck_,
+             timedPeriodLabel_,
+             timedPeriodEdit_,
+             filePathLabel_,
+             filePathEdit_,
+             fileBrowseButton_,
+             fileSendButton_,
+             fileStopButton_,
+             fileDelayLabel_,
+             fileDelayCombo_,
+             fileProgress_,
+             workflowHint_,
+             scanSectionLabel_,
+             scanSlaveLabel_,
+             scanSlaveEdit_,
+             scanFunctionLabel_,
+             scanFunctionCombo_,
+             scanStartLabel_,
+             scanStartEdit_,
+             scanEndLabel_,
+             scanEndEdit_,
+             modbusProgressLabel_,
+             modbusProgress_,
+             modbusProgressText_,
+             modbusButton_,
+             analysisSectionLabel_,
+             targetStatic_,
+             targetLabelEdit_,
+             targetValueStatic_,
+             targetValueEdit_,
+             targetUnitStatic_,
+             targetUnitEdit_,
+             toleranceStatic_,
+             toleranceEdit_,
+             candidateStatic_,
+             candidateCombo_,
+             analysisButton_,
+             ruleVerifyButton_,
+             exportReportButton_,
+             logCacheLabel_,
+             logCacheCombo_,
+             pauseScrollButton_,
+             clearButton_,
+         }) {
+        showControl(control, false);
+    }
+    for (HWND control : quickSendEdits_) {
+        showControl(control, false);
+    }
+    for (HWND control : quickSendButtons_) {
+        showControl(control, false);
+    }
+}
+
+void NativeMainWindow::updateWorkbenchTab() {
+    int tabIndex = static_cast<int>(TabCtrl_GetCurSel(workTabs_));
+    if (tabIndex < 0) {
+        tabIndex = 0;
+    }
+
+    hideWorkbenchTabControls();
+    const bool singleVisible = tabIndex == 0;
+    const bool quickVisible = tabIndex == 1;
+    const bool fileVisible = tabIndex == 2;
+    const bool scanVisible = tabIndex == 3;
+    const bool settingsVisible = tabIndex == 4;
+
+    for (HWND control : {
+             sendModeCombo_,
+             textEncodingCombo_,
+             lineEndingCombo_,
+             historyCombo_,
+             sendEdit_,
+             sendButton_,
+             timedSendCheck_,
+             timedPeriodLabel_,
+             timedPeriodEdit_,
+         }) {
+        showControl(control, singleVisible);
+    }
+
+    for (HWND control : quickSendEdits_) {
+        showControl(control, quickVisible);
+    }
+    for (HWND control : quickSendButtons_) {
+        showControl(control, quickVisible);
+    }
+
+    for (HWND control : {filePathLabel_, filePathEdit_, fileBrowseButton_, fileSendButton_, fileStopButton_, fileDelayLabel_, fileDelayCombo_, fileProgress_}) {
+        showControl(control, fileVisible);
+    }
+
+    for (HWND control : {
+             scanSectionLabel_,
+             scanSlaveLabel_,
+             scanSlaveEdit_,
+             scanFunctionLabel_,
+             scanFunctionCombo_,
+             scanStartLabel_,
+             scanStartEdit_,
+             scanEndLabel_,
+             scanEndEdit_,
+             modbusProgressLabel_,
+             modbusProgress_,
+             modbusProgressText_,
+             modbusButton_,
+             analysisSectionLabel_,
+             targetStatic_,
+             targetLabelEdit_,
+             targetValueStatic_,
+             targetValueEdit_,
+             targetUnitStatic_,
+             targetUnitEdit_,
+             toleranceStatic_,
+             toleranceEdit_,
+             candidateStatic_,
+             candidateCombo_,
+             analysisButton_,
+             ruleVerifyButton_,
+             exportReportButton_,
+         }) {
+        showControl(control, scanVisible);
+    }
+
+    for (HWND control : {logCacheLabel_, logCacheCombo_, pauseScrollButton_, clearButton_}) {
+        showControl(control, settingsVisible);
     }
 }
 
@@ -1998,6 +2758,16 @@ void NativeMainWindow::applyUiPreferences() {
     selectComboData(sendModeCombo_, preferences->sendPayloadMode);
     selectComboData(textEncodingCombo_, preferences->sendTextEncodingCodePage);
     selectComboData(lineEndingCombo_, preferences->sendLineEnding);
+    SendMessageW(autoReconnectCheck_, BM_SETCHECK, preferences->autoReconnect ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageW(timedSendCheck_, BM_SETCHECK, preferences->timedSendEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
+    timedSendActive_ = preferences->timedSendEnabled;
+    setControlText(timedPeriodEdit_, std::to_wstring(std::clamp(preferences->timedSendPeriodMs, 50, 3600000)));
+    selectComboData(fileDelayCombo_, std::clamp(preferences->fileSendDelayMs, 0, 1000));
+    applyLogCacheLimit(static_cast<std::size_t>(std::clamp(preferences->logVisibleCharLimit, static_cast<int>(kMinLogVisibleChars), static_cast<int>(kMaxLogVisibleChars))));
+    selectComboData(logCacheCombo_, static_cast<LPARAM>(logVisibleCharLimit_));
+    for (std::size_t index = 0; index < quickSendEdits_.size() && index < preferences->quickSendSlots.size(); ++index) {
+        setControlText(quickSendEdits_[index], utf8ToWide(preferences->quickSendSlots[index]));
+    }
     showLogTimestamps_ = preferences->showLogTimestamps;
     applyLogTheme(preferences->logThemeIndex);
     updateLogTimestampMenu();
@@ -2032,6 +2802,16 @@ void NativeMainWindow::saveUiPreferences() {
     preferences.sendPayloadMode = static_cast<int>(selectedComboData(sendModeCombo_, 0));
     preferences.sendTextEncodingCodePage = static_cast<int>(selectedTextCodePage());
     preferences.sendLineEnding = static_cast<int>(selectedComboData(lineEndingCombo_, 0));
+    preferences.autoReconnect = SendMessageW(autoReconnectCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    preferences.timedSendEnabled = SendMessageW(timedSendCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    preferences.timedSendPeriodMs = std::clamp(textToInt(timedPeriodEdit_, 1000), 50, 3600000);
+    preferences.fileSendDelayMs = static_cast<int>(selectedComboData(fileDelayCombo_, 0));
+    preferences.logVisibleCharLimit = static_cast<int>(logVisibleCharLimit_);
+    preferences.quickSendSlots.clear();
+    preferences.quickSendSlots.reserve(quickSendEdits_.size());
+    for (HWND edit : quickSendEdits_) {
+        preferences.quickSendSlots.push_back(wideToUtf8(controlText(edit)));
+    }
     preferences.windowLeft = windowRect.left;
     preferences.windowTop = windowRect.top;
     preferences.windowWidth = windowRect.right - windowRect.left;
@@ -2074,55 +2854,82 @@ void NativeMainWindow::connectSerial() {
     }
 
     lastOpenOptions_ = options;
+    disconnectAfterModbusScan_ = false;
     waitingReconnect_ = false;
     KillTimer(window_, IDT_RECONNECT);
     appendLog(uiString(T::SystemConnectedPrefix) + utf8ToWide(serialPort_.endpoint()));
     SetWindowTextW(connectButton_, tx(T::DisconnectButton));
     updateRtsControlState();
     saveCurrentSerialProfile();
+    updateTimedSendTimer();
     setStatus(tx(T::ConnectedStatus));
 }
 
 void NativeMainWindow::disconnectSerial() {
+    if (modbusScanRunning_) {
+        disconnectAfterModbusScan_ = true;
+        requestCancelModbusScan();
+        setStatus(tx(T::ModbusDisconnectPendingStatus));
+        return;
+    }
+    closeSerialPort(tx(T::DisconnectedStatus));
+}
+
+void NativeMainWindow::closeSerialPort(const std::wstring& statusText) {
     if (!serialPort_.isOpen()) {
         return;
     }
+    KillTimer(window_, IDT_TIMED_SEND);
+    stopFileSend({});
     const std::wstring endpoint = utf8ToWide(serialPort_.endpoint());
     serialPort_.close();
     appendLog(uiString(T::SystemDisconnectedPrefix) + endpoint);
     SetWindowTextW(connectButton_, tx(T::ConnectButton));
     updateRtsControlState();
-    setStatus(tx(T::DisconnectedStatus));
+    updateTimedSendTimer();
+    setStatus(statusText.empty() ? tx(T::DisconnectedStatus) : statusText.c_str());
 }
 
 void NativeMainWindow::sendPayload() {
+    sendPayloadFromText(controlText(sendEdit_), true);
+}
+
+bool NativeMainWindow::sendPayloadFromText(const std::wstring& text, bool saveHistory) {
     if (!serialPort_.isOpen()) {
         setStatus(tx(T::SerialNotConnectedSend));
-        return;
+        return false;
+    }
+    if (modbusScanRunning_) {
+        setStatus(tx(T::ModbusRunning));
+        return false;
+    }
+    if (fileSendActive_) {
+        setStatus(tx(T::FileSendBusyStatus));
+        return false;
     }
 
     std::wstring errorText;
-    const std::vector<std::uint8_t> payload = payloadFromInput(&errorText);
+    const std::vector<std::uint8_t> payload = payloadFromText(text, &errorText);
     if (!errorText.empty()) {
         setStatus(errorText);
-        return;
+        return false;
     }
     if (payload.empty()) {
         setStatus(tx(T::EmptyPayload));
-        return;
+        return false;
     }
 
     const SerialIoResult result = serialPort_.writeBytes(payload);
     if (!result.ok) {
         setStatus(utf8ToWide(result.errorMessage));
         handleSerialFailure(result.errorMessage);
-        return;
+        return false;
     }
 
     saveRawEvent("Tx", payload);
-    if (store_.isOpen()) {
+    if (saveHistory && store_.isOpen()) {
         native_storage::SendHistoryEntry history;
-        history.content = wideToUtf8(controlText(sendEdit_));
+        history.content = wideToUtf8(text);
         history.payloadMode = static_cast<int>(selectedComboData(sendModeCombo_, 0));
         history.lineEnding = static_cast<int>(selectedComboData(lineEndingCombo_, 0));
         history.textEncodingCodePage = static_cast<int>(selectedTextCodePage());
@@ -2131,11 +2938,220 @@ void NativeMainWindow::sendPayload() {
         refreshSendHistory();
     }
     appendPayloadLog(NativeLogKind::Tx, payload);
+    txByteCount_ += static_cast<std::uint64_t>(result.byteCount);
+    updateStatusSegments();
     setStatus(uiString(T::SentPrefix) + std::to_wstring(result.byteCount) + uiString(T::BytesSuffix));
+    return true;
+}
+
+void NativeMainWindow::sendQuickPayload(std::size_t index) {
+    if (index >= quickSendEdits_.size()) {
+        return;
+    }
+    const std::wstring text = controlText(quickSendEdits_[index]);
+    if (text.empty()) {
+        setStatus(tx(T::QuickSendEmptyStatus));
+        return;
+    }
+    sendPayloadFromText(text, false);
+}
+
+void NativeMainWindow::updateTimedSendTimer() {
+    KillTimer(window_, IDT_TIMED_SEND);
+    if (!timedSendActive_ || !serialPort_.isOpen()) {
+        return;
+    }
+    const int periodMs = std::clamp(textToInt(timedPeriodEdit_, 1000), 50, 3600000);
+    SetTimer(window_, IDT_TIMED_SEND, static_cast<UINT>(periodMs), nullptr);
+}
+
+void NativeMainWindow::browseFileSend() {
+    wchar_t fileName[MAX_PATH] = {};
+    const std::wstring current = controlText(filePathEdit_);
+    if (!current.empty()) {
+        wcsncpy_s(fileName, current.c_str(), _TRUNCATE);
+    }
+
+    OPENFILENAMEW dialog = {};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = window_;
+    dialog.lpstrFilter = tx(T::FileSendFilter);
+    dialog.lpstrFile = fileName;
+    dialog.nMaxFile = MAX_PATH;
+    dialog.lpstrTitle = tx(T::FileSendDialogTitle);
+    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    if (!GetOpenFileNameW(&dialog)) {
+        return;
+    }
+
+    setControlText(filePathEdit_, fileName);
+    fileSendPath_ = std::filesystem::path(fileName);
+    saveUiPreferences();
+}
+
+void NativeMainWindow::startFileSend() {
+    if (!serialPort_.isOpen()) {
+        setStatus(tx(T::SerialNotConnectedSend));
+        return;
+    }
+    if (modbusScanRunning_) {
+        setStatus(tx(T::ModbusRunning));
+        return;
+    }
+    if (fileSendActive_) {
+        return;
+    }
+
+    const std::wstring pathText = controlText(filePathEdit_);
+    if (pathText.empty()) {
+        setStatus(tx(T::FileSendNoFile));
+        return;
+    }
+
+    fileSendPath_ = std::filesystem::path(pathText);
+    std::error_code error;
+    fileSendTotalBytes_ = std::filesystem::file_size(fileSendPath_, error);
+    if (error) {
+        setStatus(uiString(T::FileSendOpenFailedPrefix) + pathText);
+        return;
+    }
+
+    fileSendStream_.close();
+    fileSendStream_.clear();
+    fileSendStream_.open(fileSendPath_, std::ios::binary);
+    if (!fileSendStream_) {
+        setStatus(uiString(T::FileSendOpenFailedPrefix) + pathText);
+        return;
+    }
+
+    fileSendSentBytes_ = 0;
+    fileSendActive_ = true;
+    KillTimer(window_, IDT_TIMED_SEND);
+    updateFileSendProgress();
+    enableControl(fileSendButton_, false);
+    enableControl(fileBrowseButton_, false);
+    enableControl(filePathEdit_, false);
+    enableControl(fileStopButton_, true);
+    const int delayMs = std::max<int>(1, static_cast<int>(selectedComboData(fileDelayCombo_, 0)));
+    SetTimer(window_, IDT_FILE_SEND, static_cast<UINT>(delayMs), nullptr);
+    setStatus(uiString(T::FileSendStartedPrefix) + pathText);
+}
+
+void NativeMainWindow::stopFileSend(const std::wstring& statusText) {
+    KillTimer(window_, IDT_FILE_SEND);
+    if (fileSendStream_.is_open()) {
+        fileSendStream_.close();
+    }
+    const bool wasActive = fileSendActive_;
+    fileSendActive_ = false;
+    enableControl(fileSendButton_, true);
+    enableControl(fileBrowseButton_, true);
+    enableControl(filePathEdit_, true);
+    enableControl(fileStopButton_, false);
+    updateFileSendProgress();
+    if (!statusText.empty()) {
+        setStatus(statusText);
+    } else if (wasActive) {
+        setStatus(tx(T::FileSendStoppedStatus));
+    }
+    if (wasActive) {
+        updateTimedSendTimer();
+    }
+}
+
+void NativeMainWindow::pumpFileSend() {
+    if (!fileSendActive_) {
+        return;
+    }
+    if (!serialPort_.isOpen()) {
+        stopFileSend(tx(T::DisconnectedStatus));
+        return;
+    }
+
+    std::vector<std::uint8_t> chunk(kFileSendChunkBytes);
+    fileSendStream_.read(reinterpret_cast<char*>(chunk.data()), static_cast<std::streamsize>(chunk.size()));
+    const std::streamsize readCount = fileSendStream_.gcount();
+    if (readCount <= 0) {
+        const std::wstring done = uiString(T::FileSendDonePrefix) + std::to_wstring(fileSendSentBytes_) + uiString(T::BytesSuffix);
+        stopFileSend(done);
+        return;
+    }
+    chunk.resize(static_cast<std::size_t>(readCount));
+
+    const SerialIoResult result = serialPort_.writeBytes(chunk);
+    if (!result.ok) {
+        stopFileSend(utf8ToWide(result.errorMessage));
+        handleSerialFailure(result.errorMessage);
+        return;
+    }
+
+    saveRawEvent("Tx", chunk);
+    appendPayloadLog(NativeLogKind::Tx, chunk);
+    fileSendSentBytes_ += static_cast<std::uintmax_t>(result.byteCount);
+    txByteCount_ += static_cast<std::uint64_t>(result.byteCount);
+    updateFileSendProgress();
+    updateStatusSegments();
+
+    const bool done = fileSendStream_.eof() || fileSendSentBytes_ >= fileSendTotalBytes_;
+    if (done) {
+        const std::wstring summary = uiString(T::FileSendDonePrefix) + std::to_wstring(fileSendSentBytes_) + uiString(T::BytesSuffix);
+        stopFileSend(summary);
+        return;
+    }
+
+    if ((fileSendSentBytes_ % static_cast<std::uintmax_t>(kFileSendChunkBytes * 16)) == 0) {
+        setStatus(uiString(T::FileSendProgressPrefix)
+            + std::to_wstring(fileSendSentBytes_)
+            + L"/"
+            + std::to_wstring(fileSendTotalBytes_)
+            + uiString(T::BytesSuffix));
+    }
+}
+
+void NativeMainWindow::updateFileSendProgress() {
+    if (fileProgress_ == nullptr) {
+        return;
+    }
+    SendMessageW(fileProgress_, PBM_SETRANGE32, 0, 1000);
+    const int position = fileSendTotalBytes_ == 0
+        ? 0
+        : static_cast<int>(std::min<std::uintmax_t>(1000, (fileSendSentBytes_ * 1000) / fileSendTotalBytes_));
+    SendMessageW(fileProgress_, PBM_SETPOS, static_cast<WPARAM>(position), 0);
+}
+
+void NativeMainWindow::updateModbusScanProgress(
+    std::size_t completedBlocks,
+    std::size_t totalBlocks,
+    std::size_t successBlocks,
+    std::size_t failedBlocks,
+    std::size_t observations) {
+    if (modbusProgress_ != nullptr) {
+        SendMessageW(modbusProgress_, PBM_SETRANGE32, 0, 1000);
+        const int position = totalBlocks == 0
+            ? 0
+            : static_cast<int>(std::min<std::size_t>(1000, (completedBlocks * 1000) / totalBlocks));
+        SendMessageW(modbusProgress_, PBM_SETPOS, static_cast<WPARAM>(position), 0);
+    }
+
+    const std::wstring text = std::to_wstring(completedBlocks)
+        + L"/"
+        + std::to_wstring(totalBlocks)
+        + L"  \u6210"
+        + std::to_wstring(successBlocks)
+        + L" \u5931"
+        + std::to_wstring(failedBlocks)
+        + L" \u89C2"
+        + std::to_wstring(observations);
+    if (modbusProgressText_ != nullptr) {
+        SetWindowTextW(modbusProgressText_, text.c_str());
+    }
 }
 
 void NativeMainWindow::pollSerial() {
     if (!serialPort_.isOpen()) {
+        return;
+    }
+    if (modbusScanRunning_) {
         return;
     }
     if (!serialPort_.waitForReadyRead(0)) {
@@ -2145,6 +3161,9 @@ void NativeMainWindow::pollSerial() {
         return;
     }
 
+    std::vector<native_storage::RawIoEvent> events;
+    std::vector<std::uint8_t> mergedPayload;
+    const std::string endpoint = serialPort_.endpoint();
     for (int batch = 0; batch < 8; ++batch) {
         const std::vector<std::uint8_t> payload = serialPort_.readAvailable(4096);
         if (payload.empty()) {
@@ -2153,9 +3172,22 @@ void NativeMainWindow::pollSerial() {
             }
             break;
         }
-        saveRawEvent("Rx", payload);
-        appendPayloadLog(NativeLogKind::Rx, payload);
+        native_storage::RawIoEvent event;
+        event.sessionId = sessionId_;
+        event.direction = "Rx";
+        event.timestampUtc = timestampText();
+        event.endpoint = endpoint;
+        event.payload = payload;
+        events.push_back(std::move(event));
+        mergedPayload.insert(mergedPayload.end(), payload.begin(), payload.end());
     }
+    if (mergedPayload.empty()) {
+        return;
+    }
+    saveRawEvents(std::move(events));
+    appendPayloadLog(NativeLogKind::Rx, mergedPayload);
+    rxByteCount_ += static_cast<std::uint64_t>(mergedPayload.size());
+    updateStatusSegments();
 }
 
 void NativeMainWindow::handleSerialFailure(const std::string& message) {
@@ -2280,24 +3312,22 @@ std::size_t NativeMainWindow::rebuildLogView() {
         }
         std::wstring rendered = renderLogEntry(entry);
         const std::size_t renderedSize = rendered.size();
-        while (!visibleLines.empty() && visibleChars + renderedSize > kMaxVisibleLogChars) {
+        while (!visibleLines.empty() && visibleChars + renderedSize > logVisibleCharLimit_) {
             visibleChars -= visibleLines.front().second.size();
             visibleLines.erase(visibleLines.begin());
         }
-        if (renderedSize <= kMaxVisibleLogChars) {
+        if (renderedSize <= logVisibleCharLimit_) {
             visibleChars += renderedSize;
             visibleLines.emplace_back(entry.kind, std::move(rendered));
         }
     }
 
-    SendMessageW(receiveLog_, WM_SETREDRAW, FALSE, 0);
+    ScopedWindowRedraw redraw(receiveLog_);
     SetWindowTextW(receiveLog_, L"");
     visibleLogChars_ = 0;
     for (const auto& line : visibleLines) {
         insertVisibleLogText(line.first, line.second);
     }
-    SendMessageW(receiveLog_, WM_SETREDRAW, TRUE, 0);
-    InvalidateRect(receiveLog_, nullptr, TRUE);
     lastLogSearchOffset_ = 0;
     visibleLogLineCount_ = visibleLines.size();
     if (logAutoFollow_) {
@@ -2360,7 +3390,7 @@ void NativeMainWindow::addLogEntry(NativeLogEntry entry) {
     entry.text = sanitizeLogText(entry.text);
     bool trimmed = false;
     logEntries_.push_back(std::move(entry));
-    while (logEntries_.size() > kMaxLogEntries) {
+    while (logEntries_.size() > logEntryLimit_) {
         logEntries_.pop_front();
         trimmed = true;
     }
@@ -2380,7 +3410,7 @@ void NativeMainWindow::addLogEntry(NativeLogEntry entry) {
     if (logEntryMatchesFilter(latest)) {
         appendVisibleLogEntry(latest);
         ++visibleLogLineCount_;
-        if (visibleLogChars_ > kMaxVisibleLogChars) {
+        if (visibleLogChars_ > logVisibleCharLimit_) {
             rebuildLogView();
         }
     }
@@ -2588,6 +3618,38 @@ void NativeMainWindow::exportVisibleLog() {
 
 void NativeMainWindow::setStatus(const std::wstring& text) {
     SetWindowTextW(statusText_, text.c_str());
+    updateStatusSegments();
+}
+
+void NativeMainWindow::updateStatusSegments() {
+    if (txStatusText_ != nullptr) {
+        const std::wstring txText = L"TX " + std::to_wstring(txByteCount_) + L" B";
+        SetWindowTextW(txStatusText_, txText.c_str());
+    }
+    if (rxStatusText_ != nullptr) {
+        const std::wstring rxText = L"RX " + std::to_wstring(rxByteCount_) + L" B";
+        SetWindowTextW(rxStatusText_, rxText.c_str());
+    }
+    if (clockStatusText_ != nullptr) {
+        SYSTEMTIME now = {};
+        GetLocalTime(&now);
+        wchar_t buffer[16] = {};
+        swprintf_s(
+            buffer,
+            L"%02u:%02u:%02u",
+            static_cast<unsigned int>(now.wHour),
+            static_cast<unsigned int>(now.wMinute),
+            static_cast<unsigned int>(now.wSecond));
+        SetWindowTextW(clockStatusText_, buffer);
+    }
+}
+
+void NativeMainWindow::applyLogCacheLimit(std::size_t visibleCharLimit) {
+    logVisibleCharLimit_ = std::clamp<std::size_t>(visibleCharLimit, kMinLogVisibleChars, kMaxLogVisibleChars);
+    logEntryLimit_ = std::clamp<std::size_t>(logVisibleCharLimit_ / 160, 1000, kMaxLogEntryLimit);
+    if (receiveLog_ != nullptr) {
+        SendMessageW(receiveLog_, EM_EXLIMITTEXT, 0, static_cast<LPARAM>(logVisibleCharLimit_ + kMaxRenderedLogLineChars));
+    }
 }
 
 void NativeMainWindow::setSendModeStatus() {
@@ -2616,12 +3678,93 @@ std::wstring NativeMainWindow::controlText(HWND control) const {
     return text;
 }
 
+std::wstring NativeMainWindow::analysisInputText(HWND control) const {
+    if (analysisPlaceholderActive(control)) {
+        return L"";
+    }
+    return controlText(control);
+}
+
 void NativeMainWindow::setControlText(HWND control, const std::wstring& text) {
     SetWindowTextW(control, text.c_str());
 }
 
+void NativeMainWindow::initializeAnalysisPlaceholders() {
+    restoreAnalysisPlaceholder(targetLabelEdit_);
+    restoreAnalysisPlaceholder(targetValueEdit_);
+    restoreAnalysisPlaceholder(targetUnitEdit_);
+}
+
+void NativeMainWindow::clearAnalysisPlaceholder(HWND control) {
+    if (!analysisPlaceholderActive(control)) {
+        return;
+    }
+    setAnalysisPlaceholderActive(control, false);
+    SetWindowTextW(control, L"");
+    InvalidateRect(control, nullptr, TRUE);
+}
+
+void NativeMainWindow::restoreAnalysisPlaceholder(HWND control) {
+    if (control == nullptr) {
+        return;
+    }
+    if (!controlText(control).empty() && !analysisPlaceholderActive(control)) {
+        return;
+    }
+    const wchar_t* placeholder = analysisPlaceholderText(control);
+    if (placeholder == nullptr || placeholder[0] == L'\0') {
+        return;
+    }
+    setAnalysisPlaceholderActive(control, true);
+    SetWindowTextW(control, placeholder);
+    SendMessageW(control, EM_SETSEL, 0, 0);
+    InvalidateRect(control, nullptr, TRUE);
+}
+
+bool NativeMainWindow::analysisPlaceholderActive(HWND control) const {
+    if (control == targetLabelEdit_) {
+        return targetNamePlaceholderActive_;
+    }
+    if (control == targetValueEdit_) {
+        return targetValuePlaceholderActive_;
+    }
+    if (control == targetUnitEdit_) {
+        return targetUnitPlaceholderActive_;
+    }
+    return false;
+}
+
+void NativeMainWindow::setAnalysisPlaceholderActive(HWND control, bool active) {
+    if (control == targetLabelEdit_) {
+        targetNamePlaceholderActive_ = active;
+    } else if (control == targetValueEdit_) {
+        targetValuePlaceholderActive_ = active;
+    } else if (control == targetUnitEdit_) {
+        targetUnitPlaceholderActive_ = active;
+    }
+}
+
+const wchar_t* NativeMainWindow::analysisPlaceholderText(HWND control) const {
+    if (control == targetLabelEdit_) {
+        return tx(T::TargetNameCue);
+    }
+    if (control == targetValueEdit_) {
+        return tx(T::TargetValueCue);
+    }
+    if (control == targetUnitEdit_) {
+        return tx(T::TargetUnitCue);
+    }
+    return L"";
+}
+
 std::vector<std::uint8_t> NativeMainWindow::payloadFromInput(std::wstring* errorText) const {
-    const std::wstring text = controlText(sendEdit_);
+    return payloadFromText(controlText(sendEdit_), errorText);
+}
+
+std::vector<std::uint8_t> NativeMainWindow::payloadFromText(const std::wstring& text, std::wstring* errorText) const {
+    if (errorText != nullptr) {
+        errorText->clear();
+    }
     const int mode = static_cast<int>(selectedComboData(sendModeCombo_, 0));
     std::vector<std::uint8_t> payload;
     if (mode == 1) {
@@ -2699,6 +3842,12 @@ SerialOpenOptions NativeMainWindow::currentOpenOptions() const {
 
 void NativeMainWindow::applySerialLineControl(WORD controlId) {
     const bool enabled = SendMessageW(controlId == IDC_DTR_CHECK ? dtrCheck_ : rtsCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    if (modbusScanRunning_) {
+        HWND control = controlId == IDC_DTR_CHECK ? dtrCheck_ : rtsCheck_;
+        SendMessageW(control, BM_SETCHECK, enabled ? BST_UNCHECKED : BST_CHECKED, 0);
+        setStatus(tx(T::ModbusRunning));
+        return;
+    }
     if (!serialPort_.isOpen()) {
         setStatus(std::wstring(controlId == IDC_DTR_CHECK ? tx(T::DtrAppliedPrefix) : tx(T::RtsAppliedPrefix))
             + (enabled ? tx(T::SignalEnabledSuffix) : tx(T::SignalDisabledSuffix))
@@ -2732,6 +3881,10 @@ void NativeMainWindow::applySerialLineControl(WORD controlId) {
 }
 
 void NativeMainWindow::updateRtsControlState() {
+    if (modbusScanRunning_) {
+        EnableWindow(rtsCheck_, FALSE);
+        return;
+    }
     const bool selectedHardwareRtsCts = selectedComboData(flowControlCombo_, static_cast<LPARAM>(SerialFlowControl::None))
         == static_cast<LPARAM>(SerialFlowControl::HardwareRtsCts);
     const bool hardwareManaged = serialPort_.isOpen() ? serialPort_.usesHardwareRtsCts() : selectedHardwareRtsCts;
@@ -2776,12 +3929,20 @@ void NativeMainWindow::updateLogTimestampMenu() {
 }
 
 void NativeMainWindow::runModbusScan() {
+    if (modbusScanRunning_) {
+        requestCancelModbusScan();
+        return;
+    }
     if (!serialPort_.isOpen()) {
         setStatus(tx(T::ConnectBeforeModbus));
         return;
     }
     if (!store_.isOpen()) {
         setStatus(tx(T::StorageModbusClosed));
+        return;
+    }
+    if (fileSendActive_) {
+        setStatus(tx(T::FileSendBusyStatus));
         return;
     }
 
@@ -2815,118 +3976,364 @@ void NativeMainWindow::runModbusScan() {
     execution.session.startedAtUtc = timestampText();
 
     appendLog(uiString(T::SystemModbusStartPrefix) + utf8ToWide(scanSessionId));
+    if (modbusScanThread_ != nullptr) {
+        WaitForSingleObject(modbusScanThread_, INFINITE);
+        CloseHandle(modbusScanThread_);
+        modbusScanThread_ = nullptr;
+    }
+    modbusScanCancelRequested_ = false;
+    disconnectAfterModbusScan_ = false;
+    setModbusScanRunningUi(true);
+    updateModbusScanProgress(0, planResult.plan.blocks.size(), 0, 0, 0);
     setStatus(tx(T::ModbusRunning));
 
-    for (const modbus_core::ScanBlock& block : planResult.plan.blocks) {
-        native_storage::ScanAttemptRecord attempt;
-        attempt.sessionId = scanSessionId;
-        attempt.blockIndex = block.index;
-        attempt.attemptIndex = 0;
-        attempt.startAddress = block.startAddress;
-        attempt.quantity = block.quantity;
-        attempt.requestFrame = block.requestFrame;
-        attempt.sentAtUtc = timestampText();
-        attempt.endpoint = serialPort_.endpoint();
+    auto* context = new ModbusWorkerContext;
+    context->owner = this;
+    context->plan = planResult.plan;
+    context->execution = std::move(execution);
+    context->scanSessionId = scanSessionId;
+    modbusScanThread_ = CreateThread(nullptr, 0, &NativeMainWindow::modbusScanThreadProc, context, 0, nullptr);
+    if (modbusScanThread_ == nullptr) {
+        delete context;
+        setModbusScanRunningUi(false);
+        setStatus(tx(T::ModbusThreadCreateFailed));
+    }
+}
 
-        saveRawEvent("Tx", block.requestFrame);
-        appendPayloadLog(NativeLogKind::ModbusTx, block.requestFrame);
-        const SerialIoResult writeResult = serialPort_.writeBytes(block.requestFrame);
-        if (!writeResult.ok) {
-            attempt.status = "write-error";
-            attempt.errorMessage = writeResult.errorMessage;
-            execution.attempts.push_back(std::move(attempt));
-            ++execution.session.failedBlockCount;
-            handleSerialFailure(writeResult.errorMessage);
-            break;
+DWORD WINAPI NativeMainWindow::modbusScanThreadProc(void* parameter) {
+    std::unique_ptr<ModbusWorkerContext> context(static_cast<ModbusWorkerContext*>(parameter));
+    if (!context || context->owner == nullptr) {
+        return 1;
+    }
+    NativeMainWindow* self = context->owner;
+    auto* result = new ModbusWorkerResult;
+    result->execution = std::move(context->execution);
+    const std::string scanSessionId = context->scanSessionId;
+    const std::string endpoint = self->serialPort_.endpoint();
+
+    const auto appendRawEvent = [&](std::string direction, const std::vector<std::uint8_t>& payload) {
+        native_storage::RawIoEvent event;
+        event.sessionId = scanSessionId;
+        event.direction = std::move(direction);
+        event.timestampUtc = timestampText();
+        event.endpoint = endpoint;
+        event.payload = payload;
+        result->rawEvents.push_back(std::move(event));
+    };
+    const auto appendPayloadEntry = [&](NativeLogKind kind, const wchar_t* prefix, const std::vector<std::uint8_t>& payload) {
+        NativeLogEntry entry;
+        entry.kind = kind;
+        entry.timestamp = localClockText();
+        entry.payloadPrefix = prefix;
+        entry.payload = payload;
+        entry.hasPayload = true;
+        result->logEntries.push_back(std::move(entry));
+    };
+    const auto postProgress = [&]() {
+        auto* progress = new ModbusWorkerProgress;
+        progress->completedBlocks = result->execution.attempts.size();
+        progress->totalBlocks = context->plan.blocks.size();
+        progress->successBlocks = static_cast<std::size_t>(std::max(0, result->execution.session.successBlockCount));
+        progress->failedBlocks = static_cast<std::size_t>(std::max(0, result->execution.session.failedBlockCount));
+        progress->observations = result->execution.observations.size();
+        if (!PostMessageW(self->window_, kModbusScanProgressMessage, 0, reinterpret_cast<LPARAM>(progress))) {
+            delete progress;
         }
+    };
 
-        std::vector<std::uint8_t> response;
-        const std::size_t expectedNormalBytes = static_cast<std::size_t>(5 + block.quantity * 2);
-        const ULONGLONG deadline = GetTickCount64() + 1200;
-        while (GetTickCount64() < deadline) {
-            if (serialPort_.waitForReadyRead(50)) {
-                std::vector<std::uint8_t> chunk = serialPort_.readAvailable(260);
-                response.insert(response.end(), chunk.begin(), chunk.end());
-                if (response.size() >= expectedNormalBytes
-                    || (response.size() >= 5 && (response[1] & 0x80U) != 0)) {
-                    break;
-                }
-            } else if (!serialPort_.lastErrorText().empty()) {
-                attempt.errorMessage = serialPort_.lastErrorText();
+    try {
+        for (const modbus_core::ScanBlock& block : context->plan.blocks) {
+            if (self->modbusScanCancelRequested_) {
+                result->cancelled = true;
+                postProgress();
                 break;
             }
-        }
 
-        attempt.receivedAtUtc = timestampText();
-        attempt.responseFrame = response;
-        if (!response.empty()) {
-            saveRawEvent("Rx", response);
-            appendPayloadLog(NativeLogKind::ModbusRx, response);
-        }
+            native_storage::ScanAttemptRecord attempt;
+            attempt.sessionId = scanSessionId;
+            attempt.blockIndex = block.index;
+            attempt.attemptIndex = 0;
+            attempt.startAddress = block.startAddress;
+            attempt.quantity = block.quantity;
+            attempt.requestFrame = block.requestFrame;
+            attempt.sentAtUtc = timestampText();
+            attempt.endpoint = endpoint;
 
-        if (response.empty()) {
-            attempt.status = "timeout";
-            if (attempt.errorMessage.empty()) {
-                attempt.errorMessage = wideToUtf8(tx(T::ModbusTimeout));
+            const SerialIoResult writeResult = self->serialPort_.writeBytes(block.requestFrame);
+            if (!writeResult.ok) {
+                attempt.status = "write-error";
+                attempt.errorMessage = writeResult.errorMessage;
+                result->execution.attempts.push_back(std::move(attempt));
+                ++result->execution.session.failedBlockCount;
+                result->errorMessage = writeResult.errorMessage;
+                result->serialFailed = true;
+                postProgress();
+                break;
             }
-            ++execution.session.failedBlockCount;
-            execution.attempts.push_back(std::move(attempt));
-            continue;
+
+            appendRawEvent("Tx", block.requestFrame);
+            appendPayloadEntry(NativeLogKind::ModbusTx, L"[Modbus TX]", block.requestFrame);
+
+            std::vector<std::uint8_t> response;
+            const std::size_t expectedNormalBytes = static_cast<std::size_t>(5 + block.quantity * 2);
+            const ULONGLONG deadline = GetTickCount64() + 1200;
+            while (GetTickCount64() < deadline) {
+                if (self->modbusScanCancelRequested_) {
+                    result->cancelled = true;
+                    break;
+                }
+                if (self->serialPort_.waitForReadyRead(50)) {
+                    std::vector<std::uint8_t> chunk = self->serialPort_.readAvailable(260);
+                    response.insert(response.end(), chunk.begin(), chunk.end());
+                    if (response.size() >= expectedNormalBytes
+                        || (response.size() >= 5 && (response[1] & 0x80U) != 0)) {
+                        break;
+                    }
+                } else if (!self->serialPort_.lastErrorText().empty()) {
+                    attempt.errorMessage = self->serialPort_.lastErrorText();
+                    result->errorMessage = attempt.errorMessage;
+                    result->serialFailed = true;
+                    break;
+                }
+            }
+
+            attempt.receivedAtUtc = timestampText();
+            attempt.responseFrame = response;
+            if (!response.empty()) {
+                appendRawEvent("Rx", response);
+                appendPayloadEntry(NativeLogKind::ModbusRx, L"[Modbus RX]", response);
+            }
+
+            if (result->cancelled) {
+                attempt.status = "cancelled";
+                result->execution.attempts.push_back(std::move(attempt));
+                postProgress();
+                break;
+            }
+            if (result->serialFailed) {
+                attempt.status = "read-error";
+                result->execution.attempts.push_back(std::move(attempt));
+                ++result->execution.session.failedBlockCount;
+                postProgress();
+                break;
+            }
+            if (response.empty()) {
+                attempt.status = "timeout";
+                if (attempt.errorMessage.empty()) {
+                    attempt.errorMessage = wideToUtf8(tx(T::ModbusTimeout));
+                }
+                ++result->execution.session.failedBlockCount;
+                result->execution.attempts.push_back(std::move(attempt));
+                postProgress();
+                continue;
+            }
+
+            const auto parsed = modbus_core::parseReadResponse(
+                response,
+                context->plan.slaveId,
+                context->plan.functionCode,
+                block.startAddress,
+                block.quantity);
+            if (!parsed.ok) {
+                attempt.status = "parse-error";
+                attempt.errorMessage = parsed.errorMessage;
+                attempt.isModbusException = parsed.isException;
+                attempt.exceptionCode = parsed.exceptionCode;
+                attempt.exceptionDescription = parsed.exceptionDescription;
+                ++result->execution.session.failedBlockCount;
+                result->execution.attempts.push_back(std::move(attempt));
+                postProgress();
+                continue;
+            }
+
+            attempt.status = "success";
+            ++result->execution.session.successBlockCount;
+            for (const modbus_core::RegisterObservation& observation : parsed.observations) {
+                native_storage::ScanObservationRecord record;
+                record.sessionId = scanSessionId;
+                record.blockIndex = block.index;
+                record.attemptIndex = 0;
+                record.slaveId = parsed.slaveId;
+                record.functionCode = parsed.functionCode;
+                record.address = observation.address;
+                record.value = observation.value;
+                record.observedAtUtc = attempt.receivedAtUtc;
+                result->execution.observations.push_back(std::move(record));
+            }
+            result->execution.attempts.push_back(std::move(attempt));
+            postProgress();
+            if (context->plan.requestIntervalMs > 0) {
+                Sleep(static_cast<DWORD>(context->plan.requestIntervalMs));
+            }
         }
 
-        const auto parsed = modbus_core::parseReadResponse(
-            response,
-            planResult.plan.slaveId,
-            planResult.plan.functionCode,
-            block.startAddress,
-            block.quantity);
-        if (!parsed.ok) {
-            attempt.status = "parse-error";
-            attempt.errorMessage = parsed.errorMessage;
-            attempt.isModbusException = parsed.isException;
-            attempt.exceptionCode = parsed.exceptionCode;
-            attempt.exceptionDescription = parsed.exceptionDescription;
-            ++execution.session.failedBlockCount;
-            execution.attempts.push_back(std::move(attempt));
-            continue;
+        result->execution.session.finishedAtUtc = timestampText();
+        if (result->cancelled) {
+            result->execution.session.status = "cancelled";
+        } else {
+            result->execution.session.status = result->execution.session.failedBlockCount == 0
+                ? "completed"
+                : (result->execution.session.successBlockCount > 0 ? "partial" : "failed");
         }
-
-        attempt.status = "success";
-        ++execution.session.successBlockCount;
-        for (const modbus_core::RegisterObservation& observation : parsed.observations) {
-            native_storage::ScanObservationRecord record;
-            record.sessionId = scanSessionId;
-            record.blockIndex = block.index;
-            record.attemptIndex = 0;
-            record.slaveId = parsed.slaveId;
-            record.functionCode = parsed.functionCode;
-            record.address = observation.address;
-            record.value = observation.value;
-            record.observedAtUtc = attempt.receivedAtUtc;
-            execution.observations.push_back(std::move(record));
-        }
-        execution.attempts.push_back(std::move(attempt));
-        if (planResult.plan.requestIntervalMs > 0) {
-            Sleep(static_cast<DWORD>(planResult.plan.requestIntervalMs));
-        }
+    } catch (...) {
+        result->execution.session.finishedAtUtc = timestampText();
+        result->execution.session.status = "failed";
+        result->errorMessage = wideToUtf8(L"Modbus \u626B\u63CF\u7EBF\u7A0B\u5F02\u5E38\u7EC8\u6B62\u3002");
     }
 
-    execution.session.finishedAtUtc = timestampText();
-    execution.session.status = execution.session.failedBlockCount == 0 ? "completed" : (execution.session.successBlockCount > 0 ? "partial" : "failed");
-    if (!store_.saveScanExecution(execution)) {
-        setStatus(utf8ToWide(store_.lastErrorText()));
+    if (!PostMessageW(self->window_, kModbusScanDoneMessage, 0, reinterpret_cast<LPARAM>(result))) {
+        delete result;
+    }
+    return 0;
+}
+
+void NativeMainWindow::requestCancelModbusScan() {
+    if (!modbusScanRunning_) {
+        return;
+    }
+    modbusScanCancelRequested_ = true;
+    setStatus(tx(T::ModbusCancelRequestedStatus));
+}
+
+void NativeMainWindow::handleModbusScanProgress(ModbusWorkerProgress* progressPointer) {
+    std::unique_ptr<ModbusWorkerProgress> progress(progressPointer);
+    if (!progress) {
         return;
     }
 
-    const std::wstring summary = uiString(T::ModbusSummaryPrefix)
-        + std::to_wstring(execution.session.successBlockCount)
-        + uiString(T::ModbusFailedBlocks)
-        + std::to_wstring(execution.session.failedBlockCount)
-        + uiString(T::ModbusObservations)
-        + std::to_wstring(execution.observations.size())
-        + uiString(T::ChinesePeriod);
-    appendLog(std::wstring(L"[") + L"\u7CFB\u7EDF] " + summary);
+    updateModbusScanProgress(
+        progress->completedBlocks,
+        progress->totalBlocks,
+        progress->successBlocks,
+        progress->failedBlocks,
+        progress->observations);
+    if (modbusScanRunning_) {
+        setStatus(uiString(T::ModbusProgressPrefix)
+            + std::to_wstring(progress->completedBlocks)
+            + L"/"
+            + std::to_wstring(progress->totalBlocks)
+            + tx(T::ModbusProgressBlocks)
+            + tx(T::ModbusProgressSuccessBlocks)
+            + std::to_wstring(progress->successBlocks)
+            + tx(T::ModbusProgressFailedBlocks)
+            + std::to_wstring(progress->failedBlocks)
+            + tx(T::ModbusProgressObservationsShort)
+            + std::to_wstring(progress->observations)
+            + tx(T::ChinesePeriod));
+    }
+}
+
+void NativeMainWindow::handleModbusScanDone(ModbusWorkerResult* resultPointer) {
+    std::unique_ptr<ModbusWorkerResult> result(resultPointer);
+    const bool shouldDisconnectAfterScan = disconnectAfterModbusScan_;
+    disconnectAfterModbusScan_ = false;
+    if (modbusScanThread_ != nullptr) {
+        WaitForSingleObject(modbusScanThread_, INFINITE);
+        CloseHandle(modbusScanThread_);
+        modbusScanThread_ = nullptr;
+    }
+    if (!result) {
+        setModbusScanRunningUi(false);
+        return;
+    }
+
+    updateModbusScanProgress(
+        result->execution.attempts.size(),
+        static_cast<std::size_t>(std::max(0, result->execution.session.requestCount)),
+        static_cast<std::size_t>(std::max(0, result->execution.session.successBlockCount)),
+        static_cast<std::size_t>(std::max(0, result->execution.session.failedBlockCount)),
+        result->execution.observations.size());
+
+    for (const native_storage::RawIoEvent& event : result->rawEvents) {
+        if (event.direction == "Tx") {
+            txByteCount_ += static_cast<std::uint64_t>(event.payload.size());
+        } else if (event.direction == "Rx") {
+            rxByteCount_ += static_cast<std::uint64_t>(event.payload.size());
+        }
+    }
+    updateStatusSegments();
+    saveRawEvents(std::move(result->rawEvents));
+    for (NativeLogEntry& entry : result->logEntries) {
+        addLogEntry(std::move(entry));
+    }
+
+    std::wstring summary;
+    if (!store_.saveScanExecution(result->execution)) {
+        summary = utf8ToWide(store_.lastErrorText());
+    } else if (result->cancelled) {
+        summary = tx(T::ModbusCancelledStatus);
+    } else {
+        summary = uiString(T::ModbusSummaryPrefix)
+            + std::to_wstring(result->execution.session.successBlockCount)
+            + uiString(T::ModbusFailedBlocks)
+            + std::to_wstring(result->execution.session.failedBlockCount)
+            + uiString(T::ModbusObservations)
+            + std::to_wstring(result->execution.observations.size())
+            + uiString(T::ChinesePeriod);
+    }
+
+    if (!summary.empty()) {
+        appendLog(std::wstring(L"[\u7CFB\u7EDF] ") + summary);
+    }
+    setModbusScanRunningUi(false);
+    if (shouldDisconnectAfterScan) {
+        if (result->serialFailed && !result->errorMessage.empty()) {
+            appendLog(NativeLogKind::Error, uiString(T::SystemSerialFailedPrefix) + utf8ToWide(result->errorMessage));
+        }
+        closeSerialPort(tx(T::ModbusDisconnectedAfterCancelStatus));
+        return;
+    }
+    if (result->serialFailed && !result->errorMessage.empty()) {
+        handleSerialFailure(result->errorMessage);
+        return;
+    }
     setStatus(summary);
+}
+
+void NativeMainWindow::setModbusScanRunningUi(bool running) {
+    modbusScanRunning_ = running;
+    if (running) {
+        KillTimer(window_, IDT_SERIAL_POLL);
+        KillTimer(window_, IDT_TIMED_SEND);
+    } else if (serialPort_.isOpen()) {
+        SetTimer(window_, IDT_SERIAL_POLL, 50, nullptr);
+        updateTimedSendTimer();
+    }
+    SetWindowTextW(modbusButton_, running ? tx(T::ModbusStopButton) : tx(T::ModbusScanButton));
+
+    for (HWND control : {
+             portCombo_,
+             refreshButton_,
+             saveProfileButton_,
+             baudCombo_,
+             dataBitsCombo_,
+             parityCombo_,
+             stopBitsCombo_,
+             flowControlCombo_,
+             dtrCheck_,
+             rtsCheck_,
+             autoReconnectCheck_,
+             scanSlaveEdit_,
+             scanFunctionCombo_,
+             scanStartEdit_,
+             scanEndEdit_,
+             analysisButton_,
+             ruleVerifyButton_,
+             exportReportButton_,
+             sendEdit_,
+             sendButton_,
+             timedSendCheck_,
+             timedPeriodEdit_,
+             fileSendButton_,
+             fileBrowseButton_,
+             filePathEdit_,
+         }) {
+        enableControl(control, !running);
+    }
+    for (HWND button : quickSendButtons_) {
+        enableControl(button, !running);
+    }
+    updateRtsControlState();
 }
 
 void NativeMainWindow::showAnalysisWorkspace() {
@@ -2947,7 +4354,7 @@ void NativeMainWindow::showAnalysisWorkspace() {
     }
 
     bool targetOk = false;
-    const double targetValue = textToDouble(targetValueEdit_, 0.0, &targetOk);
+    const double targetValue = textToDoubleText(analysisInputText(targetValueEdit_), 0.0, &targetOk);
     if (!targetOk) {
         setStatus(tx(T::AnalysisInvalidTarget));
         return;
@@ -2962,9 +4369,9 @@ void NativeMainWindow::showAnalysisWorkspace() {
     }
 
     analysis_core::TargetValue target;
-    target.label = wideToUtf8(controlText(targetLabelEdit_));
+    target.label = wideToUtf8(analysisInputText(targetLabelEdit_));
     target.value = targetValue;
-    target.unit = wideToUtf8(controlText(targetUnitEdit_));
+    target.unit = wideToUtf8(analysisInputText(targetUnitEdit_));
 
     analysis_core::CandidateGenerationOptions options;
     options.scaleTransforms = {{1.0, 0.0}, {0.1, 0.0}, {0.01, 0.0}, {0.001, 0.0}, {10.0, 0.0}};
@@ -3199,7 +4606,7 @@ bool NativeMainWindow::saveRuleFromCandidate(const native_storage::MatchCandidat
 
     native_storage::ProtocolFieldRuleRecord rule;
     rule.ruleId = "rule-" + std::to_string(candidate.id);
-    rule.fieldName = wideToUtf8(ruleDisplayName(candidate, controlText(targetLabelEdit_)));
+    rule.fieldName = wideToUtf8(ruleDisplayName(candidate, analysisInputText(targetLabelEdit_)));
     rule.sourceStabilityRunId = candidate.runId;
     rule.sourceStableCandidateId = candidate.id;
     rule.candidateType = candidate.candidateType;
@@ -3211,7 +4618,7 @@ bool NativeMainWindow::saveRuleFromCandidate(const native_storage::MatchCandidat
     rule.registerCount = candidate.registerCount;
     rule.scaleMultiplier = candidate.scaleMultiplier;
     rule.scaleOffset = candidate.scaleOffset;
-    rule.unit = wideToUtf8(controlText(targetUnitEdit_));
+    rule.unit = wideToUtf8(analysisInputText(targetUnitEdit_));
     rule.confidenceLevel = wideToUtf8(candidate.score >= 85.0 ? L"\u9AD8" : (candidate.score >= 65.0 ? L"\u4E2D" : L"\u4F4E"));
     rule.stabilityScore = candidate.score;
     rule.evidenceSummary = candidate.evidenceText;
@@ -3374,7 +4781,14 @@ void NativeMainWindow::saveRawEvent(std::string direction, const std::vector<std
     event.timestampUtc = timestampText();
     event.endpoint = serialPort_.endpoint();
     event.payload = payload;
-    store_.appendRawEvent(event);
+    saveRawEvents({std::move(event)});
+}
+
+bool NativeMainWindow::saveRawEvents(std::vector<native_storage::RawIoEvent> events) {
+    if (!store_.isOpen() || events.empty()) {
+        return false;
+    }
+    return store_.appendRawEvents(events);
 }
 
 } // namespace svm::win32

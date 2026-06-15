@@ -131,6 +131,7 @@ if(SVM_BUILD_WIN32_APP)
             -static-libgcc
             -static-libstdc++
             -Wl,--gc-sections
+            -Wl,-s
         )
     endif()
 

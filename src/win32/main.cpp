@@ -41,7 +41,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int commandShow) {
 
     INITCOMMONCONTROLSEX controls = {};
     controls.dwSize = sizeof(controls);
-    controls.dwICC = ICC_STANDARD_CLASSES;
+    controls.dwICC = ICC_STANDARD_CLASSES | ICC_TAB_CLASSES | ICC_PROGRESS_CLASS;
     InitCommonControlsEx(&controls);
 
     svm::win32::NativeMainWindow window;

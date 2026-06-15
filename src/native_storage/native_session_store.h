@@ -53,6 +53,12 @@ struct UiPreferences {
     int sendPayloadMode = 0;
     int sendTextEncodingCodePage = 65001;
     int sendLineEnding = 0;
+    bool autoReconnect = false;
+    bool timedSendEnabled = false;
+    int timedSendPeriodMs = 1000;
+    int fileSendDelayMs = 0;
+    int logVisibleCharLimit = 350000;
+    std::vector<std::string> quickSendSlots;
     int windowLeft = -1;
     int windowTop = -1;
     int windowWidth = 1220;

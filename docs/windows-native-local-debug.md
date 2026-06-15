@@ -7,7 +7,9 @@
 推荐安装：
 
 ```bash
-apt-get install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64 mingw-w64-tools icoutils python3-pefile osslsigncode unzip p7zip-full libimage-exiftool-perl wine64 xvfb
+dpkg --add-architecture i386
+apt-get update
+apt-get install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64 mingw-w64-tools icoutils python3-pefile osslsigncode unzip p7zip-full libimage-exiftool-perl wine64 wine32:i386 xvfb xdotool imagemagick fonts-noto-cjk
 ```
 
 关键命令：
@@ -17,7 +19,9 @@ apt-get install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 binutils-mingw-w64-
 - `x86_64-w64-mingw32-strip`：本地调试包瘦身；
 - `wrestool` / `exiftool`：资源和版本信息检查；
 - `python3-pefile`：Python PE 导入表解析；
-- `wine` / `xvfb-run`：无界面 self-test 冒烟运行。
+- `wine` / `xvfb-run`：无界面 self-test 冒烟运行和真实 UI 截图；
+- `xdotool` / `xwd` / `convert`：定位窗口并生成截图；
+- `fonts-noto-cjk`：在 Wine/Xvfb 截图中正确显示中文。
 
 ## 本地构建
 
@@ -85,13 +89,57 @@ SVM_STRICT_WINE_TEST=1 scripts/package-windows-native-mingw.sh
 scripts/package-windows-native-mingw.sh --skip-wine
 ```
 
+## Wine/Xvfb UI 截图闭环
+
+本地可直接启动 Windows exe 并截取真实 UI：
+
+```bash
+scripts/capture-windows-native-ui-wine.sh
+```
+
+默认输出：
+
+```text
+/tmp/svm-native-wine-ui/root.png
+/tmp/svm-native-wine-ui/tab-single.png
+/tmp/svm-native-wine-ui/tab-quick.png
+/tmp/svm-native-wine-ui/tab-file.png
+/tmp/svm-native-wine-ui/tab-scan.png
+/tmp/svm-native-wine-ui/tab-settings.png
+/tmp/svm-native-wine-ui/compact-tab-single.png
+/tmp/svm-native-wine-ui/compact-tab-quick.png
+/tmp/svm-native-wine-ui/compact-tab-file.png
+/tmp/svm-native-wine-ui/compact-tab-scan.png
+/tmp/svm-native-wine-ui/compact-tab-settings.png
+/tmp/svm-native-wine-ui/window-info.txt
+/tmp/svm-native-wine-ui/self-test.log
+```
+
+该脚本会：
+
+- 初始化 64 位 Wine prefix；
+- 为 `Microsoft YaHei UI` 配置 `Noto Sans CJK SC` 字体替换，避免中文显示成方块；
+- 运行 `svm-native-win32.exe --self-test`；
+- 在 Xvfb 中启动真实窗口，等待稳定帧并截图；
+- 自动切换“单发 / 多发 / 文件 / 扫描 / 设置”五个标签页并截图；
+- 将窗口缩放到 `760x520` 后再次捕获五个紧凑尺寸标签页。
+
+常用参数：
+
+```bash
+SVM_WINEPREFIX=/tmp/svm-native-wine64-ui2 \
+SVM_WINE_UI_OUTPUT_DIR=/tmp/svm-native-wine-ui \
+SVM_WINE_UI_SCREEN=1280x900x24 \
+scripts/capture-windows-native-ui-wine.sh
+```
+
 ## 布局韧性策略
 
 窗口尺寸测试分三档：
 
 | 档位 | 示例 | 验收重点 |
 |------|------|----------|
-| 支持范围 | `840x620`、`1040x720`、`1366x768` | 完整交互可用，主要区域不越过状态栏 |
+| 支持范围 | `760x520`、`1040x720`、`1366x768` | 完整交互可用，主要区域不越过状态栏，底部标签页核心控件可见 |
 | 强制小尺寸 | `640x400`、`480x320`、`320x240` | 不崩溃、不出现负宽高、工具栏和输入区域布局有界 |
 | 极小退化 | `1x1` 等异常输入 | 布局计算稳定，内部按最小安全尺寸钳制 |
 

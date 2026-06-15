@@ -113,6 +113,12 @@ void uiPreferencesRoundTrip() {
     preferences.sendPayloadMode = 1;
     preferences.sendTextEncodingCodePage = 936;
     preferences.sendLineEnding = 3;
+    preferences.autoReconnect = true;
+    preferences.timedSendEnabled = true;
+    preferences.timedSendPeriodMs = 250;
+    preferences.fileSendDelayMs = 20;
+    preferences.logVisibleCharLimit = 500000;
+    preferences.quickSendSlots = {"01 03 00 00 00 01", "AT+RST", "", "", "", "", "", "", "", "AA 55"};
     preferences.windowLeft = 20;
     preferences.windowTop = 30;
     preferences.windowWidth = 1280;
@@ -130,6 +136,15 @@ void uiPreferencesRoundTrip() {
     assert(loaded->sendPayloadMode == 1);
     assert(loaded->sendTextEncodingCodePage == 936);
     assert(loaded->sendLineEnding == 3);
+    assert(loaded->autoReconnect);
+    assert(loaded->timedSendEnabled);
+    assert(loaded->timedSendPeriodMs == 250);
+    assert(loaded->fileSendDelayMs == 20);
+    assert(loaded->logVisibleCharLimit == 500000);
+    assert(loaded->quickSendSlots.size() == 10);
+    assert(loaded->quickSendSlots[0] == "01 03 00 00 00 01");
+    assert(loaded->quickSendSlots[1] == "AT+RST");
+    assert(loaded->quickSendSlots[9] == "AA 55");
     assert(loaded->windowLeft == 20);
     assert(loaded->windowTop == 30);
     assert(loaded->windowWidth == 1280);

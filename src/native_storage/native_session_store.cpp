@@ -330,11 +330,25 @@ UiPreferences uiPreferencesFromRecord(const NativeSessionStore::Record& record) 
     if (record.size() >= 14) {
         preferences.updatedAtUtc = record[13];
     }
+    if (record.size() >= 19) {
+        preferences.autoReconnect = toBool(record[14]);
+        preferences.timedSendEnabled = toBool(record[15]);
+        preferences.timedSendPeriodMs = toInt(record[16], 1000);
+        preferences.fileSendDelayMs = toInt(record[17]);
+        preferences.logVisibleCharLimit = toInt(record[18], 350000);
+    }
+    if (record.size() >= 29) {
+        preferences.quickSendSlots.clear();
+        preferences.quickSendSlots.reserve(10);
+        for (std::size_t index = 19; index < 29; ++index) {
+            preferences.quickSendSlots.push_back(record[index]);
+        }
+    }
     return preferences;
 }
 
 NativeSessionStore::Record recordFromUiPreferences(const UiPreferences& preferences) {
-    return {
+    NativeSessionStore::Record record = {
         toString(preferences.id),
         preferences.name,
         toString(preferences.logThemeIndex),
@@ -350,6 +364,15 @@ NativeSessionStore::Record recordFromUiPreferences(const UiPreferences& preferen
         toString(preferences.windowHeight),
         preferences.updatedAtUtc,
     };
+    record.push_back(toString(preferences.autoReconnect));
+    record.push_back(toString(preferences.timedSendEnabled));
+    record.push_back(toString(preferences.timedSendPeriodMs));
+    record.push_back(toString(preferences.fileSendDelayMs));
+    record.push_back(toString(preferences.logVisibleCharLimit));
+    for (std::size_t index = 0; index < 10; ++index) {
+        record.push_back(index < preferences.quickSendSlots.size() ? preferences.quickSendSlots[index] : std::string{});
+    }
+    return record;
 }
 
 ScanSessionRecord scanSessionFromRecord(const NativeSessionStore::Record& record) {
@@ -1317,12 +1340,26 @@ bool NativeSessionStore::rewriteRecords(std::string_view fileName, const std::ve
         }
     }
 
-    std::error_code error;
-    std::filesystem::copy_file(tempPath, path, std::filesystem::copy_options::overwrite_existing, error);
-    std::filesystem::remove(tempPath);
-    if (error) {
-        lastErrorText_ = "重写 native 存储失败：" + error.message();
-        return false;
+    std::error_code copyError;
+    std::filesystem::copy_file(tempPath, path, std::filesystem::copy_options::overwrite_existing, copyError);
+    if (copyError) {
+        std::error_code removeError;
+        std::filesystem::remove(path, removeError);
+        if (removeError) {
+            std::filesystem::remove(tempPath);
+            lastErrorText_ = "重写 native 存储失败：" + copyError.message() + "；删除旧文件失败：" + removeError.message();
+            return false;
+        }
+
+        std::error_code renameError;
+        std::filesystem::rename(tempPath, path, renameError);
+        if (renameError) {
+            std::filesystem::remove(tempPath);
+            lastErrorText_ = "重写 native 存储失败：" + copyError.message() + "；替换临时文件失败：" + renameError.message();
+            return false;
+        }
+    } else {
+        std::filesystem::remove(tempPath);
     }
     lastErrorText_.clear();
     return true;
