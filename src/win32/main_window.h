@@ -170,6 +170,7 @@ private:
     HWND logPanelTitle_ = nullptr;
     HWND workPanelTitle_ = nullptr;
     HWND workTabs_ = nullptr;
+    HWND workPageBackground_ = nullptr;
     HWND workflowHint_ = nullptr;
     HWND portLabel_ = nullptr;
     HWND portCombo_ = nullptr;
