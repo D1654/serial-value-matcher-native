@@ -30,6 +30,10 @@ v0.1.0 包信息：
 - 不包含 `Qt6*.dll`、`qsqlite.dll`、`sqldrivers` 或 .NET 运行库；
 - SHA256 见 Release 附件中的 `.sha256.txt`。
 
+## 界面预览
+
+![串口值匹配器 Windows Native 主界面](docs/images/native-ui-overview.png)
+
 ## 当前能力
 
 串口调试：
@@ -92,14 +96,7 @@ scripts/build-windows-native-mingw.sh
 scripts/package-windows-native-mingw.sh
 ```
 
-Wine UI 截图闭环：
-
-```bash
-SVM_WINEPREFIX=/tmp/svm-native-wine64-ui2 \
-SVM_XDG_RUNTIME_DIR=/tmp/xdg-runtime-root \
-SVM_WINE_UI_OUTPUT_DIR=/tmp/svm-native-wine-ui \
-scripts/capture-windows-native-ui-wine.sh
-```
+本地 Wine 自测和 UI 截图闭环见 `docs/windows-native-local-debug.md`。
 
 ## 文档
 
