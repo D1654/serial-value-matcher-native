@@ -56,6 +56,7 @@ constexpr int kFileSendChunkBytes = 1024;
 constexpr std::size_t kDefaultLogVisibleChars = 350000;
 constexpr COLORREF kFormBackgroundColor = RGB(235, 235, 235);
 constexpr COLORREF kInputBorderColor = RGB(128, 128, 128);
+constexpr COLORREF kPlaceholderTextColor = RGB(92, 92, 92);
 constexpr UINT_PTR kInputBorderSubclassId = 1001;
 
 const wchar_t* tx(T id) {
@@ -287,19 +288,36 @@ NativeUiMetrics nativeUiMetricsForSize(int width, int height) {
 }
 
 HFONT createClassicUiFont() {
+    // SimSun's 9pt grid-fitted Chinese glyphs are clearer than forced ClearType YaHei in dense Win32 forms.
+    HFONT font = CreateFontW(
+        -12,
+        0,
+        0,
+        0,
+        FW_NORMAL,
+        FALSE,
+        FALSE,
+        FALSE,
+        GB2312_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        DEFAULT_QUALITY,
+        DEFAULT_PITCH | FF_DONTCARE,
+        L"SimSun");
+    if (font != nullptr) {
+        return font;
+    }
+
     NONCLIENTMETRICSW metrics = {};
     metrics.cbSize = sizeof(metrics);
     if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, metrics.cbSize, &metrics, 0) != FALSE) {
-        LOGFONTW font = metrics.lfMessageFont;
-        if (font.lfHeight == 0 || font.lfHeight < -12) {
-            font.lfHeight = -12;
-        } else if (font.lfHeight > 12) {
-            font.lfHeight = 12;
-        }
-        font.lfWidth = 0;
-        font.lfWeight = FW_NORMAL;
-        font.lfQuality = CLEARTYPE_QUALITY;
-        return CreateFontIndirectW(&font);
+        LOGFONTW fallback = metrics.lfMessageFont;
+        fallback.lfHeight = -12;
+        fallback.lfWidth = 0;
+        fallback.lfWeight = FW_NORMAL;
+        fallback.lfQuality = DEFAULT_QUALITY;
+        fallback.lfCharSet = DEFAULT_CHARSET;
+        return CreateFontIndirectW(&fallback);
     }
 
     return CreateFontW(
@@ -314,7 +332,7 @@ HFONT createClassicUiFont() {
         DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS,
         CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY,
+        DEFAULT_QUALITY,
         DEFAULT_PITCH | FF_DONTCARE,
         L"MS Shell Dlg 2");
 }
@@ -1409,7 +1427,9 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         HDC dc = reinterpret_cast<HDC>(wParam);
         SetBkColor(dc, GetSysColor(COLOR_WINDOW));
         HWND editControl = reinterpret_cast<HWND>(lParam);
-        if (!IsWindowEnabled(editControl) || analysisPlaceholderActive(editControl)) {
+        if (analysisPlaceholderActive(editControl)) {
+            SetTextColor(dc, kPlaceholderTextColor);
+        } else if (!IsWindowEnabled(editControl)) {
             SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
         }
         return reinterpret_cast<LRESULT>(GetSysColorBrush(COLOR_WINDOW));
@@ -1419,7 +1439,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         HDC dc = reinterpret_cast<HDC>(wParam);
         if (hasWindowClass(control, L"Edit")) {
             SetBkColor(dc, GetSysColor(COLOR_WINDOW));
-            SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
+            SetTextColor(dc, analysisPlaceholderActive(control) ? kPlaceholderTextColor : GetSysColor(COLOR_GRAYTEXT));
             return reinterpret_cast<LRESULT>(GetSysColorBrush(COLOR_WINDOW));
         }
         SetBkColor(dc, kFormBackgroundColor);
