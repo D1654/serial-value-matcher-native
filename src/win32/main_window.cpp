@@ -55,6 +55,8 @@ constexpr UINT kModbusScanProgressMessage = WM_APP + 15;
 constexpr int kFileSendChunkBytes = 1024;
 constexpr std::size_t kDefaultLogVisibleChars = 350000;
 constexpr COLORREF kFormBackgroundColor = RGB(235, 235, 235);
+constexpr COLORREF kInputBorderColor = RGB(128, 128, 128);
+constexpr UINT_PTR kInputBorderSubclassId = 1001;
 
 const wchar_t* tx(T id) {
     return uiText(id);
@@ -135,6 +137,50 @@ COLORREF logColorForKind(NativeLogKind kind, int themeIndex) {
         return palette.error;
     }
     return palette.normal;
+}
+
+HBRUSH formBackgroundBrush() {
+    static HBRUSH brush = CreateSolidBrush(kFormBackgroundColor);
+    return brush;
+}
+
+HBRUSH inputBorderBrush() {
+    static HBRUSH brush = CreateSolidBrush(kInputBorderColor);
+    return brush;
+}
+
+void drawInputBorder(HWND control) {
+    HDC dc = GetWindowDC(control);
+    if (dc == nullptr) {
+        return;
+    }
+    RECT rect = {};
+    GetWindowRect(control, &rect);
+    OffsetRect(&rect, -rect.left, -rect.top);
+    FrameRect(dc, &rect, inputBorderBrush());
+    ReleaseDC(control, dc);
+}
+
+LRESULT CALLBACK inputBorderSubclassProc(
+    HWND control,
+    UINT message,
+    WPARAM wParam,
+    LPARAM lParam,
+    UINT_PTR,
+    DWORD_PTR) {
+    const LRESULT result = DefSubclassProc(control, message, wParam, lParam);
+    switch (message) {
+    case WM_NCPAINT:
+    case WM_PAINT:
+    case WM_ENABLE:
+    case WM_SETFOCUS:
+    case WM_KILLFOCUS:
+        drawInputBorder(control);
+        break;
+    default:
+        break;
+    }
+    return result;
 }
 
 struct NativeRect {
@@ -827,6 +873,10 @@ void applyClassicControlChrome(HWND control) {
     }
 }
 
+bool isWorkbenchInputEdit(HWND control) {
+    return control != nullptr && hasWindowClass(control, L"Edit");
+}
+
 void addComboItem(HWND combo, const wchar_t* text, LPARAM data) {
     const LRESULT index = SendMessageW(combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text));
     if (index >= 0) {
@@ -1359,17 +1409,28 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         HDC dc = reinterpret_cast<HDC>(wParam);
         SetBkColor(dc, GetSysColor(COLOR_WINDOW));
         HWND editControl = reinterpret_cast<HWND>(lParam);
-        if (analysisPlaceholderActive(editControl)) {
+        if (!IsWindowEnabled(editControl) || analysisPlaceholderActive(editControl)) {
             SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
         }
         return reinterpret_cast<LRESULT>(GetSysColorBrush(COLOR_WINDOW));
     }
-    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLORSTATIC: {
+        HWND control = reinterpret_cast<HWND>(lParam);
+        HDC dc = reinterpret_cast<HDC>(wParam);
+        if (hasWindowClass(control, L"Edit")) {
+            SetBkColor(dc, GetSysColor(COLOR_WINDOW));
+            SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
+            return reinterpret_cast<LRESULT>(GetSysColorBrush(COLOR_WINDOW));
+        }
+        SetBkColor(dc, kFormBackgroundColor);
+        SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+        return reinterpret_cast<LRESULT>(formBackgroundBrush());
+    }
     case WM_CTLCOLORBTN: {
         HDC dc = reinterpret_cast<HDC>(wParam);
         SetBkColor(dc, kFormBackgroundColor);
         SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
-        return reinterpret_cast<LRESULT>(GetSysColorBrush(COLOR_BTNFACE));
+        return reinterpret_cast<LRESULT>(formBackgroundBrush());
     }
     case WM_COMMAND: {
         const WORD commandId = LOWORD(wParam);
@@ -1793,7 +1854,7 @@ void NativeMainWindow::createControls() {
     logPanelTitle_ = CreateWindowExW(0, L"STATIC", tx(T::LogGroup), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     workPanelTitle_ = CreateWindowExW(0, L"STATIC", tx(T::SendGroup), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     workTabs_ = CreateWindowExW(0, WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_WORK_TABS), instance_, nullptr);
-    workPageBackground_ = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    workPageBackground_ = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     workflowHint_ = CreateWindowExW(0, L"STATIC", tx(T::WorkflowHint), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     portLabel_ = CreateWindowExW(0, L"STATIC", tx(T::PortLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     portCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_PORT_COMBO), instance_, nullptr);
@@ -2179,6 +2240,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int checkOffsetY = std::max(0, (row - 16) / 2);
     const int progressOffsetY = compact ? 3 : 4;
     const int progressHeight = compact ? 14 : 16;
+    const int formFieldGap = compact ? 3 : 4;
     MoveWindow(
         workPageBackground_,
         pageBackgroundX,
@@ -2226,7 +2288,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int periodEditWidth = compact ? 60 : 68;
     MoveWindow(timedSendCheck_, timedX, timedY + checkOffsetY, timedCheckWidth, 16, TRUE);
     MoveWindow(timedPeriodLabel_, timedX + timedCheckWidth + gap, timedY + labelOffsetY, periodLabelWidth, labelHeight, TRUE);
-    MoveWindow(timedPeriodEdit_, timedX + timedCheckWidth + gap + periodLabelWidth, timedY, periodEditWidth, row, TRUE);
+    MoveWindow(timedPeriodEdit_, timedX + timedCheckWidth + gap + periodLabelWidth + formFieldGap, timedY, periodEditWidth, row, TRUE);
 
     int quickColumns = 2;
     if (pageW >= 620) {
@@ -2258,9 +2320,9 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int fileSendWidth = compact ? 68 : 76;
     const int fileStopWidth = compact ? 44 : 50;
     const bool fileFirstRowVisible = y + row <= pageBottom && pageW >= fileLabelWidth + browseWidth + fileSendWidth + fileStopWidth + gap * 4 + 24;
-    const int filePathWidth = std::max(1, pageW - fileLabelWidth - browseWidth - fileSendWidth - fileStopWidth - gap * 4);
+    const int filePathWidth = std::max(1, pageW - fileLabelWidth - browseWidth - fileSendWidth - fileStopWidth - gap * 4 - formFieldGap);
     MoveWindow(filePathLabel_, x, y + labelOffsetY, fileLabelWidth, labelHeight, TRUE);
-    x += fileLabelWidth;
+    x += fileLabelWidth + formFieldGap;
     MoveWindow(filePathEdit_, x, y, filePathWidth, row, TRUE);
     x += filePathWidth + gap;
     MoveWindow(fileBrowseButton_, x, y, browseWidth, row, TRUE);
@@ -2274,7 +2336,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int delayComboWidth = compact ? 66 : 74;
     const bool fileSecondRowVisible = y + row <= pageBottom;
     MoveWindow(fileDelayLabel_, x, y + labelOffsetY, delayLabelWidth, labelHeight, TRUE);
-    x += delayLabelWidth;
+    x += delayLabelWidth + formFieldGap;
     MoveWindow(fileDelayCombo_, x, y, delayComboWidth, 160, TRUE);
     x += delayComboWidth + gap;
     MoveWindow(fileProgress_, x, y + progressOffsetY, std::max(1, pageX + pageW - x), progressHeight, TRUE);
@@ -2295,23 +2357,24 @@ void NativeMainWindow::layoutControls(int width, int height) {
         + scanFunctionLabelWidth
         + addressLabelWidth + addressEditWidth
         + addressLabelWidth + addressEditWidth
-        + gap * 7;
+        + gap * 7
+        + formFieldGap * 4;
     const int scanFunctionWidth = std::max(1, std::min(compact ? 148 : 166, pageW - fixedScanRowWidth));
     const bool scanParameterRowVisible = y + row <= pageBottom;
     MoveWindow(scanSlaveLabel_, x, y + labelOffsetY, shortLabelWidth, labelHeight, TRUE);
-    x += shortLabelWidth + gap;
+    x += shortLabelWidth + formFieldGap;
     MoveWindow(scanSlaveEdit_, x, y, scanSlaveEditWidth, row, TRUE);
     x += scanSlaveEditWidth + gap;
     MoveWindow(scanFunctionLabel_, x, y + labelOffsetY, scanFunctionLabelWidth, labelHeight, TRUE);
-    x += scanFunctionLabelWidth + gap;
+    x += scanFunctionLabelWidth + formFieldGap;
     MoveWindow(scanFunctionCombo_, x, y, scanFunctionWidth, 160, TRUE);
     x += scanFunctionWidth + gap;
     MoveWindow(scanStartLabel_, x, y + labelOffsetY, addressLabelWidth, labelHeight, TRUE);
-    x += addressLabelWidth + gap;
+    x += addressLabelWidth + formFieldGap;
     MoveWindow(scanStartEdit_, x, y, addressEditWidth, row, TRUE);
     x += addressEditWidth + gap;
     MoveWindow(scanEndLabel_, x, y + labelOffsetY, addressLabelWidth, labelHeight, TRUE);
-    x += addressLabelWidth + gap;
+    x += addressLabelWidth + formFieldGap;
     MoveWindow(scanEndEdit_, x, y, addressEditWidth, row, TRUE);
 
     y += row + gap;
@@ -2344,23 +2407,24 @@ void NativeMainWindow::layoutControls(int width, int height) {
         - targetValueLabelWidth - targetValueEditWidth
         - targetUnitLabelWidth - targetUnitEditWidth
         - toleranceLabelWidth
-        - gap * 3);
+        - gap * 3
+        - formFieldGap * 4);
     MoveWindow(analysisSectionLabel_, x, y, std::max(1, analysisSectionWidth), row, TRUE);
     x += analysisSectionWidth;
     MoveWindow(targetStatic_, x, y, targetNameLabelWidth, row, TRUE);
-    x += targetNameLabelWidth;
+    x += targetNameLabelWidth + formFieldGap;
     MoveWindow(targetLabelEdit_, x, y, targetNameEditWidth, row, TRUE);
     x += targetNameEditWidth + gap;
     MoveWindow(targetValueStatic_, x, y, targetValueLabelWidth, row, TRUE);
-    x += targetValueLabelWidth;
+    x += targetValueLabelWidth + formFieldGap;
     MoveWindow(targetValueEdit_, x, y, targetValueEditWidth, row, TRUE);
     x += targetValueEditWidth + gap;
     MoveWindow(targetUnitStatic_, x, y, targetUnitLabelWidth, row, TRUE);
-    x += targetUnitLabelWidth;
+    x += targetUnitLabelWidth + formFieldGap;
     MoveWindow(targetUnitEdit_, x, y, targetUnitEditWidth, row, TRUE);
     x += targetUnitEditWidth + gap;
     MoveWindow(toleranceStatic_, x, y, toleranceLabelWidth, row, TRUE);
-    x += toleranceLabelWidth;
+    x += toleranceLabelWidth + formFieldGap;
     MoveWindow(toleranceEdit_, x, y, toleranceEditWidth, row, TRUE);
 
     y += row + gap;
@@ -2377,9 +2441,10 @@ void NativeMainWindow::layoutControls(int width, int height) {
         - analysisButtonWidth
         - ruleButtonWidth
         - exportButtonWidth
-        - gap * 5);
+        - gap * 5
+        - formFieldGap);
     MoveWindow(candidateStatic_, x, y, candidateLabelWidth, row, TRUE);
-    x += candidateLabelWidth;
+    x += candidateLabelWidth + formFieldGap;
     MoveWindow(candidateCombo_, x, y, candidateWidth, 180, TRUE);
     x += candidateWidth + gap;
     MoveWindow(modbusButton_, x, y, modbusButtonWidth, row, TRUE);
@@ -2397,7 +2462,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int pauseButtonWidth = compact ? 78 : 88;
     const bool settingsRowVisible = y + row <= pageBottom;
     MoveWindow(logCacheLabel_, x, y + labelOffsetY, settingsLabelWidth, labelHeight, TRUE);
-    x += settingsLabelWidth;
+    x += settingsLabelWidth + formFieldGap;
     MoveWindow(logCacheCombo_, x, y, settingsComboWidth, 260, TRUE);
     x += settingsComboWidth + gap;
     MoveWindow(pauseScrollButton_, x, y, pauseButtonWidth, row, TRUE);
@@ -2499,6 +2564,58 @@ void NativeMainWindow::setDefaultFonts() {
     for (HWND child = GetWindow(window_, GW_CHILD); child != nullptr; child = GetWindow(child, GW_HWNDNEXT)) {
         addControlFont(child, uiFont_);
         applyClassicControlChrome(child);
+        applyWorkbenchInputChrome(child);
+    }
+}
+
+void NativeMainWindow::applyWorkbenchInputChrome(HWND control) {
+    if (!isWorkbenchInputEdit(control)) {
+        return;
+    }
+    const auto applyInputChrome = [&]() {
+        const LONG_PTR style = GetWindowLongPtrW(control, GWL_STYLE);
+        const LONG_PTR exStyle = GetWindowLongPtrW(control, GWL_EXSTYLE);
+        const LONG_PTR desiredStyle = style | WS_BORDER;
+        const LONG_PTR desiredExStyle = exStyle & ~static_cast<LONG_PTR>(WS_EX_CLIENTEDGE);
+        if (style != desiredStyle || exStyle != desiredExStyle) {
+            SetWindowLongPtrW(control, GWL_STYLE, desiredStyle);
+            SetWindowLongPtrW(control, GWL_EXSTYLE, desiredExStyle);
+            SetWindowPos(
+                control,
+                nullptr,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        }
+        SetWindowSubclass(control, inputBorderSubclassProc, kInputBorderSubclassId, 0);
+        SendMessageW(control, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(6, 5));
+    };
+    for (HWND workbenchEdit : {
+             logFilterEdit_,
+             logSearchEdit_,
+             sendEdit_,
+             timedPeriodEdit_,
+             filePathEdit_,
+             scanSlaveEdit_,
+             scanStartEdit_,
+             scanEndEdit_,
+             targetLabelEdit_,
+             targetValueEdit_,
+             targetUnitEdit_,
+             toleranceEdit_,
+         }) {
+        if (workbenchEdit == control) {
+            applyInputChrome();
+            return;
+        }
+    }
+    for (HWND workbenchEdit : quickSendEdits_) {
+        if (workbenchEdit == control) {
+            applyInputChrome();
+            return;
+        }
     }
 }
 
