@@ -122,6 +122,7 @@ enum class TextId {
     TargetNameCue,
     TargetValueCue,
     TargetUnitCue,
+    ToleranceCue,
     ToleranceLabel,
     ToleranceDefault,
     CandidatePlaceholder,

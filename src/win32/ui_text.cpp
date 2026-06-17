@@ -118,9 +118,10 @@ const wchar_t* uiText(TextId id) {
     case TextId::TargetValueDefault: return L"";
     case TextId::TargetNameDefault: return L"";
     case TextId::TargetUnitDefault: return L"";
-    case TextId::TargetNameCue: return L"\u5982\uFF1A\u6E29\u5EA6";
-    case TextId::TargetValueCue: return L"\u5982\uFF1A25.6";
-    case TextId::TargetUnitCue: return L"\u5982\uFF1A\u2103";
+    case TextId::TargetNameCue: return L"\u53D8\u91CF\u540D\uFF0C\u5982\uFF1A\u6E29\u5EA6";
+    case TextId::TargetValueCue: return L"\u5F53\u524D\u503C\uFF0C\u5982\uFF1A25.6";
+    case TextId::TargetUnitCue: return L"\u5355\u4F4D\uFF0C\u5982\uFF1A\u2103";
+    case TextId::ToleranceCue: return L"\u8BEF\u5DEE\uFF0C\u5982\uFF1A0.01";
     case TextId::ToleranceLabel: return L"\u5BB9\u5DEE";
     case TextId::ToleranceDefault: return L"0.01";
     case TextId::CandidatePlaceholder: return L"\u5019\u9009\u7ED3\u679C";
