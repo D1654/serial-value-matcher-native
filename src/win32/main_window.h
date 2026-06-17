@@ -136,7 +136,6 @@ private:
     std::wstring controlText(HWND control) const;
     std::wstring analysisInputText(HWND control) const;
     void setControlText(HWND control, const std::wstring& text);
-    void applyWorkbenchInputChrome(HWND control);
     void initializeAnalysisPlaceholders();
     void clearAnalysisPlaceholder(HWND control);
     void restoreAnalysisPlaceholder(HWND control);
