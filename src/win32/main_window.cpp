@@ -55,7 +55,6 @@ constexpr UINT kModbusScanProgressMessage = WM_APP + 15;
 constexpr int kFileSendChunkBytes = 1024;
 constexpr std::size_t kDefaultLogVisibleChars = 350000;
 constexpr COLORREF kFormBackgroundColor = RGB(228, 228, 228);
-constexpr COLORREF kPlaceholderTextColor = RGB(92, 92, 92);
 
 const wchar_t* tx(T id) {
     return uiText(id);
@@ -843,9 +842,7 @@ void applyClassicControlChrome(HWND control) {
     if (control == nullptr) {
         return;
     }
-    if (hasWindowClass(control, L"Edit") || hasWindowClass(control, L"RICHEDIT50W")) {
-        SendMessageW(control, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(5, 4));
-    } else if (hasWindowClass(control, L"ComboBox")) {
+    if (hasWindowClass(control, L"ComboBox")) {
         SendMessageW(control, CB_SETMINVISIBLE, 10, 0);
     }
 }
@@ -1378,25 +1375,12 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         }
         break;
     }
-    case WM_CTLCOLOREDIT: {
-        HDC dc = reinterpret_cast<HDC>(wParam);
-        SetBkColor(dc, GetSysColor(COLOR_WINDOW));
-        HWND editControl = reinterpret_cast<HWND>(lParam);
-        if (analysisPlaceholderActive(editControl)) {
-            SetTextColor(dc, kPlaceholderTextColor);
-        } else if (!IsWindowEnabled(editControl)) {
-            SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
-        }
-        return reinterpret_cast<LRESULT>(GetSysColorBrush(COLOR_WINDOW));
-    }
     case WM_CTLCOLORSTATIC: {
         HWND control = reinterpret_cast<HWND>(lParam);
-        HDC dc = reinterpret_cast<HDC>(wParam);
-        if (hasWindowClass(control, L"Edit")) {
-            SetBkColor(dc, GetSysColor(COLOR_WINDOW));
-            SetTextColor(dc, analysisPlaceholderActive(control) ? kPlaceholderTextColor : GetSysColor(COLOR_GRAYTEXT));
-            return reinterpret_cast<LRESULT>(GetSysColorBrush(COLOR_WINDOW));
+        if (hasWindowClass(control, L"Edit") || hasWindowClass(control, L"RICHEDIT50W")) {
+            break;
         }
+        HDC dc = reinterpret_cast<HDC>(wParam);
         SetBkColor(dc, kFormBackgroundColor);
         SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
         return reinterpret_cast<LRESULT>(formBackgroundBrush());
@@ -1508,15 +1492,6 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
                 updateTimedSendTimer();
             } else if (HIWORD(wParam) == EN_KILLFOCUS) {
                 saveUiPreferences();
-            }
-            return 0;
-        case IDC_TARGET_LABEL_EDIT:
-        case IDC_TARGET_VALUE_EDIT:
-        case IDC_TARGET_UNIT_EDIT:
-            if (HIWORD(wParam) == EN_SETFOCUS) {
-                clearAnalysisPlaceholder(reinterpret_cast<HWND>(lParam));
-            } else if (HIWORD(wParam) == EN_KILLFOCUS) {
-                restoreAnalysisPlaceholder(reinterpret_cast<HWND>(lParam));
             }
             return 0;
         case IDC_FILE_BROWSE_BUTTON:
@@ -1979,7 +1954,9 @@ void NativeMainWindow::createControls() {
     clockStatusText_ = CreateWindowExW(0, L"STATIC", L"--:--:--", WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     SendMessageW(logFilterEdit_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(tx(T::LogFilterCue)));
     SendMessageW(logSearchEdit_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(tx(T::LogSearchCue)));
-    initializeAnalysisPlaceholders();
+    SendMessageW(targetLabelEdit_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(tx(T::TargetNameCue)));
+    SendMessageW(targetValueEdit_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(tx(T::TargetValueCue)));
+    SendMessageW(targetUnitEdit_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(tx(T::TargetUnitCue)));
     SendMessageW(receiveLog_, EM_EXLIMITTEXT, 0, static_cast<LPARAM>(logVisibleCharLimit_ + kMaxRenderedLogLineChars));
 
     for (const wchar_t* label : {tx(T::WorkbenchTabSingle), tx(T::WorkbenchTabQuick), tx(T::WorkbenchTabFile), tx(T::WorkbenchTabScan), tx(T::WorkbenchTabSettings)}) {
@@ -3743,82 +3720,11 @@ std::wstring NativeMainWindow::controlText(HWND control) const {
 }
 
 std::wstring NativeMainWindow::analysisInputText(HWND control) const {
-    if (analysisPlaceholderActive(control)) {
-        return L"";
-    }
     return controlText(control);
 }
 
 void NativeMainWindow::setControlText(HWND control, const std::wstring& text) {
     SetWindowTextW(control, text.c_str());
-}
-
-void NativeMainWindow::initializeAnalysisPlaceholders() {
-    restoreAnalysisPlaceholder(targetLabelEdit_);
-    restoreAnalysisPlaceholder(targetValueEdit_);
-    restoreAnalysisPlaceholder(targetUnitEdit_);
-}
-
-void NativeMainWindow::clearAnalysisPlaceholder(HWND control) {
-    if (!analysisPlaceholderActive(control)) {
-        return;
-    }
-    setAnalysisPlaceholderActive(control, false);
-    SetWindowTextW(control, L"");
-    InvalidateRect(control, nullptr, TRUE);
-}
-
-void NativeMainWindow::restoreAnalysisPlaceholder(HWND control) {
-    if (control == nullptr) {
-        return;
-    }
-    if (!controlText(control).empty() && !analysisPlaceholderActive(control)) {
-        return;
-    }
-    const wchar_t* placeholder = analysisPlaceholderText(control);
-    if (placeholder == nullptr || placeholder[0] == L'\0') {
-        return;
-    }
-    setAnalysisPlaceholderActive(control, true);
-    SetWindowTextW(control, placeholder);
-    SendMessageW(control, EM_SETSEL, 0, 0);
-    InvalidateRect(control, nullptr, TRUE);
-}
-
-bool NativeMainWindow::analysisPlaceholderActive(HWND control) const {
-    if (control == targetLabelEdit_) {
-        return targetNamePlaceholderActive_;
-    }
-    if (control == targetValueEdit_) {
-        return targetValuePlaceholderActive_;
-    }
-    if (control == targetUnitEdit_) {
-        return targetUnitPlaceholderActive_;
-    }
-    return false;
-}
-
-void NativeMainWindow::setAnalysisPlaceholderActive(HWND control, bool active) {
-    if (control == targetLabelEdit_) {
-        targetNamePlaceholderActive_ = active;
-    } else if (control == targetValueEdit_) {
-        targetValuePlaceholderActive_ = active;
-    } else if (control == targetUnitEdit_) {
-        targetUnitPlaceholderActive_ = active;
-    }
-}
-
-const wchar_t* NativeMainWindow::analysisPlaceholderText(HWND control) const {
-    if (control == targetLabelEdit_) {
-        return tx(T::TargetNameCue);
-    }
-    if (control == targetValueEdit_) {
-        return tx(T::TargetValueCue);
-    }
-    if (control == targetUnitEdit_) {
-        return tx(T::TargetUnitCue);
-    }
-    return L"";
 }
 
 std::vector<std::uint8_t> NativeMainWindow::payloadFromInput(std::wstring* errorText) const {

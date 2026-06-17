@@ -136,12 +136,6 @@ private:
     std::wstring controlText(HWND control) const;
     std::wstring analysisInputText(HWND control) const;
     void setControlText(HWND control, const std::wstring& text);
-    void initializeAnalysisPlaceholders();
-    void clearAnalysisPlaceholder(HWND control);
-    void restoreAnalysisPlaceholder(HWND control);
-    bool analysisPlaceholderActive(HWND control) const;
-    void setAnalysisPlaceholderActive(HWND control, bool active);
-    const wchar_t* analysisPlaceholderText(HWND control) const;
     std::vector<std::uint8_t> payloadFromInput(std::wstring* errorText) const;
     std::vector<std::uint8_t> payloadFromText(const std::wstring& text, std::wstring* errorText) const;
     std::wstring formatPayloadForLog(const std::vector<std::uint8_t>& payload) const;
@@ -266,9 +260,6 @@ private:
     bool ownsUiFont_ = false;
     bool receiveLogUsesRichEdit_ = false;
     bool showLogTimestamps_ = true;
-    bool targetNamePlaceholderActive_ = false;
-    bool targetValuePlaceholderActive_ = false;
-    bool targetUnitPlaceholderActive_ = false;
     int logThemeIndex_ = 0;
     std::size_t logVisibleCharLimit_ = 350000;
     std::size_t logEntryLimit_ = 2000;
