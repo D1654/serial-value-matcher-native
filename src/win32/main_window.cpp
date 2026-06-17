@@ -2361,21 +2361,21 @@ void NativeMainWindow::layoutControls(int width, int height) {
         - toleranceLabelWidth
         - gap * 3
         - formFieldGap * 4);
-    MoveWindow(analysisSectionLabel_, x, y, std::max(1, analysisSectionWidth), row, TRUE);
+    MoveWindow(analysisSectionLabel_, x, y + labelOffsetY, std::max(1, analysisSectionWidth), labelHeight, TRUE);
     x += analysisSectionWidth;
-    MoveWindow(targetStatic_, x, y, targetNameLabelWidth, row, TRUE);
+    MoveWindow(targetStatic_, x, y + labelOffsetY, targetNameLabelWidth, labelHeight, TRUE);
     x += targetNameLabelWidth + formFieldGap;
     MoveWindow(targetLabelEdit_, x, y, targetNameEditWidth, row, TRUE);
     x += targetNameEditWidth + gap;
-    MoveWindow(targetValueStatic_, x, y, targetValueLabelWidth, row, TRUE);
+    MoveWindow(targetValueStatic_, x, y + labelOffsetY, targetValueLabelWidth, labelHeight, TRUE);
     x += targetValueLabelWidth + formFieldGap;
     MoveWindow(targetValueEdit_, x, y, targetValueEditWidth, row, TRUE);
     x += targetValueEditWidth + gap;
-    MoveWindow(targetUnitStatic_, x, y, targetUnitLabelWidth, row, TRUE);
+    MoveWindow(targetUnitStatic_, x, y + labelOffsetY, targetUnitLabelWidth, labelHeight, TRUE);
     x += targetUnitLabelWidth + formFieldGap;
     MoveWindow(targetUnitEdit_, x, y, targetUnitEditWidth, row, TRUE);
     x += targetUnitEditWidth + gap;
-    MoveWindow(toleranceStatic_, x, y, toleranceLabelWidth, row, TRUE);
+    MoveWindow(toleranceStatic_, x, y + labelOffsetY, toleranceLabelWidth, labelHeight, TRUE);
     x += toleranceLabelWidth + formFieldGap;
     MoveWindow(toleranceEdit_, x, y, toleranceEditWidth, row, TRUE);
 
