@@ -2345,28 +2345,39 @@ void NativeMainWindow::layoutControls(int width, int height) {
     y += progressHeight + gap;
     x = pageX;
     const bool scanTargetRowVisible = y + row <= pageBottom;
-    const bool showScanAnalysisLabel = pageW >= 520;
-    const int analysisSectionWidth = showScanAnalysisLabel ? (compact ? 66 : 78) : 0;
-    const int targetGroupWidth = std::max(1, pageW - analysisSectionWidth);
-    const int targetSectionGap = analysisSectionWidth > 0 ? formFieldGap : 0;
-    const int targetInputWidth = std::max(1, targetGroupWidth - targetSectionGap);
-    const int targetNameEditWidth = std::max(1, std::min(compact ? 132 : 158, targetInputWidth * 32 / 100));
-    const int targetValueEditWidth = std::max(1, std::min(compact ? 116 : 136, targetInputWidth * 28 / 100));
-    const int targetUnitEditWidth = std::max(1, std::min(compact ? 78 : 88, targetInputWidth * 16 / 100));
-    const int toleranceEditWidth = std::max(1, targetGroupWidth
-        - targetSectionGap
-        - targetNameEditWidth
-        - targetValueEditWidth
-        - targetUnitEditWidth
-        - gap * 3);
-    MoveWindow(analysisSectionLabel_, pageX, y + labelOffsetY, std::max(1, analysisSectionWidth), labelHeight, TRUE);
-    x += analysisSectionWidth + targetSectionGap;
+    const bool showScanAnalysisLabel = pageW >= 700;
+    const int analysisSectionWidth = showScanAnalysisLabel ? (compact ? 72 : 84) : 0;
+    const int targetNameLabelWidth = compact ? 42 : 48;
+    const int targetNameEditWidth = std::max(1, std::min(compact ? 80 : 94, pageW / 8));
+    const int targetValueLabelWidth = compact ? 42 : 48;
+    const int targetValueEditWidth = std::max(1, std::min(compact ? 72 : 86, pageW / 8));
+    const int targetUnitLabelWidth = compact ? 28 : 32;
+    const int targetUnitEditWidth = std::max(1, std::min(compact ? 56 : 68, pageW / 8));
+    const int toleranceLabelWidth = compact ? 28 : 32;
+    const int toleranceEditWidth = std::max(1, pageW
+        - analysisSectionWidth
+        - targetNameLabelWidth - targetNameEditWidth
+        - targetValueLabelWidth - targetValueEditWidth
+        - targetUnitLabelWidth - targetUnitEditWidth
+        - toleranceLabelWidth
+        - gap * 3
+        - formFieldGap * 4);
+    MoveWindow(analysisSectionLabel_, x, y + labelOffsetY, std::max(1, analysisSectionWidth), labelHeight, TRUE);
+    x += analysisSectionWidth;
+    MoveWindow(targetStatic_, x, y + labelOffsetY, targetNameLabelWidth, labelHeight, TRUE);
+    x += targetNameLabelWidth + formFieldGap;
     MoveWindow(targetLabelEdit_, x, y, targetNameEditWidth, row, TRUE);
     x += targetNameEditWidth + gap;
+    MoveWindow(targetValueStatic_, x, y + labelOffsetY, targetValueLabelWidth, labelHeight, TRUE);
+    x += targetValueLabelWidth + formFieldGap;
     MoveWindow(targetValueEdit_, x, y, targetValueEditWidth, row, TRUE);
     x += targetValueEditWidth + gap;
+    MoveWindow(targetUnitStatic_, x, y + labelOffsetY, targetUnitLabelWidth, labelHeight, TRUE);
+    x += targetUnitLabelWidth + formFieldGap;
     MoveWindow(targetUnitEdit_, x, y, targetUnitEditWidth, row, TRUE);
     x += targetUnitEditWidth + gap;
+    MoveWindow(toleranceStatic_, x, y + labelOffsetY, toleranceLabelWidth, labelHeight, TRUE);
+    x += toleranceLabelWidth + formFieldGap;
     MoveWindow(toleranceEdit_, x, y, toleranceEditWidth, row, TRUE);
 
     y += row + gap;
@@ -2459,13 +2470,13 @@ void NativeMainWindow::layoutControls(int width, int height) {
         showControl(modbusProgress_, scanProgressRowVisible);
         showControl(modbusProgressText_, scanProgressRowVisible);
         showControl(analysisSectionLabel_, scanTargetRowVisible && showScanAnalysisLabel);
-        showControl(targetStatic_, false);
+        showControl(targetStatic_, scanTargetRowVisible);
         showControl(targetLabelEdit_, scanTargetRowVisible);
-        showControl(targetValueStatic_, false);
+        showControl(targetValueStatic_, scanTargetRowVisible);
         showControl(targetValueEdit_, scanTargetRowVisible);
-        showControl(targetUnitStatic_, false);
+        showControl(targetUnitStatic_, scanTargetRowVisible);
         showControl(targetUnitEdit_, scanTargetRowVisible);
-        showControl(toleranceStatic_, false);
+        showControl(toleranceStatic_, scanTargetRowVisible);
         showControl(toleranceEdit_, scanTargetRowVisible);
         showControl(candidateStatic_, scanCandidateRowVisible);
         showControl(candidateCombo_, scanCandidateRowVisible);
