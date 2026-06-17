@@ -2345,8 +2345,8 @@ void NativeMainWindow::layoutControls(int width, int height) {
     y += progressHeight + gap;
     x = pageX;
     const bool scanTargetRowVisible = y + row <= pageBottom;
-    const bool showScanAnalysisLabel = pageW >= 700;
-    const int analysisSectionWidth = showScanAnalysisLabel ? (compact ? 72 : 84) : 0;
+    const bool showScanAnalysisLabel = pageW >= 520;
+    const int analysisSectionWidth = showScanAnalysisLabel ? (compact ? 66 : 78) : 0;
     const int targetGroupWidth = std::max(1, pageW - analysisSectionWidth);
     const int targetSectionGap = analysisSectionWidth > 0 ? formFieldGap : 0;
     const int targetInputWidth = std::max(1, targetGroupWidth - targetSectionGap);
@@ -2359,7 +2359,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
         - targetValueEditWidth
         - targetUnitEditWidth
         - gap * 3);
-    MoveWindow(analysisSectionLabel_, pageX, y, pageW, row, TRUE);
+    MoveWindow(analysisSectionLabel_, pageX, y + labelOffsetY, std::max(1, analysisSectionWidth), labelHeight, TRUE);
     x += analysisSectionWidth + targetSectionGap;
     MoveWindow(targetLabelEdit_, x, y, targetNameEditWidth, row, TRUE);
     x += targetNameEditWidth + gap;
@@ -2458,7 +2458,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
         showControl(modbusProgressLabel_, scanProgressRowVisible);
         showControl(modbusProgress_, scanProgressRowVisible);
         showControl(modbusProgressText_, scanProgressRowVisible);
-        showControl(analysisSectionLabel_, scanTargetRowVisible);
+        showControl(analysisSectionLabel_, scanTargetRowVisible && showScanAnalysisLabel);
         showControl(targetStatic_, false);
         showControl(targetLabelEdit_, scanTargetRowVisible);
         showControl(targetValueStatic_, false);
