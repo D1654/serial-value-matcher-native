@@ -56,7 +56,6 @@ constexpr int kFileSendChunkBytes = 1024;
 constexpr std::size_t kDefaultLogVisibleChars = 350000;
 constexpr COLORREF kFormBackgroundColor = RGB(228, 228, 228);
 constexpr COLORREF kPlaceholderTextColor = RGB(92, 92, 92);
-constexpr UINT_PTR kUnifiedEditSubclassId = 0x51564d45;
 
 const wchar_t* tx(T id) {
     return uiText(id);
@@ -840,61 +839,11 @@ bool hasWindowClass(HWND control, const wchar_t* expectedClassName) {
     return lstrcmpiW(className, expectedClassName) == 0;
 }
 
-bool isSingleLineEdit(HWND control) {
-    if (!hasWindowClass(control, L"Edit")) {
-        return false;
-    }
-    const LONG_PTR style = GetWindowLongPtrW(control, GWL_STYLE);
-    return (style & ES_MULTILINE) == 0;
-}
-
-LRESULT CALLBACK unifiedEditSubclassProc(HWND control, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR subclassId, DWORD_PTR) {
-    if (subclassId != kUnifiedEditSubclassId) {
-        return DefSubclassProc(control, message, wParam, lParam);
-    }
-
-    switch (message) {
-    case WM_PAINT: {
-        const LRESULT result = DefSubclassProc(control, message, wParam, lParam);
-        HDC dc = GetDC(control);
-        if (dc != nullptr) {
-            RECT rect = {};
-            GetClientRect(control, &rect);
-            const COLORREF borderColor = IsWindowEnabled(control) ? GetSysColor(COLOR_3DSHADOW) : GetSysColor(COLOR_GRAYTEXT);
-            HBRUSH borderBrush = CreateSolidBrush(borderColor);
-            if (borderBrush != nullptr) {
-                FrameRect(dc, &rect, borderBrush);
-                DeleteObject(borderBrush);
-            }
-            ReleaseDC(control, dc);
-        }
-        return result;
-    }
-    case WM_ENABLE:
-    case WM_SETFOCUS:
-    case WM_KILLFOCUS: {
-        const LRESULT result = DefSubclassProc(control, message, wParam, lParam);
-        InvalidateRect(control, nullptr, FALSE);
-        return result;
-    }
-    case WM_DESTROY:
-        RemoveWindowSubclass(control, unifiedEditSubclassProc, kUnifiedEditSubclassId);
-        break;
-    default:
-        break;
-    }
-
-    return DefSubclassProc(control, message, wParam, lParam);
-}
-
 void applyClassicControlChrome(HWND control) {
     if (control == nullptr) {
         return;
     }
-    if (isSingleLineEdit(control)) {
-        SendMessageW(control, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(5, 4));
-        SetWindowSubclass(control, unifiedEditSubclassProc, kUnifiedEditSubclassId, 0);
-    } else if (hasWindowClass(control, L"RICHEDIT50W") || hasWindowClass(control, L"Edit")) {
+    if (hasWindowClass(control, L"Edit") || hasWindowClass(control, L"RICHEDIT50W")) {
         SendMessageW(control, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(5, 4));
     } else if (hasWindowClass(control, L"ComboBox")) {
         SendMessageW(control, CB_SETMINVISIBLE, 10, 0);
