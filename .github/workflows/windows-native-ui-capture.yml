@@ -1,0 +1,79 @@
+name: Windows Native UI Capture
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/windows-native-ui-capture.yml"
+      - "scripts/capture-windows-native-ui.ps1"
+      - "src/win32/**"
+      - "src/core/**"
+      - "src/native_storage/**"
+      - "CMakeLists.txt"
+
+permissions:
+  contents: read
+
+env:
+  BUILD_DIR: build-windows-native-ui
+  UI_ARTIFACT_DIR: artifacts/windows-native-ui
+
+jobs:
+  capture-ui:
+    name: Capture Win32 native UI on Windows
+    runs-on: windows-2022
+
+    steps:
+      - name: Check out repository
+        # actions/checkout v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+
+      - name: Configure native-only
+        shell: pwsh
+        run: >
+          cmake -S . -B $env:BUILD_DIR
+          -G "Visual Studio 17 2022"
+          -A x64
+          -DSVM_BUILD_QT_APP=OFF
+          -DSVM_BUILD_QT_TESTS=OFF
+          -DSVM_BUILD_WIN32_APP=ON
+
+      - name: Build Release
+        shell: pwsh
+        run: cmake --build $env:BUILD_DIR --config Release --parallel 1
+
+      - name: Run native tests
+        shell: pwsh
+        run: ctest --test-dir $env:BUILD_DIR --output-on-failure -C Release
+
+      - name: Run native app self-test
+        shell: pwsh
+        run: '& (Join-Path $env:BUILD_DIR "Release\svm-native-win32.exe") --self-test'
+
+      - name: Capture native UI screenshots
+        shell: pwsh
+        run: >
+          .\scripts\capture-windows-native-ui.ps1
+          -BuildDir $env:BUILD_DIR
+          -Config Release
+          -OutputDir $env:UI_ARTIFACT_DIR
+
+      - name: Summarize screenshots
+        shell: pwsh
+        run: |
+          "## Windows native UI screenshots" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          Get-ChildItem $env:UI_ARTIFACT_DIR -Filter *.png | Sort-Object Name | ForEach-Object {
+            "- $($_.Name) ($($_.Length) bytes)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          }
+
+      - name: Upload UI screenshots
+        # actions/upload-artifact v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: windows-native-ui-screenshots
+          path: |
+            artifacts/windows-native-ui/*.png
+            artifacts/windows-native-ui/capture-status.txt
+            artifacts/windows-native-ui/window-info.txt
+          if-no-files-found: error
+          retention-days: 14
