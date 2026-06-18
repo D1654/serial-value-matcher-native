@@ -230,7 +230,7 @@ NativeUiMetrics nativeUiMetricsForSize(int width, int height) {
     metrics.compact = width < 1040 || height < 720;
     metrics.tight = width < 860;
     metrics.margin = metrics.tight ? 3 : (metrics.compact ? 4 : 6);
-    metrics.row = metrics.compact ? 22 : 23;
+    metrics.row = metrics.compact ? 24 : 23;
     metrics.gap = metrics.tight ? 2 : (metrics.compact ? 3 : 4);
     metrics.labelHeight = metrics.compact ? 15 : 16;
     metrics.titleHeight = metrics.compact ? 16 : 18;
@@ -239,7 +239,7 @@ NativeUiMetrics nativeUiMetricsForSize(int width, int height) {
     metrics.smallButtonWidth = metrics.tight ? 44 : (metrics.compact ? 48 : 52);
     metrics.desiredSideWidth = metrics.tight ? 150 : (metrics.compact ? 154 : 170);
     metrics.minSideWidth = metrics.tight ? 112 : 140;
-    metrics.desiredWorkHeight = metrics.tight ? 144 : (metrics.compact ? 150 : 162);
+    metrics.desiredWorkHeight = metrics.tight ? 158 : (metrics.compact ? 164 : 162);
     metrics.minimumLogHeight = metrics.compact ? 150 : 210;
     metrics.logActionWidth = metrics.compact ? 38 : 42;
     return metrics;
