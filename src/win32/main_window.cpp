@@ -2260,10 +2260,8 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int progressOffsetY = compact ? 3 : 4;
     const int progressHeight = compact ? 14 : 16;
     const int formFieldGap = compact ? 2 : 3;
-    const int workEditHeight = std::max(18, row - 2);
-    const int workEditOffsetY = std::max(0, (row - workEditHeight) / 2);
     const auto moveWorkEdit = [&](HWND control, int editX, int editY, int editWidth) {
-        MoveWindow(control, editX, editY + workEditOffsetY, editWidth, workEditHeight, TRUE);
+        MoveWindow(control, editX, editY, editWidth, row, TRUE);
     };
     MoveWindow(
         workPageBackground_,
