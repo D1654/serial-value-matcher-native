@@ -322,6 +322,22 @@ void enableControl(HWND control, bool enabled) {
     }
 }
 
+HWND createSingleLineEdit(HWND parent, HINSTANCE instance, int controlId, const wchar_t* text, DWORD extraStyle = 0) {
+    return CreateWindowExW(
+        0,
+        L"EDIT",
+        text,
+        WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | extraStyle,
+        0,
+        0,
+        0,
+        0,
+        parent,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(controlId)),
+        instance,
+        nullptr);
+}
+
 SendControlLayout calculateSendControlLayout(int x, int y, int innerWidth, int row, int gap, int labelHeight) {
     const bool compact = innerWidth < 390;
     const int sendModeWidth = compact ? 90 : 110;
@@ -1910,30 +1926,22 @@ void NativeMainWindow::createControls() {
     copyLogButton_ = CreateWindowExW(0, L"BUTTON", tx(T::CopyLogButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_COPY_LOG_BUTTON), instance_, nullptr);
     exportLogButton_ = CreateWindowExW(0, L"BUTTON", tx(T::ExportLogButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_EXPORT_LOG_BUTTON), instance_, nullptr);
     logFilterLabel_ = CreateWindowExW(0, L"STATIC", tx(T::LogFilterLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
-    logFilterEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_FILTER_EDIT), instance_, nullptr);
+    logFilterEdit_ = createSingleLineEdit(window_, instance_, IDC_LOG_FILTER_EDIT, L"");
     logSearchLabel_ = CreateWindowExW(0, L"STATIC", tx(T::LogSearchLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
-    logSearchEdit_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_SEARCH_EDIT), instance_, nullptr);
+    logSearchEdit_ = createSingleLineEdit(window_, instance_, IDC_LOG_SEARCH_EDIT, L"");
     findLogButton_ = CreateWindowExW(0, L"BUTTON", tx(T::FindButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_FIND_BUTTON), instance_, nullptr);
     historyCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_HISTORY_COMBO), instance_, nullptr);
-    sendEdit_ = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SEND_EDIT), instance_, nullptr);
+    sendEdit_ = createSingleLineEdit(window_, instance_, IDC_SEND_EDIT, L"");
     sendButton_ = CreateWindowExW(0, L"BUTTON", tx(T::SendButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SEND_BUTTON), instance_, nullptr);
     timedSendCheck_ = CreateWindowExW(0, L"BUTTON", tx(T::TimedSendCheck), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TIMED_SEND_CHECK), instance_, nullptr);
     timedPeriodLabel_ = CreateWindowExW(0, L"STATIC", tx(T::TimedPeriodLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
-    timedPeriodEdit_ = CreateWindowExW(0, L"EDIT", L"1000", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TIMED_PERIOD_EDIT), instance_, nullptr);
+    timedPeriodEdit_ = createSingleLineEdit(window_, instance_, IDC_TIMED_PERIOD_EDIT, L"1000", ES_NUMBER);
     for (std::size_t index = 0; index < quickSendEdits_.size(); ++index) {
-        quickSendEdits_[index] = CreateWindowExW(
-            0,
-            L"EDIT",
-            L"",
-            WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
-            0,
-            0,
-            0,
-            0,
+        quickSendEdits_[index] = createSingleLineEdit(
             window_,
-            reinterpret_cast<HMENU>(IDC_QUICK_SEND_EDIT_BASE + index),
             instance_,
-            nullptr);
+            static_cast<int>(IDC_QUICK_SEND_EDIT_BASE + index),
+            L"");
         const std::wstring quickButtonText = std::wstring(L"\u53D1") + std::to_wstring(index + 1);
         quickSendButtons_[index] = CreateWindowExW(
             0,
@@ -1950,7 +1958,7 @@ void NativeMainWindow::createControls() {
             nullptr);
     }
     filePathLabel_ = CreateWindowExW(0, L"STATIC", tx(T::FilePathLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
-    filePathEdit_ = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_FILE_PATH_EDIT), instance_, nullptr);
+    filePathEdit_ = createSingleLineEdit(window_, instance_, IDC_FILE_PATH_EDIT, L"");
     fileBrowseButton_ = CreateWindowExW(0, L"BUTTON", tx(T::FileBrowseButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_FILE_BROWSE_BUTTON), instance_, nullptr);
     fileSendButton_ = CreateWindowExW(0, L"BUTTON", tx(T::FileSendButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_FILE_SEND_BUTTON), instance_, nullptr);
     fileStopButton_ = CreateWindowExW(0, L"BUTTON", tx(T::FileStopButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_FILE_STOP_BUTTON), instance_, nullptr);
@@ -1967,25 +1975,25 @@ void NativeMainWindow::createControls() {
     exportReportButton_ = CreateWindowExW(0, L"BUTTON", tx(T::ExportReportButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_EXPORT_REPORT_BUTTON), instance_, nullptr);
     scanSectionLabel_ = CreateWindowExW(0, L"STATIC", tx(T::ScanSectionLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     scanSlaveLabel_ = CreateWindowExW(0, L"STATIC", tx(T::ScanSlaveLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
-    scanSlaveEdit_ = CreateWindowExW(0, L"EDIT", L"1", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SCAN_SLAVE_EDIT), instance_, nullptr);
+    scanSlaveEdit_ = createSingleLineEdit(window_, instance_, IDC_SCAN_SLAVE_EDIT, L"1", ES_NUMBER);
     scanFunctionLabel_ = CreateWindowExW(0, L"STATIC", tx(T::ScanFunctionLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     scanFunctionCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SCAN_FUNCTION_COMBO), instance_, nullptr);
     scanStartLabel_ = CreateWindowExW(0, L"STATIC", tx(T::ScanStartLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
-    scanStartEdit_ = CreateWindowExW(0, L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SCAN_START_EDIT), instance_, nullptr);
+    scanStartEdit_ = createSingleLineEdit(window_, instance_, IDC_SCAN_START_EDIT, L"0", ES_NUMBER);
     scanEndLabel_ = CreateWindowExW(0, L"STATIC", tx(T::ScanEndLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
-    scanEndEdit_ = CreateWindowExW(0, L"EDIT", L"15", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_SCAN_END_EDIT), instance_, nullptr);
+    scanEndEdit_ = createSingleLineEdit(window_, instance_, IDC_SCAN_END_EDIT, L"15", ES_NUMBER);
     modbusProgressLabel_ = CreateWindowExW(0, L"STATIC", tx(T::ModbusProgressLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     modbusProgress_ = CreateWindowExW(0, PROGRESS_CLASSW, L"", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_MODBUS_PROGRESS), instance_, nullptr);
     modbusProgressText_ = CreateWindowExW(0, L"STATIC", L"0/0", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     analysisSectionLabel_ = CreateWindowExW(0, L"STATIC", tx(T::AnalysisSectionLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     targetStatic_ = CreateWindowExW(0, L"STATIC", tx(T::TargetNameLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
-    targetLabelEdit_ = CreateWindowExW(0, L"EDIT", tx(T::TargetNameDefault), WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TARGET_LABEL_EDIT), instance_, nullptr);
+    targetLabelEdit_ = createSingleLineEdit(window_, instance_, IDC_TARGET_LABEL_EDIT, tx(T::TargetNameDefault));
     targetValueStatic_ = CreateWindowExW(0, L"STATIC", tx(T::TargetValueLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
-    targetValueEdit_ = CreateWindowExW(0, L"EDIT", tx(T::TargetValueDefault), WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TARGET_VALUE_EDIT), instance_, nullptr);
+    targetValueEdit_ = createSingleLineEdit(window_, instance_, IDC_TARGET_VALUE_EDIT, tx(T::TargetValueDefault));
     targetUnitStatic_ = CreateWindowExW(0, L"STATIC", tx(T::TargetUnitLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
-    targetUnitEdit_ = CreateWindowExW(0, L"EDIT", tx(T::TargetUnitDefault), WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TARGET_UNIT_EDIT), instance_, nullptr);
+    targetUnitEdit_ = createSingleLineEdit(window_, instance_, IDC_TARGET_UNIT_EDIT, tx(T::TargetUnitDefault));
     toleranceStatic_ = CreateWindowExW(0, L"STATIC", tx(T::ToleranceFieldLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
-    toleranceEdit_ = CreateWindowExW(0, L"EDIT", tx(T::ToleranceDefault), WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_TOLERANCE_EDIT), instance_, nullptr);
+    toleranceEdit_ = createSingleLineEdit(window_, instance_, IDC_TOLERANCE_EDIT, tx(T::ToleranceDefault));
     candidateStatic_ = CreateWindowExW(0, L"STATIC", tx(T::CandidateLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     candidateCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_CANDIDATE_COMBO), instance_, nullptr);
     receiveLog_ = CreateWindowExW(
