@@ -338,6 +338,27 @@ HWND createSingleLineEdit(HWND parent, HINSTANCE instance, int controlId, const 
         nullptr);
 }
 
+int singleLineEditHeight(HFONT font, int row) {
+    int textHeight = 12;
+    HDC dc = GetDC(nullptr);
+    if (dc != nullptr) {
+        HGDIOBJ oldFont = nullptr;
+        if (font != nullptr) {
+            oldFont = SelectObject(dc, font);
+        }
+        TEXTMETRICW metrics = {};
+        if (GetTextMetricsW(dc, &metrics) != FALSE) {
+            textHeight = metrics.tmHeight;
+        }
+        if (oldFont != nullptr) {
+            SelectObject(dc, oldFont);
+        }
+        ReleaseDC(nullptr, dc);
+    }
+    const int naturalHeight = textHeight + GetSystemMetrics(SM_CYBORDER) * 2 + 4;
+    return std::clamp(naturalHeight, std::max(14, row - 5), row);
+}
+
 SendControlLayout calculateSendControlLayout(int x, int y, int innerWidth, int row, int gap, int labelHeight) {
     const bool compact = innerWidth < 390;
     const int sendModeWidth = compact ? 90 : 110;
@@ -2159,6 +2180,8 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int labelHeight = metrics.labelHeight;
     const int smallButtonWidth = metrics.smallButtonWidth;
     const int titleHeight = metrics.titleHeight;
+    const int editHeight = singleLineEditHeight(uiFont_, row);
+    const int editOffsetY = std::max(0, (row - editHeight) / 2);
 
     const int statusHeight = metrics.statusHeight;
     const int statusY = std::max(margin, height - statusHeight - 4);
@@ -2242,8 +2265,8 @@ void NativeMainWindow::layoutControls(int width, int height) {
     MoveWindow(logEncodingCombo_, logLayout.encodingCombo.x, logLayout.encodingCombo.y, logLayout.encodingCombo.width, 140, TRUE);
     MoveWindow(copyLogButton_, logLayout.copyButton.x, logLayout.copyButton.y, logLayout.copyButton.width, logLayout.copyButton.height, TRUE);
     MoveWindow(exportLogButton_, logLayout.exportButton.x, logLayout.exportButton.y, logLayout.exportButton.width, logLayout.exportButton.height, TRUE);
-    MoveWindow(logFilterEdit_, logLayout.filterEdit.x, logLayout.filterEdit.y, logLayout.filterEdit.width, logLayout.filterEdit.height, TRUE);
-    MoveWindow(logSearchEdit_, logLayout.searchEdit.x, logLayout.searchEdit.y, logLayout.searchEdit.width, logLayout.searchEdit.height, TRUE);
+    MoveWindow(logFilterEdit_, logLayout.filterEdit.x, logLayout.filterEdit.y + editOffsetY, logLayout.filterEdit.width, editHeight, TRUE);
+    MoveWindow(logSearchEdit_, logLayout.searchEdit.x, logLayout.searchEdit.y + editOffsetY, logLayout.searchEdit.width, editHeight, TRUE);
     MoveWindow(findLogButton_, logLayout.findButton.x, logLayout.findButton.y, logLayout.findButton.width, logLayout.findButton.height, TRUE);
     const int logContentY = std::max(logLayout.exportButton.bottom(), logLayout.findButton.bottom()) + (compact ? 5 : 6);
     MoveWindow(receiveLog_, mainX, logContentY, mainWidth, std::max(1, logY + logHeight - logContentY), TRUE);
@@ -2274,7 +2297,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int progressHeight = compact ? 14 : 16;
     const int formFieldGap = compact ? 2 : 3;
     const auto moveWorkEdit = [&](HWND control, int editX, int editY, int editWidth) {
-        MoveWindow(control, editX, editY, editWidth, row, TRUE);
+        MoveWindow(control, editX, editY + editOffsetY, editWidth, editHeight, TRUE);
     };
     MoveWindow(
         workPageBackground_,
