@@ -230,7 +230,7 @@ NativeUiMetrics nativeUiMetricsForSize(int width, int height) {
     metrics.compact = width < 1040 || height < 720;
     metrics.tight = width < 860;
     metrics.margin = metrics.tight ? 3 : (metrics.compact ? 4 : 6);
-    metrics.row = metrics.compact ? 24 : 23;
+    metrics.row = metrics.compact ? 22 : 23;
     metrics.gap = metrics.tight ? 2 : (metrics.compact ? 3 : 4);
     metrics.labelHeight = metrics.compact ? 15 : 16;
     metrics.titleHeight = metrics.compact ? 16 : 18;
@@ -401,6 +401,63 @@ bool sendControlLayoutIsSane(int innerWidth) {
         && rectIsValid(layout.lineEndingCombo)
         && rectIsValid(layout.historyCombo)
         && layout.historyCombo.right() <= innerWidth;
+}
+
+bool scanTabLayoutIsSane(int pageWidth, int pageHeight) {
+    const NativeUiMetrics metrics = nativeUiMetricsForSize(pageWidth + 200, 520);
+    const int row = metrics.row;
+    const int gap = metrics.gap;
+    const int labelHeight = metrics.labelHeight;
+    const int formFieldGap = metrics.compact ? 2 : 3;
+    const int progressHeight = metrics.compact ? 14 : 16;
+
+    const int shortLabelWidth = metrics.compact ? 28 : 32;
+    const int scanSlaveEditWidth = metrics.compact ? 34 : 40;
+    const int scanFunctionLabelWidth = metrics.compact ? 32 : 36;
+    const int addressLabelWidth = metrics.compact ? 52 : 58;
+    const int addressEditWidth = metrics.compact ? 46 : 52;
+    const int scanFunctionWidth = metrics.compact ? 132 : 166;
+    const int parameterRowWidth =
+        shortLabelWidth + scanSlaveEditWidth
+        + scanFunctionLabelWidth + scanFunctionWidth
+        + (addressLabelWidth + addressEditWidth) * 2
+        + gap * 4
+        + formFieldGap * 4;
+
+    const int analysisSectionWidth = metrics.compact ? 68 : 82;
+    const int targetNameLabelWidth = metrics.compact ? 42 : 48;
+    const int targetValueLabelWidth = metrics.compact ? 42 : 48;
+    const int targetUnitLabelWidth = metrics.compact ? 28 : 32;
+    const int toleranceLabelWidth = metrics.compact ? 28 : 32;
+    const int targetNameEditWidth = metrics.compact ? 86 : 126;
+    const int targetValueEditWidth = metrics.compact ? 76 : 96;
+    const int targetUnitEditWidth = metrics.compact ? 44 : 72;
+    const int toleranceEditWidth = metrics.compact ? 54 : 72;
+    const int targetRowWidth =
+        analysisSectionWidth
+        + targetNameLabelWidth + targetNameEditWidth
+        + targetValueLabelWidth + targetValueEditWidth
+        + targetUnitLabelWidth + targetUnitEditWidth
+        + toleranceLabelWidth + toleranceEditWidth
+        + gap * 3
+        + formFieldGap * 4;
+
+    const int candidateLabelWidth = metrics.compact ? 32 : 36;
+    const int modbusButtonWidth = metrics.compact ? 90 : 102;
+    const int analysisButtonWidth = metrics.compact ? 66 : 76;
+    const int ruleButtonWidth = metrics.compact ? 66 : 76;
+    const int exportButtonWidth = metrics.compact ? 66 : 76;
+    const int candidateMinimumWidth =
+        candidateLabelWidth + 120
+        + modbusButtonWidth + analysisButtonWidth + ruleButtonWidth + exportButtonWidth
+        + gap * 5
+        + formFieldGap;
+
+    const int requiredHeight = labelHeight + gap + row + gap + progressHeight + gap + row + gap + row;
+    return pageWidth >= parameterRowWidth
+        && pageWidth >= targetRowWidth
+        && pageWidth >= candidateMinimumWidth
+        && pageHeight >= requiredHeight;
 }
 
 std::wstring formatLogCacheLimit(std::size_t charLimit) {
@@ -1225,6 +1282,9 @@ bool NativeMainWindow::runSelfTest() {
     }
     if (!sendControlLayoutIsSane(428)) {
         return fail("send-layout-428");
+    }
+    if (!scanTabLayoutIsSane(554, 108)) {
+        return fail("scan-tab-layout-554x108");
     }
     if (!mainLayoutProbeIsFullyUsableAtSize(kMinTrackWidth, kMinTrackHeight)) {
         return fail("main-layout-min");
@@ -2308,7 +2368,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     x = pageX;
     const int shortLabelWidth = compact ? 28 : 32;
     const int scanSlaveEditWidth = compact ? 34 : 40;
-    const int addressLabelWidth = compact ? 42 : 48;
+    const int addressLabelWidth = compact ? 52 : 58;
     const int addressEditWidth = compact ? 46 : 52;
     const int scanFunctionLabelWidth = compact ? 32 : 36;
     const int fixedScanRowWidth =
@@ -2316,9 +2376,9 @@ void NativeMainWindow::layoutControls(int width, int height) {
         + scanFunctionLabelWidth
         + addressLabelWidth + addressEditWidth
         + addressLabelWidth + addressEditWidth
-        + gap * 7
+        + gap * 4
         + formFieldGap * 4;
-    const int scanFunctionWidth = std::max(1, std::min(compact ? 148 : 166, pageW - fixedScanRowWidth));
+    const int scanFunctionWidth = std::max(1, std::min(compact ? 132 : 166, pageW - fixedScanRowWidth));
     const bool scanParameterRowVisible = y + row <= pageBottom;
     MoveWindow(scanSlaveLabel_, x, y + labelOffsetY, shortLabelWidth, labelHeight, TRUE);
     x += shortLabelWidth + formFieldGap;
@@ -2351,16 +2411,16 @@ void NativeMainWindow::layoutControls(int width, int height) {
     y += progressHeight + gap;
     x = pageX;
     const bool scanTargetRowVisible = y + row <= pageBottom;
-    const bool showScanAnalysisLabel = pageW >= 700;
-    const int analysisSectionWidth = showScanAnalysisLabel ? (compact ? 72 : 84) : 0;
+    const bool showScanAnalysisLabel = pageW >= (compact ? 520 : 640);
+    const int analysisSectionWidth = showScanAnalysisLabel ? (compact ? 68 : 82) : 0;
     const int targetNameLabelWidth = compact ? 42 : 48;
     const int targetValueLabelWidth = compact ? 42 : 48;
     const int targetUnitLabelWidth = compact ? 28 : 32;
     const int toleranceLabelWidth = compact ? 28 : 32;
-    const int targetNameDesiredWidth = compact ? 104 : 126;
-    const int targetValueDesiredWidth = compact ? 90 : 96;
-    const int targetUnitDesiredWidth = compact ? 64 : 72;
-    const int toleranceDesiredWidth = compact ? 64 : 72;
+    const int targetNameDesiredWidth = compact ? 86 : 126;
+    const int targetValueDesiredWidth = compact ? 76 : 96;
+    const int targetUnitDesiredWidth = compact ? 44 : 72;
+    const int toleranceDesiredWidth = compact ? 54 : 72;
     const int targetDesiredEditWidth =
         targetNameDesiredWidth + targetValueDesiredWidth + targetUnitDesiredWidth + toleranceDesiredWidth;
     const int targetAvailableEditWidth = std::max(4, pageW
