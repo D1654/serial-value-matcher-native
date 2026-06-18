@@ -154,9 +154,9 @@ capture_tab_set() {
     local geometry
     geometry="$(xdotool getwindowgeometry --shell "$window_id")"
     eval "$geometry"
-    local tab_y_offset="${SVM_WINE_UI_TAB_Y_OFFSET:-185}"
+    local tab_y_offset="${SVM_WINE_UI_TAB_Y_OFFSET:-205}"
     if [[ "$prefix" == compact-tab-* ]]; then
-        tab_y_offset="${SVM_WINE_UI_COMPACT_TAB_Y_OFFSET:-160}"
+        tab_y_offset="${SVM_WINE_UI_COMPACT_TAB_Y_OFFSET:-205}"
     fi
     local tab_y=$((HEIGHT - tab_y_offset))
     if [[ "$tab_y" -lt 80 ]]; then
