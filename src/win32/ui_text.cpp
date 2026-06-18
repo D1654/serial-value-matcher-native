@@ -115,9 +115,9 @@ const wchar_t* uiText(TextId id) {
     case TextId::Fc04Input: return L"FC04 \u8F93\u5165\u5BC4\u5B58\u5668";
     case TextId::SendHistory: return L"\u53D1\u9001\u5386\u53F2";
     case TextId::TargetLabel: return L"\u76EE\u6807";
-    case TextId::TargetValueDefault: return L"";
-    case TextId::TargetNameDefault: return L"";
-    case TextId::TargetUnitDefault: return L"";
+    case TextId::TargetValueDefault: return L"25.6";
+    case TextId::TargetNameDefault: return L"\u6E29\u5EA6";
+    case TextId::TargetUnitDefault: return L"\u2103";
     case TextId::TargetNameCue: return L"\u53D8\u91CF\u540D\uFF0C\u5982\uFF1A\u6E29\u5EA6";
     case TextId::TargetValueCue: return L"\u5F53\u524D\u503C\uFF0C\u5982\uFF1A25.6";
     case TextId::TargetUnitCue: return L"\u5355\u4F4D\uFF0C\u5982\uFF1A\u2103";
