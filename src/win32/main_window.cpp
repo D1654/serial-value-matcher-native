@@ -295,29 +295,6 @@ HFONT createClassicUiFont() {
         L"MS Shell Dlg 2");
 }
 
-HFONT createClassicEditFont() {
-    HFONT font = CreateFontW(
-        -13,
-        0,
-        0,
-        0,
-        FW_NORMAL,
-        FALSE,
-        FALSE,
-        FALSE,
-        GB2312_CHARSET,
-        OUT_DEFAULT_PRECIS,
-        CLIP_DEFAULT_PRECIS,
-        DEFAULT_QUALITY,
-        DEFAULT_PITCH | FF_DONTCARE,
-        L"SimSun");
-    if (font != nullptr) {
-        return font;
-    }
-
-    return createClassicUiFont();
-}
-
 bool rectIsValid(const NativeRect& rect) {
     return rect.width > 0 && rect.height > 0;
 }
@@ -1813,11 +1790,6 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             uiFont_ = nullptr;
             ownsUiFont_ = false;
         }
-        if (ownsEditFont_ && editFont_ != nullptr) {
-            DeleteObject(editFont_);
-            editFont_ = nullptr;
-            ownsEditFont_ = false;
-        }
         if (richEditModule_ != nullptr) {
             FreeLibrary(richEditModule_);
             richEditModule_ = nullptr;
@@ -1885,11 +1857,6 @@ void NativeMainWindow::createControls() {
     ownsUiFont_ = uiFont_ != nullptr;
     if (uiFont_ == nullptr) {
         uiFont_ = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-    }
-    editFont_ = createClassicEditFont();
-    ownsEditFont_ = editFont_ != nullptr;
-    if (editFont_ == nullptr) {
-        editFont_ = uiFont_;
     }
 
     richEditModule_ = LoadLibraryW(L"Msftedit.dll");
@@ -2068,7 +2035,6 @@ void NativeMainWindow::createControls() {
 
     populateSerialOptionControls();
     setDefaultFonts();
-    applyWorkbenchEditFonts();
     applyLogTheme(0);
     updateRtsControlState();
     enableControl(fileStopButton_, false);
@@ -2633,26 +2599,6 @@ void NativeMainWindow::setDefaultFonts() {
     for (HWND child = GetWindow(window_, GW_CHILD); child != nullptr; child = GetWindow(child, GW_HWNDNEXT)) {
         addControlFont(child, uiFont_);
         applyClassicControlChrome(child);
-    }
-}
-
-void NativeMainWindow::applyWorkbenchEditFonts() {
-    for (HWND control : {
-             sendEdit_,
-             timedPeriodEdit_,
-             filePathEdit_,
-             scanSlaveEdit_,
-             scanStartEdit_,
-             scanEndEdit_,
-             targetLabelEdit_,
-             targetValueEdit_,
-             targetUnitEdit_,
-             toleranceEdit_,
-         }) {
-        addControlFont(control, editFont_);
-    }
-    for (HWND control : quickSendEdits_) {
-        addControlFont(control, editFont_);
     }
 }
 

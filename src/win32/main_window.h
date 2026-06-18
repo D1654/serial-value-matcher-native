@@ -65,7 +65,6 @@ private:
     void populateSerialOptionControls();
     void layoutControls(int width, int height);
     void setDefaultFonts();
-    void applyWorkbenchEditFonts();
     void refreshPorts();
     void refreshSendHistory();
     void applySelectedHistory();
@@ -257,10 +256,8 @@ private:
     HWND rxStatusText_ = nullptr;
     HWND clockStatusText_ = nullptr;
     HFONT uiFont_ = nullptr;
-    HFONT editFont_ = nullptr;
     HMODULE richEditModule_ = nullptr;
     bool ownsUiFont_ = false;
-    bool ownsEditFont_ = false;
     bool receiveLogUsesRichEdit_ = false;
     bool showLogTimestamps_ = true;
     int logThemeIndex_ = 0;
