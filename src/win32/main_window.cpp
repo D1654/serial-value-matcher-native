@@ -245,54 +245,14 @@ NativeUiMetrics nativeUiMetricsForSize(int width, int height) {
     return metrics;
 }
 
-HFONT createClassicUiFont() {
-    // SimSun's 9pt grid-fitted Chinese glyphs are clearer than forced ClearType YaHei in dense Win32 forms.
-    HFONT font = CreateFontW(
-        -12,
-        0,
-        0,
-        0,
-        FW_NORMAL,
-        FALSE,
-        FALSE,
-        FALSE,
-        GB2312_CHARSET,
-        OUT_DEFAULT_PRECIS,
-        CLIP_DEFAULT_PRECIS,
-        DEFAULT_QUALITY,
-        DEFAULT_PITCH | FF_DONTCARE,
-        L"SimSun");
-    if (font != nullptr) {
-        return font;
-    }
-
+HFONT createSystemUiFont() {
     NONCLIENTMETRICSW metrics = {};
     metrics.cbSize = sizeof(metrics);
     if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, metrics.cbSize, &metrics, 0) != FALSE) {
-        LOGFONTW fallback = metrics.lfMessageFont;
-        fallback.lfHeight = -12;
-        fallback.lfWidth = 0;
-        fallback.lfWeight = FW_NORMAL;
-        fallback.lfQuality = DEFAULT_QUALITY;
-        fallback.lfCharSet = DEFAULT_CHARSET;
-        return CreateFontIndirectW(&fallback);
+        return CreateFontIndirectW(&metrics.lfMessageFont);
     }
 
-    return CreateFontW(
-        -12,
-        0,
-        0,
-        0,
-        FW_NORMAL,
-        FALSE,
-        FALSE,
-        FALSE,
-        DEFAULT_CHARSET,
-        OUT_DEFAULT_PRECIS,
-        CLIP_DEFAULT_PRECIS,
-        DEFAULT_QUALITY,
-        DEFAULT_PITCH | FF_DONTCARE,
-        L"MS Shell Dlg 2");
+    return nullptr;
 }
 
 bool rectIsValid(const NativeRect& rect) {
@@ -1895,7 +1855,7 @@ void NativeMainWindow::createMenus() {
 }
 
 void NativeMainWindow::createControls() {
-    uiFont_ = createClassicUiFont();
+    uiFont_ = createSystemUiFont();
     ownsUiFont_ = uiFont_ != nullptr;
     if (uiFont_ == nullptr) {
         uiFont_ = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
