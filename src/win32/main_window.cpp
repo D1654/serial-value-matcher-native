@@ -2260,6 +2260,11 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int progressOffsetY = compact ? 3 : 4;
     const int progressHeight = compact ? 14 : 16;
     const int formFieldGap = compact ? 2 : 3;
+    const int workEditHeight = std::max(18, row - 2);
+    const int workEditOffsetY = std::max(0, (row - workEditHeight) / 2);
+    const auto moveWorkEdit = [&](HWND control, int editX, int editY, int editWidth) {
+        MoveWindow(control, editX, editY + workEditOffsetY, editWidth, workEditHeight, TRUE);
+    };
     MoveWindow(
         workPageBackground_,
         pageBackgroundX,
@@ -2297,7 +2302,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     y = contentY;
     const int sendButtonWidth = std::max(1, std::min(compact ? 54 : 60, pageW / 6));
     const int sendEditWidth = std::max(1, pageW - sendButtonWidth - gap);
-    MoveWindow(sendEdit_, x, y, sendEditWidth, row, TRUE);
+    moveWorkEdit(sendEdit_, x, y, sendEditWidth);
     MoveWindow(sendButton_, x + sendEditWidth + gap, y, sendButtonWidth, row, TRUE);
     const bool sendContentVisible = y + row <= pageBottom && pageW >= 96;
     const int timedX = pageX;
@@ -2307,7 +2312,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int periodEditWidth = compact ? 60 : 68;
     MoveWindow(timedSendCheck_, timedX, timedY + checkOffsetY, timedCheckWidth, 16, TRUE);
     MoveWindow(timedPeriodLabel_, timedX + timedCheckWidth + gap, timedY + labelOffsetY, periodLabelWidth, labelHeight, TRUE);
-    MoveWindow(timedPeriodEdit_, timedX + timedCheckWidth + gap + periodLabelWidth + formFieldGap, timedY, periodEditWidth, row, TRUE);
+    moveWorkEdit(timedPeriodEdit_, timedX + timedCheckWidth + gap + periodLabelWidth + formFieldGap, timedY, periodEditWidth);
 
     int quickColumns = 2;
     if (pageW >= 620) {
@@ -2328,7 +2333,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
         const int slotY = contentY + slotRow * quickSlotHeight;
         const int editWidth = std::max(1, quickColumnWidth - quickButtonWidth - gap);
         quickSlotVisible[index] = slotY + row <= pageBottom && quickColumnWidth > quickButtonWidth + gap;
-        MoveWindow(quickSendEdits_[index], slotX, slotY, editWidth, row, TRUE);
+        moveWorkEdit(quickSendEdits_[index], slotX, slotY, editWidth);
         MoveWindow(quickSendButtons_[index], slotX + editWidth + gap, slotY, quickButtonWidth, row, TRUE);
     }
 
@@ -2342,7 +2347,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int filePathWidth = std::max(1, pageW - fileLabelWidth - browseWidth - fileSendWidth - fileStopWidth - gap * 4 - formFieldGap);
     MoveWindow(filePathLabel_, x, y + labelOffsetY, fileLabelWidth, labelHeight, TRUE);
     x += fileLabelWidth + formFieldGap;
-    MoveWindow(filePathEdit_, x, y, filePathWidth, row, TRUE);
+    moveWorkEdit(filePathEdit_, x, y, filePathWidth);
     x += filePathWidth + gap;
     MoveWindow(fileBrowseButton_, x, y, browseWidth, row, TRUE);
     x += browseWidth + gap;
@@ -2382,7 +2387,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const bool scanParameterRowVisible = y + row <= pageBottom;
     MoveWindow(scanSlaveLabel_, x, y + labelOffsetY, shortLabelWidth, labelHeight, TRUE);
     x += shortLabelWidth + formFieldGap;
-    MoveWindow(scanSlaveEdit_, x, y, scanSlaveEditWidth, row, TRUE);
+    moveWorkEdit(scanSlaveEdit_, x, y, scanSlaveEditWidth);
     x += scanSlaveEditWidth + gap;
     MoveWindow(scanFunctionLabel_, x, y + labelOffsetY, scanFunctionLabelWidth, labelHeight, TRUE);
     x += scanFunctionLabelWidth + formFieldGap;
@@ -2390,11 +2395,11 @@ void NativeMainWindow::layoutControls(int width, int height) {
     x += scanFunctionWidth + gap;
     MoveWindow(scanStartLabel_, x, y + labelOffsetY, addressLabelWidth, labelHeight, TRUE);
     x += addressLabelWidth + formFieldGap;
-    MoveWindow(scanStartEdit_, x, y, addressEditWidth, row, TRUE);
+    moveWorkEdit(scanStartEdit_, x, y, addressEditWidth);
     x += addressEditWidth + gap;
     MoveWindow(scanEndLabel_, x, y + labelOffsetY, addressLabelWidth, labelHeight, TRUE);
     x += addressLabelWidth + formFieldGap;
-    MoveWindow(scanEndEdit_, x, y, addressEditWidth, row, TRUE);
+    moveWorkEdit(scanEndEdit_, x, y, addressEditWidth);
 
     y += row + gap;
     x = pageX;
@@ -2448,19 +2453,19 @@ void NativeMainWindow::layoutControls(int width, int height) {
     x += analysisSectionWidth;
     MoveWindow(targetStatic_, x, y + labelOffsetY, targetNameLabelWidth, labelHeight, TRUE);
     x += targetNameLabelWidth + formFieldGap;
-    MoveWindow(targetLabelEdit_, x, y, targetNameEditWidth, row, TRUE);
+    moveWorkEdit(targetLabelEdit_, x, y, targetNameEditWidth);
     x += targetNameEditWidth + gap;
     MoveWindow(targetValueStatic_, x, y + labelOffsetY, targetValueLabelWidth, labelHeight, TRUE);
     x += targetValueLabelWidth + formFieldGap;
-    MoveWindow(targetValueEdit_, x, y, targetValueEditWidth, row, TRUE);
+    moveWorkEdit(targetValueEdit_, x, y, targetValueEditWidth);
     x += targetValueEditWidth + gap;
     MoveWindow(targetUnitStatic_, x, y + labelOffsetY, targetUnitLabelWidth, labelHeight, TRUE);
     x += targetUnitLabelWidth + formFieldGap;
-    MoveWindow(targetUnitEdit_, x, y, targetUnitEditWidth, row, TRUE);
+    moveWorkEdit(targetUnitEdit_, x, y, targetUnitEditWidth);
     x += targetUnitEditWidth + gap;
     MoveWindow(toleranceStatic_, x, y + labelOffsetY, toleranceLabelWidth, labelHeight, TRUE);
     x += toleranceLabelWidth + formFieldGap;
-    MoveWindow(toleranceEdit_, x, y, toleranceEditWidth, row, TRUE);
+    moveWorkEdit(toleranceEdit_, x, y, toleranceEditWidth);
 
     y += row + gap;
     x = pageX;
