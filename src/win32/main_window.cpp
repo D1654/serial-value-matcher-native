@@ -298,6 +298,29 @@ HWND createSingleLineEdit(HWND parent, HINSTANCE instance, int controlId, const 
         nullptr);
 }
 
+constexpr DWORD kNativeProgressExStyle = WS_EX_CLIENTEDGE;
+constexpr DWORD kNativeProgressStyle = WS_CHILD | WS_VISIBLE;
+
+bool nativeProgressStyleHasVisibleFrame() {
+    return (kNativeProgressExStyle & WS_EX_CLIENTEDGE) == WS_EX_CLIENTEDGE;
+}
+
+HWND createProgressControl(HWND parent, HINSTANCE instance, int controlId) {
+    return CreateWindowExW(
+        kNativeProgressExStyle,
+        PROGRESS_CLASSW,
+        L"",
+        kNativeProgressStyle,
+        0,
+        0,
+        0,
+        0,
+        parent,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(controlId)),
+        instance,
+        nullptr);
+}
+
 int singleLineEditHeight(HFONT font, int row) {
     int textHeight = 12;
     HDC dc = GetDC(nullptr);
@@ -1288,6 +1311,9 @@ bool NativeMainWindow::runSelfTest() {
     if (!scanTabLayoutIsSane(554, 132)) {
         return fail("scan-tab-layout-554x132");
     }
+    if (!nativeProgressStyleHasVisibleFrame()) {
+        return fail("progress-border-style");
+    }
     if (!mainLayoutProbeIsFullyUsableAtSize(kMinTrackWidth, kMinTrackHeight)) {
         return fail("main-layout-min");
     }
@@ -1945,7 +1971,7 @@ void NativeMainWindow::createControls() {
     fileStopButton_ = CreateWindowExW(0, L"BUTTON", tx(T::FileStopButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_FILE_STOP_BUTTON), instance_, nullptr);
     fileDelayLabel_ = CreateWindowExW(0, L"STATIC", tx(T::FileDelayLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     fileDelayCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_FILE_DELAY_COMBO), instance_, nullptr);
-    fileProgress_ = CreateWindowExW(0, PROGRESS_CLASSW, L"", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_FILE_PROGRESS), instance_, nullptr);
+    fileProgress_ = createProgressControl(window_, instance_, IDC_FILE_PROGRESS);
     logCacheLabel_ = CreateWindowExW(0, L"STATIC", tx(T::LogCacheLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     logCacheCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_CACHE_COMBO), instance_, nullptr);
     pauseScrollButton_ = CreateWindowExW(0, L"BUTTON", tx(T::PauseScrollButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_PAUSE_SCROLL_BUTTON), instance_, nullptr);
@@ -1964,7 +1990,7 @@ void NativeMainWindow::createControls() {
     scanEndLabel_ = CreateWindowExW(0, L"STATIC", tx(T::ScanEndLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     scanEndEdit_ = createSingleLineEdit(window_, instance_, IDC_SCAN_END_EDIT, L"15", ES_NUMBER);
     modbusProgressLabel_ = CreateWindowExW(0, L"STATIC", tx(T::ModbusProgressLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
-    modbusProgress_ = CreateWindowExW(0, PROGRESS_CLASSW, L"", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_MODBUS_PROGRESS), instance_, nullptr);
+    modbusProgress_ = createProgressControl(window_, instance_, IDC_MODBUS_PROGRESS);
     modbusProgressText_ = CreateWindowExW(0, L"STATIC", L"0/0", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     analysisSectionLabel_ = CreateWindowExW(0, L"STATIC", tx(T::AnalysisSectionLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     targetStatic_ = CreateWindowExW(0, L"STATIC", tx(T::TargetNameLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
