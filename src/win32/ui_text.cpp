@@ -57,6 +57,7 @@ const wchar_t* uiText(TextId id) {
     case TextId::FileSendButton: return L"\u53D1\u9001\u6587\u4EF6";
     case TextId::FileStopButton: return L"\u505C\u6B62";
     case TextId::FileDelayLabel: return L"\u5206\u5757\u5EF6\u8FDF";
+    case TextId::FileProgressLabel: return L"\u53D1\u9001\u8FDB\u5EA6";
     case TextId::LogCacheLabel: return L"\u65E5\u5FD7\u7F13\u5B58";
     case TextId::LogFormatLabel: return L"\u663E\u793A";
     case TextId::LogEncodingLabel: return L"\u7F16\u7801";

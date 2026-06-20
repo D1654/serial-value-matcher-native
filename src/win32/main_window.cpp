@@ -2096,6 +2096,7 @@ void NativeMainWindow::createControls() {
     fileStopButton_ = CreateWindowExW(0, L"BUTTON", tx(T::FileStopButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_FILE_STOP_BUTTON), instance_, nullptr);
     fileDelayLabel_ = CreateWindowExW(0, L"STATIC", tx(T::FileDelayLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     fileDelayCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_FILE_DELAY_COMBO), instance_, nullptr);
+    fileProgressLabel_ = CreateWindowExW(0, L"STATIC", tx(T::FileProgressLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     fileProgress_ = createProgressControl(window_, instance_, IDC_FILE_PROGRESS);
     logCacheLabel_ = CreateWindowExW(0, L"STATIC", tx(T::LogCacheLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     logCacheCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_CACHE_COMBO), instance_, nullptr);
@@ -2358,6 +2359,10 @@ void NativeMainWindow::layoutControls(int width, int height) {
     MoveWindow(rtsCheck_, x + sideInnerWidth / 2, y + 2, sideInnerWidth / 2, row - 2, TRUE);
     y += row;
     MoveWindow(autoReconnectCheck_, x, y + 2, sideInnerWidth, row - 2, TRUE);
+    y += row + gap;
+    const bool sidePauseVisible = y + row <= statusY - margin;
+    MoveWindow(pauseScrollButton_, x, y, sideInnerWidth, row, TRUE);
+    showControl(pauseScrollButton_, sidePauseVisible);
 
     const int logTitleWidth = compact ? 52 : 58;
     const bool showLogTitle = mainWidth >= 520;
@@ -2504,11 +2509,14 @@ void NativeMainWindow::layoutControls(int width, int height) {
     x = pageX;
     const int delayLabelWidth = compact ? 60 : 68;
     const int delayComboWidth = compact ? 66 : 74;
+    const int fileProgressLabelWidth = compact ? 60 : 68;
     const bool fileSecondRowVisible = y + row <= pageBottom;
     MoveWindow(fileDelayLabel_, x, y + labelOffsetY, delayLabelWidth, labelHeight, TRUE);
     x += delayLabelWidth + formFieldGap;
     MoveWindow(fileDelayCombo_, x, y, delayComboWidth, 160, TRUE);
     x += delayComboWidth + gap;
+    MoveWindow(fileProgressLabel_, x, y + labelOffsetY, fileProgressLabelWidth, labelHeight, TRUE);
+    x += fileProgressLabelWidth + formFieldGap;
     moveTopControl(fileProgress_, x, y + progressOffsetY, std::max(1, pageX + pageW - x), progressHeight);
 
     ShowWindow(workflowHint_, SW_HIDE);
@@ -2646,14 +2654,11 @@ void NativeMainWindow::layoutControls(int width, int height) {
     x = pageX;
     const int settingsLabelWidth = compact ? 58 : 66;
     const int settingsComboWidth = compact ? 68 : 78;
-    const int pauseButtonWidth = compact ? 78 : 88;
     const bool settingsRowVisible = y + row <= pageBottom;
     MoveWindow(logCacheLabel_, x, y + labelOffsetY, settingsLabelWidth, labelHeight, TRUE);
     x += settingsLabelWidth + formFieldGap;
     MoveWindow(logCacheCombo_, x, y, settingsComboWidth, 260, TRUE);
     x += settingsComboWidth + gap;
-    MoveWindow(pauseScrollButton_, x, y, pauseButtonWidth, row, TRUE);
-    x += pauseButtonWidth + gap;
     MoveWindow(clearButton_, x, y, smallButtonWidth, row, TRUE);
 
     if (pageBottom <= pageY) {
@@ -2689,6 +2694,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
         showControl(fileStopButton_, fileFirstRowVisible);
         showControl(fileDelayLabel_, fileSecondRowVisible);
         showControl(fileDelayCombo_, fileSecondRowVisible);
+        showControl(fileProgressLabel_, fileSecondRowVisible);
         showControl(fileProgress_, fileSecondRowVisible);
     } else if (activeTab == 3) {
         showControl(scanSectionLabel_, scanSectionVisible);
@@ -2721,7 +2727,6 @@ void NativeMainWindow::layoutControls(int width, int height) {
     } else if (activeTab == 4) {
         showControl(logCacheLabel_, settingsRowVisible);
         showControl(logCacheCombo_, settingsRowVisible);
-        showControl(pauseScrollButton_, settingsRowVisible);
         showControl(clearButton_, settingsRowVisible);
     }
     RECT workRect = {workInnerX, tabsY, workInnerX + workInnerWidth, tabsY + tabsHeight};
@@ -2772,6 +2777,7 @@ void NativeMainWindow::hideWorkbenchTabControls() {
              fileStopButton_,
              fileDelayLabel_,
              fileDelayCombo_,
+             fileProgressLabel_,
              fileProgress_,
              workflowHint_,
              scanSectionLabel_,
@@ -2803,7 +2809,6 @@ void NativeMainWindow::hideWorkbenchTabControls() {
              exportReportButton_,
              logCacheLabel_,
              logCacheCombo_,
-             pauseScrollButton_,
              clearButton_,
          }) {
         showControl(control, false);
@@ -2850,7 +2855,7 @@ void NativeMainWindow::updateWorkbenchTab() {
         showControl(control, quickVisible);
     }
 
-    for (HWND control : {filePathLabel_, filePathEdit_, fileBrowseButton_, fileSendButton_, fileStopButton_, fileDelayLabel_, fileDelayCombo_, fileProgress_}) {
+    for (HWND control : {filePathLabel_, filePathEdit_, fileBrowseButton_, fileSendButton_, fileStopButton_, fileDelayLabel_, fileDelayCombo_, fileProgressLabel_, fileProgress_}) {
         showControl(control, fileVisible);
     }
 
@@ -2886,7 +2891,7 @@ void NativeMainWindow::updateWorkbenchTab() {
         showControl(control, scanVisible);
     }
 
-    for (HWND control : {logCacheLabel_, logCacheCombo_, pauseScrollButton_, clearButton_}) {
+    for (HWND control : {logCacheLabel_, logCacheCombo_, clearButton_}) {
         showControl(control, settingsVisible);
     }
 }

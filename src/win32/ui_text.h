@@ -58,6 +58,7 @@ enum class TextId {
     FileSendButton,
     FileStopButton,
     FileDelayLabel,
+    FileProgressLabel,
     LogCacheLabel,
     LogFormatLabel,
     LogEncodingLabel,

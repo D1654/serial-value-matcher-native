@@ -218,6 +218,7 @@ private:
     HWND fileStopButton_ = nullptr;
     HWND fileDelayLabel_ = nullptr;
     HWND fileDelayCombo_ = nullptr;
+    HWND fileProgressLabel_ = nullptr;
     HWND fileProgress_ = nullptr;
     HWND logCacheLabel_ = nullptr;
     HWND logCacheCombo_ = nullptr;
