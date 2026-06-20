@@ -2368,19 +2368,22 @@ void NativeMainWindow::layoutControls(int width, int height) {
     y += row + (compact ? 5 : 6);
     const int sideSeparatorHeight = 2;
     const int sideActionGap = compact ? 5 : 6;
-    const bool sidePauseVisible = y + sideSeparatorHeight + sideActionGap + row <= statusY - margin;
+    const bool sideActionVisible = y + sideSeparatorHeight + sideActionGap + row <= statusY - margin;
     MoveWindow(sideActionSeparator_, x, y, sideInnerWidth, sideSeparatorHeight, TRUE);
-    showControl(sideActionSeparator_, sidePauseVisible);
+    showControl(sideActionSeparator_, sideActionVisible);
     y += sideSeparatorHeight + sideActionGap;
-    MoveWindow(pauseScrollButton_, x, y, std::max(1, (sideInnerWidth - gap) / 2), row, TRUE);
-    showControl(pauseScrollButton_, sidePauseVisible);
+    const int sideActionButtonWidth = std::max(1, (sideInnerWidth - gap) / 2);
+    MoveWindow(pauseScrollButton_, x, y, sideActionButtonWidth, row, TRUE);
+    MoveWindow(clearButton_, x + sideActionButtonWidth + gap, y, sideActionButtonWidth, row, TRUE);
+    showControl(pauseScrollButton_, sideActionVisible);
+    showControl(clearButton_, sideActionVisible);
     y += row + sideActionGap;
     const int sideHelpMinimumHeight = compact ? 86 : 100;
     const int sideHelpDesiredHeight = compact ? 112 : 126;
     const int sideHelpBottom = statusY - margin;
     const int sideHelpTopLimit = y + sideSeparatorHeight + sideActionGap;
     const int sideHelpAvailableHeight = sideHelpBottom - sideHelpTopLimit;
-    const bool sideHelpVisible = sidePauseVisible && sideInnerWidth >= 108 && sideHelpAvailableHeight >= sideHelpMinimumHeight;
+    const bool sideHelpVisible = sideActionVisible && sideInnerWidth >= 108 && sideHelpAvailableHeight >= sideHelpMinimumHeight;
     MoveWindow(sideHelpSeparator_, x, y, sideInnerWidth, sideSeparatorHeight, TRUE);
     showControl(sideHelpSeparator_, sideHelpVisible);
     if (sideHelpVisible) {
@@ -2700,8 +2703,6 @@ void NativeMainWindow::layoutControls(int width, int height) {
     MoveWindow(logCacheLabel_, x, y + labelOffsetY, settingsLabelWidth, labelHeight, TRUE);
     x += settingsLabelWidth + formFieldGap;
     MoveWindow(logCacheCombo_, x, y, settingsComboWidth, 260, TRUE);
-    x += settingsComboWidth + gap;
-    MoveWindow(clearButton_, x, y, smallButtonWidth, row, TRUE);
 
     if (pageBottom <= pageY) {
         ShowWindow(workTabs_, SW_HIDE);
@@ -2769,7 +2770,6 @@ void NativeMainWindow::layoutControls(int width, int height) {
     } else if (activeTab == 4) {
         showControl(logCacheLabel_, settingsRowVisible);
         showControl(logCacheCombo_, settingsRowVisible);
-        showControl(clearButton_, settingsRowVisible);
     }
     RECT workRect = {workInnerX, tabsY, workInnerX + workInnerWidth, tabsY + tabsHeight};
     RedrawWindow(window_, &workRect, nullptr, RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN);
@@ -2851,7 +2851,6 @@ void NativeMainWindow::hideWorkbenchTabControls() {
              exportReportButton_,
              logCacheLabel_,
              logCacheCombo_,
-             clearButton_,
          }) {
         showControl(control, false);
     }
@@ -2962,7 +2961,7 @@ void NativeMainWindow::updateWorkbenchTab() {
         showControl(control, scanVisible);
     }
 
-    for (HWND control : {logCacheLabel_, logCacheCombo_, clearButton_}) {
+    for (HWND control : {logCacheLabel_, logCacheCombo_}) {
         showControl(control, settingsVisible);
     }
 }
