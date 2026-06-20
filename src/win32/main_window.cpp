@@ -2524,11 +2524,13 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int addressLabelWidth = compact ? 52 : 58;
     const int addressEditWidth = compact ? 46 : 52;
     const int scanFunctionLabelWidth = compact ? 32 : 36;
+    const int modbusButtonWidth = compact ? 94 : 102;
     const int fixedScanRowWidth =
         shortLabelWidth + scanSlaveEditWidth
         + scanFunctionLabelWidth
         + addressLabelWidth + addressEditWidth
         + addressLabelWidth + addressEditWidth
+        + modbusButtonWidth
         + gap * 4
         + formFieldGap * 4;
     const int scanFunctionDesiredWidth = compact ? 144 : 168;
@@ -2549,6 +2551,8 @@ void NativeMainWindow::layoutControls(int width, int height) {
     MoveWindow(scanEndLabel_, x, y + labelOffsetY, addressLabelWidth, labelHeight, TRUE);
     x += addressLabelWidth + formFieldGap;
     moveWorkEdit(scanEndEdit_, x, y, addressEditWidth);
+    x += addressEditWidth + gap;
+    MoveWindow(modbusButton_, x, y, modbusButtonWidth, row, TRUE);
 
     y += row + scanBlockGap;
     x = pageX;
@@ -2618,24 +2622,20 @@ void NativeMainWindow::layoutControls(int width, int height) {
     x = pageX;
     const bool scanCandidateRowVisible = y + row <= pageBottom;
     const int candidateLabelWidth = compact ? 32 : 36;
-    const int modbusButtonWidth = compact ? 94 : 102;
     const int analysisButtonWidth = compact ? 66 : 76;
     const int ruleButtonWidth = compact ? 66 : 76;
     const int exportButtonWidth = compact ? 66 : 76;
     const int candidateWidth = std::max(1, pageW
         - candidateLabelWidth
-        - modbusButtonWidth
         - analysisButtonWidth
         - ruleButtonWidth
         - exportButtonWidth
-        - gap * 5
+        - gap * 3
         - formFieldGap);
     MoveWindow(candidateStatic_, x, y + labelOffsetY, candidateLabelWidth, labelHeight, TRUE);
     x += candidateLabelWidth + formFieldGap;
     MoveWindow(candidateCombo_, x, y, candidateWidth, 180, TRUE);
     x += candidateWidth + gap;
-    MoveWindow(modbusButton_, x, y, modbusButtonWidth, row, TRUE);
-    x += modbusButtonWidth + gap;
     MoveWindow(analysisButton_, x, y, analysisButtonWidth, row, TRUE);
     x += analysisButtonWidth + gap;
     MoveWindow(ruleVerifyButton_, x, y, ruleButtonWidth, row, TRUE);
@@ -2700,6 +2700,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
         showControl(scanStartEdit_, scanParameterRowVisible);
         showControl(scanEndLabel_, scanParameterRowVisible);
         showControl(scanEndEdit_, scanParameterRowVisible);
+        showControl(modbusButton_, scanParameterRowVisible);
         showControl(modbusProgressLabel_, scanProgressRowVisible);
         showControl(modbusProgress_, scanProgressRowVisible);
         showControl(modbusProgressText_, scanProgressRowVisible);
@@ -2714,7 +2715,6 @@ void NativeMainWindow::layoutControls(int width, int height) {
         showControl(toleranceEdit_, scanTargetRowVisible);
         showControl(candidateStatic_, scanCandidateRowVisible);
         showControl(candidateCombo_, scanCandidateRowVisible);
-        showControl(modbusButton_, scanCandidateRowVisible);
         showControl(analysisButton_, scanCandidateRowVisible);
         showControl(ruleVerifyButton_, scanCandidateRowVisible);
         showControl(exportReportButton_, scanCandidateRowVisible);
