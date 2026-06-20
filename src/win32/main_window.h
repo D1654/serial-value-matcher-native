@@ -222,6 +222,7 @@ private:
     HWND fileProgress_ = nullptr;
     HWND logCacheLabel_ = nullptr;
     HWND logCacheCombo_ = nullptr;
+    HWND sideActionSeparator_ = nullptr;
     HWND pauseScrollButton_ = nullptr;
     HWND clearButton_ = nullptr;
     HWND modbusButton_ = nullptr;

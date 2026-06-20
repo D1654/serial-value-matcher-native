@@ -2100,6 +2100,7 @@ void NativeMainWindow::createControls() {
     fileProgress_ = createProgressControl(window_, instance_, IDC_FILE_PROGRESS);
     logCacheLabel_ = CreateWindowExW(0, L"STATIC", tx(T::LogCacheLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     logCacheCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_CACHE_COMBO), instance_, nullptr);
+    sideActionSeparator_ = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     pauseScrollButton_ = CreateWindowExW(0, L"BUTTON", tx(T::PauseScrollButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_PAUSE_SCROLL_BUTTON), instance_, nullptr);
     clearButton_ = CreateWindowExW(0, L"BUTTON", tx(T::ClearButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_CLEAR_BUTTON), instance_, nullptr);
     modbusButton_ = CreateWindowExW(0, L"BUTTON", tx(T::ModbusScanButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_MODBUS_BUTTON), instance_, nullptr);
@@ -2359,9 +2360,14 @@ void NativeMainWindow::layoutControls(int width, int height) {
     MoveWindow(rtsCheck_, x + sideInnerWidth / 2, y + 2, sideInnerWidth / 2, row - 2, TRUE);
     y += row;
     MoveWindow(autoReconnectCheck_, x, y + 2, sideInnerWidth, row - 2, TRUE);
-    y += row + gap;
-    const bool sidePauseVisible = y + row <= statusY - margin;
-    MoveWindow(pauseScrollButton_, x, y, sideInnerWidth, row, TRUE);
+    y += row + (compact ? 5 : 6);
+    const int sideSeparatorHeight = 2;
+    const int sideActionGap = compact ? 5 : 6;
+    const bool sidePauseVisible = y + sideSeparatorHeight + sideActionGap + row <= statusY - margin;
+    MoveWindow(sideActionSeparator_, x, y, sideInnerWidth, sideSeparatorHeight, TRUE);
+    showControl(sideActionSeparator_, sidePauseVisible);
+    y += sideSeparatorHeight + sideActionGap;
+    MoveWindow(pauseScrollButton_, x, y, std::max(1, (sideInnerWidth - gap) / 2), row, TRUE);
     showControl(pauseScrollButton_, sidePauseVisible);
 
     const int logTitleWidth = compact ? 52 : 58;
