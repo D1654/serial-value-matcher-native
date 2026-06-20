@@ -2327,6 +2327,8 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int logHeight = std::max(1, statusY - logY - workHeight - sideGap);
     const int sendY = logY + logHeight + sideGap;
     const int sendHeight = std::max(1, statusY - sendY - 2);
+    const int tabsY = sendY;
+    const int tabsHeight = std::max(84, sendHeight);
 
     showControl(connectionGroup_, false);
     showControl(sendGroup_, false);
@@ -2365,30 +2367,32 @@ void NativeMainWindow::layoutControls(int width, int height) {
     MoveWindow(rtsCheck_, x + sideInnerWidth / 2, y + 2, sideInnerWidth / 2, row - 2, TRUE);
     y += row;
     MoveWindow(autoReconnectCheck_, x, y + 2, sideInnerWidth, row - 2, TRUE);
-    y += row + (compact ? 5 : 6);
+    const int sideControlBottom = y + row;
     const int sideSeparatorHeight = 2;
-    const int sideActionGap = compact ? 5 : 6;
-    const bool sideActionVisible = y + sideSeparatorHeight + sideActionGap + row <= statusY - margin;
-    MoveWindow(sideActionSeparator_, x, y, sideInnerWidth, sideSeparatorHeight, TRUE);
+    const int sideActionGap = compact ? 2 : 4;
+    const int sideHelpMinimumHeight = compact ? 86 : 100;
+    const int sideActionSeparatorY = sideControlBottom + sideActionGap;
+    const int sideActionButtonY = sideActionSeparatorY + sideSeparatorHeight + sideActionGap;
+    const int sideHelpSeparatorY = sideActionButtonY + row + sideActionGap;
+    const int sideHelpY = std::max(tabsY, sideHelpSeparatorY + sideSeparatorHeight + sideActionGap);
+    const int sideHelpHeight = std::min(tabsHeight, std::max(1, statusY - sideHelpY - 2));
+    const bool sideActionVisible = sideInnerWidth >= 108
+        && sideActionButtonY + row <= statusY - margin;
+    MoveWindow(sideActionSeparator_, x, sideActionSeparatorY, sideInnerWidth, sideSeparatorHeight, TRUE);
     showControl(sideActionSeparator_, sideActionVisible);
-    y += sideSeparatorHeight + sideActionGap;
     const int sideActionButtonWidth = std::max(1, (sideInnerWidth - gap) / 2);
-    MoveWindow(pauseScrollButton_, x, y, sideActionButtonWidth, row, TRUE);
-    MoveWindow(clearButton_, x + sideActionButtonWidth + gap, y, sideActionButtonWidth, row, TRUE);
+    MoveWindow(pauseScrollButton_, x, sideActionButtonY, sideActionButtonWidth, row, TRUE);
+    MoveWindow(clearButton_, x + sideActionButtonWidth + gap, sideActionButtonY, sideActionButtonWidth, row, TRUE);
     showControl(pauseScrollButton_, sideActionVisible);
     showControl(clearButton_, sideActionVisible);
-    y += row + sideActionGap;
-    const int sideHelpMinimumHeight = compact ? 86 : 100;
-    const int sideHelpDesiredHeight = compact ? 112 : 126;
-    const int sideHelpBottom = statusY - margin;
-    const int sideHelpTopLimit = y + sideSeparatorHeight + sideActionGap;
-    const int sideHelpAvailableHeight = sideHelpBottom - sideHelpTopLimit;
-    const bool sideHelpVisible = sideActionVisible && sideInnerWidth >= 108 && sideHelpAvailableHeight >= sideHelpMinimumHeight;
-    MoveWindow(sideHelpSeparator_, x, y, sideInnerWidth, sideSeparatorHeight, TRUE);
+    const bool sideHelpVisible = sideActionVisible
+        && sideHelpHeight >= sideHelpMinimumHeight
+        && sideHelpY + sideHelpHeight <= statusY;
+    MoveWindow(sideHelpSeparator_, x, sideHelpSeparatorY, sideInnerWidth, sideSeparatorHeight, TRUE);
     showControl(sideHelpSeparator_, sideHelpVisible);
     if (sideHelpVisible) {
-        const int helpHeight = std::min(sideHelpDesiredHeight, sideHelpAvailableHeight);
-        const int helpY = sideHelpBottom - helpHeight;
+        const int helpHeight = sideHelpHeight;
+        const int helpY = sideHelpY;
         const int helpPad = compact ? 6 : 7;
         const int helpTitleHeight = compact ? 17 : 18;
         MoveWindow(sideHelpFrame_, x, helpY, sideInnerWidth, helpHeight, TRUE);
@@ -2401,9 +2405,9 @@ void NativeMainWindow::layoutControls(int width, int height) {
             std::max(1, helpHeight - helpPad * 2 - helpTitleHeight - (compact ? 3 : 4)),
             TRUE);
     } else {
-        MoveWindow(sideHelpFrame_, x, y, 1, 1, TRUE);
-        MoveWindow(sideHelpTitle_, x, y, 1, 1, TRUE);
-        MoveWindow(sideHelpText_, x, y, 1, 1, TRUE);
+        MoveWindow(sideHelpFrame_, x, sideHelpY, 1, 1, TRUE);
+        MoveWindow(sideHelpTitle_, x, sideHelpY, 1, 1, TRUE);
+        MoveWindow(sideHelpText_, x, sideHelpY, 1, 1, TRUE);
     }
     showControl(sideHelpFrame_, sideHelpVisible);
     showControl(sideHelpTitle_, sideHelpVisible);
@@ -2435,8 +2439,6 @@ void NativeMainWindow::layoutControls(int width, int height) {
     showControl(workPanelTitle_, false);
     const int workInnerX = mainX;
     const int workInnerWidth = mainWidth;
-    const int tabsY = sendY;
-    const int tabsHeight = std::max(84, sendHeight);
     MoveWindow(workTabs_, workInnerX, tabsY, workInnerWidth, tabsHeight, TRUE);
 
     RECT tabDisplayRect = {0, 0, workInnerWidth, tabsHeight};
