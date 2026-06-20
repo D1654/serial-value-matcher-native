@@ -493,11 +493,11 @@ SendControlLayout calculateSendControlLayout(int x, int y, int innerWidth, int r
 LogToolbarLayout calculateLogToolbarLayout(int x, int y, int innerWidth, int row, int gap, int preferredActionWidth) {
     const bool compact = innerWidth < 620;
     const int usableWidth = std::max(7, innerWidth - gap * 6);
-    const int formatPreferredWidth = compact ? 128 : 140;
-    const int encodingPreferredWidth = compact ? 70 : 78;
-    const int formatMinimumWidth = compact ? 112 : 124;
-    const int encodingMinimumWidth = compact ? 64 : 70;
-    const int editMinimumWidth = compact ? 28 : 34;
+    const int formatPreferredWidth = compact ? 86 : 94;
+    const int encodingPreferredWidth = compact ? 60 : 66;
+    const int formatMinimumWidth = compact ? 80 : 88;
+    const int encodingMinimumWidth = compact ? 56 : 60;
+    const int editMinimumWidth = compact ? 34 : 38;
     const int actionBudget = std::max(
         1,
         (usableWidth - formatMinimumWidth - encodingMinimumWidth - editMinimumWidth * 2) / 3);
