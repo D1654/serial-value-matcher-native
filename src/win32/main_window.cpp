@@ -2102,6 +2102,10 @@ void NativeMainWindow::createControls() {
     logCacheCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_CACHE_COMBO), instance_, nullptr);
     sideActionSeparator_ = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     pauseScrollButton_ = CreateWindowExW(0, L"BUTTON", tx(T::PauseScrollButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_PAUSE_SCROLL_BUTTON), instance_, nullptr);
+    sideHelpSeparator_ = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    sideHelpFrame_ = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_ETCHEDFRAME, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    sideHelpTitle_ = CreateWindowExW(0, L"STATIC", tx(T::SideHelpTitle), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    sideHelpText_ = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     clearButton_ = CreateWindowExW(0, L"BUTTON", tx(T::ClearButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_CLEAR_BUTTON), instance_, nullptr);
     modbusButton_ = CreateWindowExW(0, L"BUTTON", tx(T::ModbusScanButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_MODBUS_BUTTON), instance_, nullptr);
     analysisButton_ = CreateWindowExW(0, L"BUTTON", tx(T::AnalysisButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_ANALYSIS_BUTTON), instance_, nullptr);
@@ -2313,6 +2317,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     if (activeTab < 0) {
         activeTab = 0;
     }
+    updateSideHelp(activeTab);
 
     const int desiredWorkHeight = metrics.desiredWorkHeight;
     const int minimumLogHeight = metrics.minimumLogHeight;
@@ -2369,6 +2374,37 @@ void NativeMainWindow::layoutControls(int width, int height) {
     y += sideSeparatorHeight + sideActionGap;
     MoveWindow(pauseScrollButton_, x, y, std::max(1, (sideInnerWidth - gap) / 2), row, TRUE);
     showControl(pauseScrollButton_, sidePauseVisible);
+    y += row + sideActionGap;
+    const int sideHelpMinimumHeight = compact ? 86 : 100;
+    const int sideHelpDesiredHeight = compact ? 112 : 126;
+    const int sideHelpBottom = statusY - margin;
+    const int sideHelpTopLimit = y + sideSeparatorHeight + sideActionGap;
+    const int sideHelpAvailableHeight = sideHelpBottom - sideHelpTopLimit;
+    const bool sideHelpVisible = sidePauseVisible && sideInnerWidth >= 108 && sideHelpAvailableHeight >= sideHelpMinimumHeight;
+    MoveWindow(sideHelpSeparator_, x, y, sideInnerWidth, sideSeparatorHeight, TRUE);
+    showControl(sideHelpSeparator_, sideHelpVisible);
+    if (sideHelpVisible) {
+        const int helpHeight = std::min(sideHelpDesiredHeight, sideHelpAvailableHeight);
+        const int helpY = sideHelpBottom - helpHeight;
+        const int helpPad = compact ? 6 : 7;
+        const int helpTitleHeight = compact ? 17 : 18;
+        MoveWindow(sideHelpFrame_, x, helpY, sideInnerWidth, helpHeight, TRUE);
+        MoveWindow(sideHelpTitle_, x + helpPad, helpY + helpPad, std::max(1, sideInnerWidth - helpPad * 2), helpTitleHeight, TRUE);
+        MoveWindow(
+            sideHelpText_,
+            x + helpPad,
+            helpY + helpPad + helpTitleHeight + (compact ? 3 : 4),
+            std::max(1, sideInnerWidth - helpPad * 2),
+            std::max(1, helpHeight - helpPad * 2 - helpTitleHeight - (compact ? 3 : 4)),
+            TRUE);
+    } else {
+        MoveWindow(sideHelpFrame_, x, y, 1, 1, TRUE);
+        MoveWindow(sideHelpTitle_, x, y, 1, 1, TRUE);
+        MoveWindow(sideHelpText_, x, y, 1, 1, TRUE);
+    }
+    showControl(sideHelpFrame_, sideHelpVisible);
+    showControl(sideHelpTitle_, sideHelpVisible);
+    showControl(sideHelpText_, sideHelpVisible);
 
     const int logTitleWidth = compact ? 52 : 58;
     const bool showLogTitle = mainWidth >= 520;
@@ -2827,11 +2863,40 @@ void NativeMainWindow::hideWorkbenchTabControls() {
     }
 }
 
+void NativeMainWindow::updateSideHelp(int tabIndex) {
+    if (sideHelpTitle_ == nullptr || sideHelpText_ == nullptr) {
+        return;
+    }
+
+    TextId helpId = T::SideHelpSingle;
+    switch (tabIndex) {
+    case 1:
+        helpId = T::SideHelpQuick;
+        break;
+    case 2:
+        helpId = T::SideHelpFile;
+        break;
+    case 3:
+        helpId = T::SideHelpScan;
+        break;
+    case 4:
+        helpId = T::SideHelpSettings;
+        break;
+    default:
+        helpId = T::SideHelpSingle;
+        break;
+    }
+
+    SetWindowTextW(sideHelpTitle_, tx(T::SideHelpTitle));
+    SetWindowTextW(sideHelpText_, tx(helpId));
+}
+
 void NativeMainWindow::updateWorkbenchTab() {
     int tabIndex = static_cast<int>(TabCtrl_GetCurSel(workTabs_));
     if (tabIndex < 0) {
         tabIndex = 0;
     }
+    updateSideHelp(tabIndex);
 
     hideWorkbenchTabControls();
     const bool singleVisible = tabIndex == 0;

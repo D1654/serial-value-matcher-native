@@ -149,6 +149,7 @@ private:
     void applyLogCacheLimit(std::size_t visibleCharLimit);
     void updateLogTimestampMenu();
     void hideWorkbenchTabControls();
+    void updateSideHelp(int tabIndex);
     std::filesystem::path defaultStoreDirectory() const;
     void saveRawEvent(std::string direction, const std::vector<std::uint8_t>& payload);
     bool saveRawEvents(std::vector<native_storage::RawIoEvent> events);
@@ -224,6 +225,10 @@ private:
     HWND logCacheCombo_ = nullptr;
     HWND sideActionSeparator_ = nullptr;
     HWND pauseScrollButton_ = nullptr;
+    HWND sideHelpSeparator_ = nullptr;
+    HWND sideHelpFrame_ = nullptr;
+    HWND sideHelpTitle_ = nullptr;
+    HWND sideHelpText_ = nullptr;
     HWND clearButton_ = nullptr;
     HWND modbusButton_ = nullptr;
     HWND analysisButton_ = nullptr;
