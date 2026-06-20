@@ -493,12 +493,38 @@ SendControlLayout calculateSendControlLayout(int x, int y, int innerWidth, int r
 LogToolbarLayout calculateLogToolbarLayout(int x, int y, int innerWidth, int row, int gap, int preferredActionWidth) {
     const bool compact = innerWidth < 620;
     const int usableWidth = std::max(7, innerWidth - gap * 6);
-    const int formatWidth = std::max(1, std::min(compact ? 110 : 120, usableWidth * 25 / 100));
-    const int encodingWidth = std::max(1, std::min(compact ? 54 : 64, usableWidth * 12 / 100));
-    const int actionBudget = std::max(1, (usableWidth - formatWidth - encodingWidth - 2) / 3);
+    const int formatPreferredWidth = compact ? 128 : 140;
+    const int encodingPreferredWidth = compact ? 70 : 78;
+    const int formatMinimumWidth = compact ? 112 : 124;
+    const int encodingMinimumWidth = compact ? 64 : 70;
+    const int editMinimumWidth = compact ? 28 : 34;
+    const int actionBudget = std::max(
+        1,
+        (usableWidth - formatMinimumWidth - encodingMinimumWidth - editMinimumWidth * 2) / 3);
     const int actionWidth = std::max(1, std::min(preferredActionWidth, actionBudget));
+    const int selectorBudget = usableWidth - actionWidth * 3 - editMinimumWidth * 2;
+    int formatWidth = formatPreferredWidth;
+    int encodingWidth = encodingPreferredWidth;
+    if (selectorBudget < formatWidth + encodingWidth) {
+        int deficit = formatWidth + encodingWidth - selectorBudget;
+        const int formatShrink = std::min(deficit, formatWidth - formatMinimumWidth);
+        formatWidth -= formatShrink;
+        deficit -= formatShrink;
+        const int encodingShrink = std::min(deficit, encodingWidth - encodingMinimumWidth);
+        encodingWidth -= encodingShrink;
+        deficit -= encodingShrink;
+        if (deficit > 0) {
+            const int tightSelectorBudget = std::max(2, selectorBudget);
+            formatWidth = std::max(1, tightSelectorBudget * 64 / 100);
+            encodingWidth = std::max(1, tightSelectorBudget - formatWidth);
+        }
+    }
     const int variableWidth = std::max(2, usableWidth - formatWidth - encodingWidth - actionWidth * 3);
-    const int searchWidth = std::clamp(variableWidth / 3, 1, variableWidth - 1);
+    const int searchPreferredWidth = compact ? 96 : 110;
+    const int searchBaseWidth = std::min(searchPreferredWidth, variableWidth * 42 / 100);
+    const int searchWidth = variableWidth >= editMinimumWidth * 2
+        ? std::clamp(searchBaseWidth, editMinimumWidth, variableWidth - editMinimumWidth)
+        : std::clamp(searchBaseWidth, 1, variableWidth - 1);
     const int filterWidth = variableWidth - searchWidth;
 
     LogToolbarLayout layout;

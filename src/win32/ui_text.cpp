@@ -112,11 +112,11 @@ const wchar_t* uiText(TextId id) {
     case TextId::GbkEncoding: return L"GBK";
     case TextId::AnsiEncoding: return L"ANSI";
     case TextId::AsciiEncoding: return L"ASCII";
-    case TextId::LogFormatHex: return L"\u65E5\u5FD7\uFF1A\u5341\u516D\u8FDB\u5236";
-    case TextId::LogFormatDecimal: return L"\u65E5\u5FD7\uFF1A\u5341\u8FDB\u5236";
-    case TextId::LogFormatBinary: return L"\u65E5\u5FD7\uFF1A\u4E8C\u8FDB\u5236";
-    case TextId::LogFormatText: return L"\u65E5\u5FD7\uFF1A\u6587\u672C";
-    case TextId::LogFormatHexText: return L"\u65E5\u5FD7\uFF1AHEX+\u6587\u672C";
+    case TextId::LogFormatHex: return L"\u5341\u516D\u8FDB\u5236";
+    case TextId::LogFormatDecimal: return L"\u5341\u8FDB\u5236";
+    case TextId::LogFormatBinary: return L"\u4E8C\u8FDB\u5236";
+    case TextId::LogFormatText: return L"\u6587\u672C";
+    case TextId::LogFormatHexText: return L"HEX+\u6587\u672C";
     case TextId::NoLineEnding: return L"\u65E0\u884C\u5C3E";
     case TextId::Fc03Holding: return L"FC03 \u4FDD\u6301\u5BC4\u5B58\u5668";
     case TextId::Fc04Input: return L"FC04 \u8F93\u5165\u5BC4\u5B58\u5668";
