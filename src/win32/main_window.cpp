@@ -2391,11 +2391,12 @@ void NativeMainWindow::layoutControls(int width, int height) {
 
     RECT tabDisplayRect = {0, 0, workInnerWidth, tabsHeight};
     TabCtrl_AdjustRect(workTabs_, FALSE, &tabDisplayRect);
-    const int pageInset = compact ? 3 : 4;
-    const int pageX = workInnerX + std::max(0L, tabDisplayRect.left) + pageInset;
-    const int pageY = tabsY + std::max(0L, tabDisplayRect.top) + pageInset;
-    const int pageRight = workInnerX + std::min<LONG>(workInnerWidth, tabDisplayRect.right) - pageInset;
-    const int pageBottom = tabsY + std::min<LONG>(tabsHeight, tabDisplayRect.bottom) - pageInset;
+    const int pageHorizontalInset = compact ? 7 : 6;
+    const int pageVerticalInset = compact ? 3 : 4;
+    const int pageX = workInnerX + std::max(0L, tabDisplayRect.left) + pageHorizontalInset;
+    const int pageY = tabsY + std::max(0L, tabDisplayRect.top) + pageVerticalInset;
+    const int pageRight = workInnerX + std::min<LONG>(workInnerWidth, tabDisplayRect.right) - pageHorizontalInset;
+    const int pageBottom = tabsY + std::min<LONG>(tabsHeight, tabDisplayRect.bottom) - pageVerticalInset;
     const int pageBackgroundX = workInnerX + std::max(0L, tabDisplayRect.left);
     const int pageBackgroundY = tabsY + std::max(0L, tabDisplayRect.top);
     const int pageBackgroundRight = workInnerX + std::min<LONG>(workInnerWidth, tabDisplayRect.right);
