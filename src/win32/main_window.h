@@ -15,6 +15,7 @@
 #include "win32/native_log_model.h"
 #include "win32/native_modbus_scan_worker.h"
 #include "win32/native_serial_io_state.h"
+#include "win32/native_ui_preferences.h"
 #include "win32/win32_serial_port.h"
 
 #include <array>
@@ -289,7 +290,7 @@ private:
     std::uint64_t workbenchAppliedRevision_ = 0;
     std::uint64_t workbenchTabApplyCount_ = 0;
     int logThemeIndex_ = 0;
-    std::size_t logVisibleCharLimit_ = 350000;
+    std::size_t logVisibleCharLimit_ = kNativeDefaultLogVisibleChars;
     std::size_t logEntryLimit_ = 2000;
     std::deque<NativeLogEntry> logEntries_;
     NativeLogFilterState logFilterState_;

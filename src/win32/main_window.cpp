@@ -7,6 +7,7 @@
 #include "win32/native_log_view.h"
 #include "win32/native_send_codec.h"
 #include "win32/native_serial_profile_codec.h"
+#include "win32/native_ui_preferences.h"
 #include "win32/resource.h"
 #include "win32/ui_text.h"
 #include "win32/utf8_win32.h"
@@ -40,14 +41,10 @@ using T = TextId;
 namespace modbus_core = ::svm::core::modbus;
 
 constexpr wchar_t kWindowClassName[] = L"SvmNativeMainWindow";
-constexpr std::size_t kMinLogVisibleChars = 200000;
-constexpr std::size_t kMaxLogVisibleChars = 100000000;
 constexpr std::size_t kMaxLogEntryLimit = 200000;
 constexpr std::size_t kLogTrimRebuildBatch = 256;
 constexpr std::size_t kLogInsertBatchChars = 65536;
 constexpr std::size_t kMaxRenderedLogLineChars = 4096;
-constexpr std::size_t kDefaultLogVisibleChars = 350000;
-constexpr int kDefaultRawEventRetentionMb = 100;
 constexpr COLORREF kFormBackgroundColor = RGB(228, 228, 228);
 constexpr wchar_t kNativeProgressClassName[] = L"SvmNativeProgress";
 constexpr COLORREF kNativeProgressBorderColor = RGB(96, 96, 96);
@@ -292,18 +289,6 @@ std::wstring formatLogCacheLimit(std::size_t charLimit) {
         return std::to_wstring(charLimit / 1000) + L"K";
     }
     return std::to_wstring(charLimit);
-}
-
-int normalizedRawEventRetentionMb(int value) {
-    switch (value) {
-    case 0:
-    case 100:
-    case 500:
-    case 1000:
-        return value;
-    default:
-        return kDefaultRawEventRetentionMb;
-    }
 }
 
 void writeSelfTestTrace(const char* message) {
@@ -908,7 +893,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             return 0;
         case IDC_LOG_CACHE_COMBO:
             if (HIWORD(wParam) == CBN_SELCHANGE) {
-                applyLogCacheLimit(static_cast<std::size_t>(selectedComboData(logCacheCombo_, kDefaultLogVisibleChars)));
+                applyLogCacheLimit(static_cast<std::size_t>(selectedComboData(logCacheCombo_, kNativeDefaultLogVisibleChars)));
                 rebuildLogView();
                 saveUiPreferences();
                 std::wstring status = uiString(T::LogCacheChangedPrefix) + formatLogCacheLimit(logVisibleCharLimit_);
@@ -921,7 +906,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             return 0;
         case IDC_RAW_EVENT_RETENTION_COMBO:
             if (HIWORD(wParam) == CBN_SELCHANGE) {
-                const int retentionLimitMb = static_cast<int>(selectedComboData(rawEventRetentionCombo_, kDefaultRawEventRetentionMb));
+                const int retentionLimitMb = static_cast<int>(selectedComboData(rawEventRetentionCombo_, kNativeDefaultRawEventRetentionMb));
                 applyRawEventRetentionLimit(retentionLimitMb);
                 saveUiPreferences();
                 setStatus(retentionLimitMb <= 0
@@ -1530,13 +1515,13 @@ void NativeMainWindow::populateSerialOptionControls() {
     addComboItem(logCacheCombo_, L"20M", 20000000);
     addComboItem(logCacheCombo_, L"50M", 50000000);
     addComboItem(logCacheCombo_, L"100M", 100000000);
-    selectComboData(logCacheCombo_, static_cast<LPARAM>(kDefaultLogVisibleChars));
+    selectComboData(logCacheCombo_, static_cast<LPARAM>(kNativeDefaultLogVisibleChars));
 
     addComboItem(rawEventRetentionCombo_, L"100M", 100);
     addComboItem(rawEventRetentionCombo_, L"500M", 500);
     addComboItem(rawEventRetentionCombo_, L"1000M", 1000);
     addComboItem(rawEventRetentionCombo_, L"\u4E0D\u9650\u5236", 0);
-    selectComboData(rawEventRetentionCombo_, kDefaultRawEventRetentionMb);
+    selectComboData(rawEventRetentionCombo_, kNativeDefaultRawEventRetentionMb);
 
     addComboItem(fileDelayCombo_, L"0 ms", 0);
     addComboItem(fileDelayCombo_, L"1 ms", 1);
@@ -2377,42 +2362,42 @@ void NativeMainWindow::applyUiPreferences() {
     if (!store_.isOpen()) {
         return;
     }
-    const auto preferences = store_.latestUiPreferences();
-    if (!preferences.has_value()) {
+    const auto storedPreferences = store_.latestUiPreferences();
+    if (!storedPreferences.has_value()) {
         return;
     }
+    const native_storage::UiPreferences preferences = nativeNormalizeUiPreferences(*storedPreferences, quickSendEdits_.size());
 
-    selectComboData(logFormatCombo_, preferences->logFormat);
-    selectComboData(logEncodingCombo_, preferences->logEncodingCodePage);
-    selectComboData(sendModeCombo_, preferences->sendPayloadMode);
-    selectComboData(textEncodingCombo_, preferences->sendTextEncodingCodePage);
-    selectComboData(lineEndingCombo_, preferences->sendLineEnding);
-    SendMessageW(autoReconnectCheck_, BM_SETCHECK, preferences->autoReconnect ? BST_CHECKED : BST_UNCHECKED, 0);
-    SendMessageW(timedSendCheck_, BM_SETCHECK, preferences->timedSendEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
-    timedSendActive_ = preferences->timedSendEnabled;
-    setControlText(timedPeriodEdit_, std::to_wstring(std::clamp(preferences->timedSendPeriodMs, 50, 3600000)));
-    selectComboData(fileDelayCombo_, std::clamp(preferences->fileSendDelayMs, 0, 1000));
-    applyLogCacheLimit(static_cast<std::size_t>(std::clamp(preferences->logVisibleCharLimit, static_cast<int>(kMinLogVisibleChars), static_cast<int>(kMaxLogVisibleChars))));
+    selectComboData(logFormatCombo_, preferences.logFormat);
+    selectComboData(logEncodingCombo_, preferences.logEncodingCodePage);
+    selectComboData(sendModeCombo_, preferences.sendPayloadMode);
+    selectComboData(textEncodingCombo_, preferences.sendTextEncodingCodePage);
+    selectComboData(lineEndingCombo_, preferences.sendLineEnding);
+    SendMessageW(autoReconnectCheck_, BM_SETCHECK, preferences.autoReconnect ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageW(timedSendCheck_, BM_SETCHECK, preferences.timedSendEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
+    timedSendActive_ = preferences.timedSendEnabled;
+    setControlText(timedPeriodEdit_, std::to_wstring(preferences.timedSendPeriodMs));
+    selectComboData(fileDelayCombo_, preferences.fileSendDelayMs);
+    applyLogCacheLimit(static_cast<std::size_t>(preferences.logVisibleCharLimit));
     selectComboData(logCacheCombo_, static_cast<LPARAM>(logVisibleCharLimit_));
-    const int rawEventRetentionLimitMb = normalizedRawEventRetentionMb(preferences->rawEventRetentionLimitMb);
-    applyRawEventRetentionLimit(rawEventRetentionLimitMb);
-    selectComboData(rawEventRetentionCombo_, rawEventRetentionLimitMb);
-    for (std::size_t index = 0; index < quickSendEdits_.size() && index < preferences->quickSendSlots.size(); ++index) {
-        setControlText(quickSendEdits_[index], utf8ToWide(preferences->quickSendSlots[index]));
+    applyRawEventRetentionLimit(preferences.rawEventRetentionLimitMb);
+    selectComboData(rawEventRetentionCombo_, preferences.rawEventRetentionLimitMb);
+    for (std::size_t index = 0; index < quickSendEdits_.size() && index < preferences.quickSendSlots.size(); ++index) {
+        setControlText(quickSendEdits_[index], utf8ToWide(preferences.quickSendSlots[index]));
     }
-    showLogTimestamps_ = preferences->showLogTimestamps;
-    applyLogTheme(preferences->logThemeIndex);
+    showLogTimestamps_ = preferences.showLogTimestamps;
+    applyLogTheme(preferences.logThemeIndex);
     updateLogTimestampMenu();
 
-    if (preferences->windowWidth >= 1080 && preferences->windowHeight >= 760) {
+    if (preferences.windowWidth >= 1080 && preferences.windowHeight >= 760) {
         RECT currentRect = {};
         GetWindowRect(window_, &currentRect);
         MoveWindow(
             window_,
-            preferences->windowLeft >= 0 ? preferences->windowLeft : currentRect.left,
-            preferences->windowTop >= 0 ? preferences->windowTop : currentRect.top,
-            preferences->windowWidth,
-            preferences->windowHeight,
+            preferences.windowLeft >= 0 ? preferences.windowLeft : currentRect.left,
+            preferences.windowTop >= 0 ? preferences.windowTop : currentRect.top,
+            preferences.windowWidth,
+            preferences.windowHeight,
             TRUE);
     }
     setStatus(tx(T::UiPreferencesRestoredStatus));
@@ -2436,16 +2421,17 @@ void NativeMainWindow::saveUiPreferences() {
     preferences.sendLineEnding = static_cast<int>(selectedComboData(lineEndingCombo_, 0));
     preferences.autoReconnect = SendMessageW(autoReconnectCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED;
     preferences.timedSendEnabled = SendMessageW(timedSendCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED;
-    preferences.timedSendPeriodMs = std::clamp(textToInt(timedPeriodEdit_, 1000), 50, 3600000);
-    preferences.fileSendDelayMs = static_cast<int>(selectedComboData(fileDelayCombo_, 0));
-    preferences.logVisibleCharLimit = static_cast<int>(logVisibleCharLimit_);
-    preferences.rawEventRetentionLimitMb = normalizedRawEventRetentionMb(
-        static_cast<int>(selectedComboData(rawEventRetentionCombo_, kDefaultRawEventRetentionMb)));
+    preferences.timedSendPeriodMs = nativeNormalizeTimedSendPeriodMs(textToInt(timedPeriodEdit_, kNativeDefaultTimedSendPeriodMs));
+    preferences.fileSendDelayMs = nativeNormalizeFileSendDelayMs(static_cast<int>(selectedComboData(fileDelayCombo_, 0)));
+    preferences.logVisibleCharLimit = static_cast<int>(nativeNormalizeLogVisibleCharLimit(logVisibleCharLimit_));
+    preferences.rawEventRetentionLimitMb = nativeNormalizeRawEventRetentionMb(
+        static_cast<int>(selectedComboData(rawEventRetentionCombo_, kNativeDefaultRawEventRetentionMb)));
     preferences.quickSendSlots.clear();
     preferences.quickSendSlots.reserve(quickSendEdits_.size());
     for (HWND edit : quickSendEdits_) {
         preferences.quickSendSlots.push_back(wideToUtf8(controlText(edit)));
     }
+    preferences.quickSendSlots = nativeNormalizeQuickSendSlots(std::move(preferences.quickSendSlots), quickSendEdits_.size());
     preferences.windowLeft = windowRect.left;
     preferences.windowTop = windowRect.top;
     preferences.windowWidth = windowRect.right - windowRect.left;
@@ -3303,7 +3289,7 @@ void NativeMainWindow::updateStatusSegments() {
 }
 
 void NativeMainWindow::applyLogCacheLimit(std::size_t visibleCharLimit) {
-    logVisibleCharLimit_ = std::clamp<std::size_t>(visibleCharLimit, kMinLogVisibleChars, kMaxLogVisibleChars);
+    logVisibleCharLimit_ = nativeNormalizeLogVisibleCharLimit(visibleCharLimit);
     logEntryLimit_ = std::clamp<std::size_t>(logVisibleCharLimit_ / 160, 1000, kMaxLogEntryLimit);
     if (receiveLog_ != nullptr) {
         nativeLogSetTextLimit(receiveLog_, logVisibleCharLimit_ + kMaxRenderedLogLineChars);
@@ -3314,7 +3300,7 @@ void NativeMainWindow::applyRawEventRetentionLimit(int retentionLimitMb) {
     if (!store_.isOpen()) {
         return;
     }
-    retentionLimitMb = normalizedRawEventRetentionMb(retentionLimitMb);
+    retentionLimitMb = nativeNormalizeRawEventRetentionMb(retentionLimitMb);
     if (retentionLimitMb <= 0) {
         store_.setRawEventRetentionLimit(0, 0);
         return;
