@@ -5,6 +5,7 @@
 #include "win32/native_layout_metrics.h"
 #include "win32/native_analysis_workflow.h"
 #include "win32/native_log_view.h"
+#include "win32/native_send_codec.h"
 #include "win32/resource.h"
 #include "win32/ui_text.h"
 #include "win32/utf8_win32.h"
@@ -44,8 +45,6 @@ constexpr std::size_t kMaxLogEntryLimit = 200000;
 constexpr std::size_t kLogTrimRebuildBatch = 256;
 constexpr std::size_t kLogInsertBatchChars = 65536;
 constexpr std::size_t kMaxRenderedLogLineChars = 4096;
-constexpr UINT kCodePageGbk = 936;
-constexpr UINT kCodePageAscii = 20127;
 constexpr int kFileSendChunkBytes = 1024;
 constexpr std::size_t kDefaultLogVisibleChars = 350000;
 constexpr int kDefaultRawEventRetentionMb = 100;
@@ -319,266 +318,6 @@ void writeSelfTestTrace(const char* message) {
     }
 }
 
-std::wstring bytesToHex(const std::vector<std::uint8_t>& bytes) {
-    std::wostringstream output;
-    output.setf(std::ios::uppercase);
-    output << std::hex;
-    for (std::size_t index = 0; index < bytes.size(); ++index) {
-        if (index != 0) {
-            output << L' ';
-        }
-        output.width(2);
-        output.fill(L'0');
-        output << static_cast<int>(bytes[index]);
-    }
-    return output.str();
-}
-
-int hexValue(wchar_t ch) {
-    if (ch >= L'0' && ch <= L'9') {
-        return ch - L'0';
-    }
-    if (ch >= L'a' && ch <= L'f') {
-        return 10 + ch - L'a';
-    }
-    if (ch >= L'A' && ch <= L'F') {
-        return 10 + ch - L'A';
-    }
-    return -1;
-}
-
-std::vector<std::uint8_t> parseHexPayload(std::wstring_view text, std::wstring* errorText) {
-    std::vector<int> nibbles;
-    for (wchar_t ch : text) {
-        if (std::iswspace(ch) || ch == L',' || ch == L'-') {
-            continue;
-        }
-        const int value = hexValue(ch);
-        if (value < 0) {
-            if (errorText != nullptr) {
-                *errorText = tx(T::HexInvalidChar);
-            }
-            return {};
-        }
-        nibbles.push_back(value);
-    }
-
-    if (nibbles.empty()) {
-        return {};
-    }
-    if ((nibbles.size() % 2) != 0) {
-        if (errorText != nullptr) {
-            *errorText = tx(T::HexOddNibble);
-        }
-        return {};
-    }
-
-    std::vector<std::uint8_t> bytes;
-    bytes.reserve(nibbles.size() / 2);
-    for (std::size_t index = 0; index < nibbles.size(); index += 2) {
-        bytes.push_back(static_cast<std::uint8_t>((nibbles[index] << 4) | nibbles[index + 1]));
-    }
-    return bytes;
-}
-
-std::vector<std::wstring> splitByteTokens(std::wstring_view text) {
-    std::vector<std::wstring> tokens;
-    std::wstring current;
-    for (wchar_t ch : text) {
-        if (std::iswspace(ch) || ch == L',' || ch == L';' || ch == L'\uFF0C' || ch == L'\u3001') {
-            if (!current.empty()) {
-                tokens.push_back(std::move(current));
-                current.clear();
-            }
-            continue;
-        }
-        current.push_back(ch);
-    }
-    if (!current.empty()) {
-        tokens.push_back(std::move(current));
-    }
-    return tokens;
-}
-
-std::vector<std::uint8_t> parseDecimalPayload(std::wstring_view text, std::wstring* errorText) {
-    const std::vector<std::wstring> tokens = splitByteTokens(text);
-    std::vector<std::uint8_t> bytes;
-    bytes.reserve(tokens.size());
-    for (const std::wstring& token : tokens) {
-        wchar_t* end = nullptr;
-        const long value = std::wcstol(token.c_str(), &end, 10);
-        if (end == token.c_str() || *end != L'\0' || value < 0 || value > 255) {
-            if (errorText != nullptr) {
-                *errorText = tx(T::SendModeInvalidDecimal);
-            }
-            return {};
-        }
-        bytes.push_back(static_cast<std::uint8_t>(value));
-    }
-    return bytes;
-}
-
-std::vector<std::uint8_t> parseBinaryPayload(std::wstring_view text, std::wstring* errorText) {
-    std::wstring bits;
-    for (wchar_t ch : text) {
-        if (std::iswspace(ch) || ch == L',' || ch == L';' || ch == L'\uFF0C' || ch == L'\u3001') {
-            continue;
-        }
-        if (ch != L'0' && ch != L'1') {
-            if (errorText != nullptr) {
-                *errorText = tx(T::SendModeInvalidBinary);
-            }
-            return {};
-        }
-        bits.push_back(ch);
-    }
-
-    if (bits.empty()) {
-        return {};
-    }
-    if ((bits.size() % 8) != 0) {
-        if (errorText != nullptr) {
-            *errorText = tx(T::SendModeInvalidBinary);
-        }
-        return {};
-    }
-
-    std::vector<std::uint8_t> bytes;
-    bytes.reserve(bits.size() / 8);
-    for (std::size_t index = 0; index < bits.size(); index += 8) {
-        std::uint8_t value = 0;
-        for (std::size_t bit = 0; bit < 8; ++bit) {
-            value = static_cast<std::uint8_t>((value << 1U) | (bits[index + bit] == L'1' ? 1U : 0U));
-        }
-        bytes.push_back(value);
-    }
-    return bytes;
-}
-
-std::vector<std::uint8_t> encodeTextPayload(std::wstring_view text, UINT codePage, std::wstring* errorText) {
-    if (text.empty()) {
-        return {};
-    }
-
-    if (codePage == kCodePageAscii) {
-        std::vector<std::uint8_t> bytes;
-        bytes.reserve(text.size());
-        for (wchar_t ch : text) {
-            if (ch > 0x7F) {
-                if (errorText != nullptr) {
-                    *errorText = tx(T::TextEncodingFailed);
-                }
-                return {};
-            }
-            bytes.push_back(static_cast<std::uint8_t>(ch));
-        }
-        return bytes;
-    }
-
-    BOOL usedDefaultChar = FALSE;
-    BOOL* usedDefaultCharPtr = codePage == CP_UTF8 ? nullptr : &usedDefaultChar;
-    const int required = WideCharToMultiByte(
-        codePage,
-        0,
-        text.data(),
-        static_cast<int>(text.size()),
-        nullptr,
-        0,
-        nullptr,
-        usedDefaultCharPtr);
-    if (required <= 0) {
-        if (errorText != nullptr) {
-            *errorText = tx(T::TextEncodingFailed);
-        }
-        return {};
-    }
-
-    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(required));
-    usedDefaultChar = FALSE;
-    if (WideCharToMultiByte(
-            codePage,
-            0,
-            text.data(),
-            static_cast<int>(text.size()),
-            reinterpret_cast<char*>(bytes.data()),
-            required,
-            nullptr,
-            usedDefaultCharPtr) <= 0
-        || usedDefaultChar) {
-        if (errorText != nullptr) {
-            *errorText = tx(T::TextEncodingFailed);
-        }
-        return {};
-    }
-    return bytes;
-}
-
-std::wstring bytesToDecimal(const std::vector<std::uint8_t>& bytes) {
-    std::wostringstream output;
-    for (std::size_t index = 0; index < bytes.size(); ++index) {
-        if (index != 0) {
-            output << L' ';
-        }
-        output << static_cast<int>(bytes[index]);
-    }
-    return output.str();
-}
-
-std::wstring bytesToBinary(const std::vector<std::uint8_t>& bytes) {
-    std::wostringstream output;
-    for (std::size_t index = 0; index < bytes.size(); ++index) {
-        if (index != 0) {
-            output << L' ';
-        }
-        for (int bit = 7; bit >= 0; --bit) {
-            output << (((bytes[index] >> bit) & 1U) != 0 ? L'1' : L'0');
-        }
-    }
-    return output.str();
-}
-
-std::wstring decodeBytesToText(const std::vector<std::uint8_t>& bytes, UINT codePage) {
-    if (bytes.empty()) {
-        return {};
-    }
-
-    if (codePage == kCodePageAscii) {
-        std::wstring text;
-        text.reserve(bytes.size());
-        for (std::uint8_t byte : bytes) {
-            text.push_back(byte <= 0x7F ? static_cast<wchar_t>(byte) : L'.');
-        }
-        return text;
-    }
-
-    const DWORD flags = codePage == CP_UTF8 ? MB_ERR_INVALID_CHARS : 0;
-    const int required = MultiByteToWideChar(
-        codePage,
-        flags,
-        reinterpret_cast<const char*>(bytes.data()),
-        static_cast<int>(bytes.size()),
-        nullptr,
-        0);
-    if (required <= 0) {
-        std::wstring text;
-        text.reserve(bytes.size());
-        for (std::uint8_t byte : bytes) {
-            text.push_back(byte >= 0x20 && byte <= 0x7E ? static_cast<wchar_t>(byte) : L'.');
-        }
-        return text;
-    }
-
-    std::wstring text(static_cast<std::size_t>(required), L'\0');
-    MultiByteToWideChar(
-        codePage,
-        flags,
-        reinterpret_cast<const char*>(bytes.data()),
-        static_cast<int>(bytes.size()),
-        text.data(),
-        required);
-    return text;
-}
-
 std::wstring localClockText() {
     SYSTEMTIME now = {};
     GetLocalTime(&now);
@@ -729,23 +468,6 @@ SerialFlowControl flowControlFromKey(std::string_view key) {
         return SerialFlowControl::SoftwareXonXoff;
     }
     return SerialFlowControl::None;
-}
-
-void appendLineEnding(std::vector<std::uint8_t>& payload, int lineEnding) {
-    switch (lineEnding) {
-    case 1:
-        payload.push_back('\r');
-        break;
-    case 2:
-        payload.push_back('\n');
-        break;
-    case 3:
-        payload.push_back('\r');
-        payload.push_back('\n');
-        break;
-    default:
-        break;
-    }
 }
 
 int textToInt(HWND control, int fallback) {
@@ -1850,9 +1572,9 @@ void NativeMainWindow::populateSerialOptionControls() {
     selectComboData(sendModeCombo_, 0);
 
     addComboItem(textEncodingCombo_, tx(T::Utf8Encoding), CP_UTF8);
-    addComboItem(textEncodingCombo_, tx(T::GbkEncoding), kCodePageGbk);
+    addComboItem(textEncodingCombo_, tx(T::GbkEncoding), kNativeCodePageGbk);
     addComboItem(textEncodingCombo_, tx(T::AnsiEncoding), CP_ACP);
-    addComboItem(textEncodingCombo_, tx(T::AsciiEncoding), kCodePageAscii);
+    addComboItem(textEncodingCombo_, tx(T::AsciiEncoding), kNativeCodePageAscii);
     selectComboData(textEncodingCombo_, CP_UTF8);
 
     addComboItem(lineEndingCombo_, tx(T::NoLineEnding), 0);
@@ -1869,9 +1591,9 @@ void NativeMainWindow::populateSerialOptionControls() {
     selectComboData(logFormatCombo_, 0);
 
     addComboItem(logEncodingCombo_, tx(T::Utf8Encoding), CP_UTF8);
-    addComboItem(logEncodingCombo_, tx(T::GbkEncoding), kCodePageGbk);
+    addComboItem(logEncodingCombo_, tx(T::GbkEncoding), kNativeCodePageGbk);
     addComboItem(logEncodingCombo_, tx(T::AnsiEncoding), CP_ACP);
-    addComboItem(logEncodingCombo_, tx(T::AsciiEncoding), kCodePageAscii);
+    addComboItem(logEncodingCombo_, tx(T::AsciiEncoding), kNativeCodePageAscii);
     selectComboData(logEncodingCombo_, CP_UTF8);
 
     addComboItem(logCacheCombo_, L"200K", 200000);
@@ -3739,36 +3461,38 @@ std::vector<std::uint8_t> NativeMainWindow::payloadFromText(const std::wstring& 
     if (errorText != nullptr) {
         errorText->clear();
     }
-    const int mode = static_cast<int>(selectedComboData(sendModeCombo_, 0));
-    std::vector<std::uint8_t> payload;
-    if (mode == 1) {
-        payload = parseHexPayload(text, errorText);
-    } else if (mode == 2) {
-        payload = parseDecimalPayload(text, errorText);
-    } else if (mode == 3) {
-        payload = parseBinaryPayload(text, errorText);
-    } else {
-        payload = encodeTextPayload(text, selectedTextCodePage(), errorText);
+    NativeSendCodecErrors errors;
+    errors.hexInvalidChar = tx(T::HexInvalidChar);
+    errors.hexOddNibble = tx(T::HexOddNibble);
+    errors.invalidDecimal = tx(T::SendModeInvalidDecimal);
+    errors.invalidBinary = tx(T::SendModeInvalidBinary);
+    errors.textEncodingFailed = tx(T::TextEncodingFailed);
+
+    NativeSendPayloadOptions options;
+    options.mode = static_cast<int>(selectedComboData(sendModeCombo_, 0));
+    options.textCodePage = selectedTextCodePage();
+    options.lineEnding = static_cast<int>(selectedComboData(lineEndingCombo_, 0));
+
+    const NativeSendPayloadResult result = nativeBuildSendPayload(text, options, errors);
+    if (errorText != nullptr) {
+        *errorText = result.errorText;
     }
-    if (errorText == nullptr || errorText->empty()) {
-        appendLineEnding(payload, static_cast<int>(selectedComboData(lineEndingCombo_, 0)));
-    }
-    return payload;
+    return result.payload;
 }
 
 std::wstring NativeMainWindow::formatPayloadForLog(const std::vector<std::uint8_t>& payload) const {
     const int mode = static_cast<int>(selectedComboData(logFormatCombo_, 0));
     switch (mode) {
     case 1:
-        return bytesToDecimal(payload);
+        return nativeBytesToDecimal(payload);
     case 2:
-        return bytesToBinary(payload);
+        return nativeBytesToBinary(payload);
     case 3:
-        return decodeBytesToText(payload, selectedLogCodePage());
+        return nativeDecodeBytesToText(payload, selectedLogCodePage());
     case 4:
-        return bytesToHex(payload) + L" | " + decodeBytesToText(payload, selectedLogCodePage());
+        return nativeBytesToHex(payload) + L" | " + nativeDecodeBytesToText(payload, selectedLogCodePage());
     default:
-        return bytesToHex(payload);
+        return nativeBytesToHex(payload);
     }
 }
 
