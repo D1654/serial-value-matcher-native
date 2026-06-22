@@ -6,6 +6,7 @@
 #include "win32/native_analysis_workflow.h"
 #include "win32/native_log_view.h"
 #include "win32/native_send_codec.h"
+#include "win32/native_send_control_state.h"
 #include "win32/native_send_history_state.h"
 #include "win32/native_serial_profile_codec.h"
 #include "win32/native_ui_preferences.h"
@@ -931,14 +932,14 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             return 0;
         case IDC_TIMED_SEND_CHECK:
             if (HIWORD(wParam) == BN_CLICKED) {
-                timedSendActive_ = SendMessageW(timedSendCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED;
+                sendControlState_.setTimedSendEnabled(SendMessageW(timedSendCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED);
                 updateTimedSendTimer();
                 saveUiPreferences();
-                setStatus(timedSendActive_ ? tx(T::TimedSendEnabledStatus) : tx(T::TimedSendDisabledStatus));
+                setStatus(sendControlState_.timedSendEnabled() ? tx(T::TimedSendEnabledStatus) : tx(T::TimedSendDisabledStatus));
             }
             return 0;
         case IDC_TIMED_PERIOD_EDIT:
-            if (HIWORD(wParam) == EN_CHANGE && timedSendActive_) {
+            if (HIWORD(wParam) == EN_CHANGE && sendControlState_.timedSendEnabled()) {
                 updateTimedSendTimer();
             } else if (HIWORD(wParam) == EN_KILLFOCUS) {
                 saveUiPreferences();
@@ -2375,7 +2376,7 @@ void NativeMainWindow::applyUiPreferences() {
     selectComboData(lineEndingCombo_, preferences.sendLineEnding);
     SendMessageW(autoReconnectCheck_, BM_SETCHECK, preferences.autoReconnect ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageW(timedSendCheck_, BM_SETCHECK, preferences.timedSendEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
-    timedSendActive_ = preferences.timedSendEnabled;
+    sendControlState_.setTimedSendEnabled(preferences.timedSendEnabled);
     setControlText(timedPeriodEdit_, std::to_wstring(preferences.timedSendPeriodMs));
     selectComboData(fileDelayCombo_, preferences.fileSendDelayMs);
     applyLogCacheLimit(static_cast<std::size_t>(preferences.logVisibleCharLimit));
@@ -2584,11 +2585,11 @@ bool NativeMainWindow::sendPayloadFromText(const std::wstring& text, bool saveHi
 }
 
 void NativeMainWindow::sendQuickPayload(std::size_t index) {
-    if (index >= quickSendEdits_.size()) {
+    if (!sendControlState_.isQuickSendIndexValid(index, quickSendEdits_.size())) {
         return;
     }
     const std::wstring text = controlText(quickSendEdits_[index]);
-    if (text.empty()) {
+    if (!sendControlState_.isQuickSendTextUsable(text)) {
         setStatus(tx(T::QuickSendEmptyStatus));
         return;
     }
@@ -2597,11 +2598,14 @@ void NativeMainWindow::sendQuickPayload(std::size_t index) {
 
 void NativeMainWindow::updateTimedSendTimer() {
     KillTimer(window_, IDT_TIMED_SEND);
-    if (!timedSendActive_ || !serialPort_.isOpen() || !serialIoState_.allowsManualSend()) {
+    const NativeTimedSendTimerDecision decision = sendControlState_.timerDecision(
+        serialPort_.isOpen(),
+        serialIoState_.allowsManualSend(),
+        textToInt(timedPeriodEdit_, kNativeDefaultTimedSendPeriodMs));
+    if (!decision.shouldRun) {
         return;
     }
-    const int periodMs = std::clamp(textToInt(timedPeriodEdit_, 1000), 50, 3600000);
-    SetTimer(window_, IDT_TIMED_SEND, static_cast<UINT>(periodMs), nullptr);
+    SetTimer(window_, IDT_TIMED_SEND, static_cast<UINT>(decision.periodMs), nullptr);
 }
 
 void NativeMainWindow::browseFileSend() {

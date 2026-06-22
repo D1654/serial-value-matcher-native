@@ -16,6 +16,7 @@
 #include "win32/native_modbus_scan_worker.h"
 #include "win32/native_serial_io_state.h"
 #include "win32/native_ui_preferences.h"
+#include "win32/native_send_control_state.h"
 #include "win32/native_send_history_state.h"
 #include "win32/win32_serial_port.h"
 
@@ -324,7 +325,7 @@ private:
     std::size_t hiddenLogLineCount_ = 0;
     std::uint64_t txByteCount_ = 0;
     std::uint64_t rxByteCount_ = 0;
-    bool timedSendActive_ = false;
+    NativeSendControlState sendControlState_;
     NativeFileSendState fileSend_;
     HANDLE modbusScanThread_ = nullptr;
     std::atomic_bool modbusScanCancelRequested_ = false;
