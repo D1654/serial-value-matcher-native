@@ -84,6 +84,7 @@ if(SVM_BUILD_WIN32_APP)
         src/win32/main_window.cpp
         src/win32/native_layout_metrics.cpp
         src/win32/native_log_model.cpp
+        src/win32/native_log_view.cpp
         src/win32/native_modbus_scan_worker.cpp
         src/win32/ui_text.cpp
         src/win32/utf8_win32.cpp

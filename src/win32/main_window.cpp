@@ -3,6 +3,7 @@
 #if defined(_WIN32)
 
 #include "win32/native_layout_metrics.h"
+#include "win32/native_log_view.h"
 #include "win32/resource.h"
 #include "win32/ui_text.h"
 #include "win32/utf8_win32.h"
@@ -62,88 +63,11 @@ const wchar_t* tx(T id) {
     return uiText(id);
 }
 
-struct NativeLogPalette {
-    COLORREF background = RGB(255, 255, 255);
-    COLORREF normal = RGB(32, 32, 32);
-    COLORREF system = RGB(84, 84, 84);
-    COLORREF tx = RGB(0, 91, 170);
-    COLORREF rx = RGB(0, 128, 72);
-    COLORREF modbusTx = RGB(138, 82, 0);
-    COLORREF modbusRx = RGB(108, 72, 145);
-    COLORREF error = RGB(176, 38, 38);
-};
-
-struct ScopedWindowRedraw {
-    explicit ScopedWindowRedraw(HWND window)
-        : window_(window) {
-        if (window_ != nullptr) {
-            SendMessageW(window_, WM_SETREDRAW, FALSE, 0);
-        }
-    }
-
-    ~ScopedWindowRedraw() {
-        if (window_ != nullptr) {
-            SendMessageW(window_, WM_SETREDRAW, TRUE, 0);
-            RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN);
-        }
-    }
-
-    HWND window_ = nullptr;
-};
-
 struct NativeProgressState {
     int minimum = 0;
     int maximum = 1000;
     int position = 0;
 };
-
-NativeLogPalette logPalette(int themeIndex) {
-    switch (themeIndex) {
-    case 1:
-        return {
-            RGB(250, 250, 248),
-            RGB(32, 32, 32),
-            RGB(88, 88, 88),
-            RGB(35, 95, 154),
-            RGB(35, 120, 84),
-            RGB(130, 86, 36),
-            RGB(106, 84, 150),
-            RGB(170, 48, 48),
-        };
-    case 2:
-        return {
-            RGB(12, 12, 12),
-            RGB(232, 232, 232),
-            RGB(210, 210, 210),
-            RGB(70, 190, 255),
-            RGB(95, 230, 130),
-            RGB(255, 210, 72),
-            RGB(215, 145, 255),
-            RGB(255, 88, 88),
-        };
-    default:
-        return {};
-    }
-}
-
-COLORREF logColorForKind(NativeLogKind kind, int themeIndex) {
-    const NativeLogPalette palette = logPalette(themeIndex);
-    switch (kind) {
-    case NativeLogKind::System:
-        return palette.system;
-    case NativeLogKind::Tx:
-        return palette.tx;
-    case NativeLogKind::Rx:
-        return palette.rx;
-    case NativeLogKind::ModbusTx:
-        return palette.modbusTx;
-    case NativeLogKind::ModbusRx:
-        return palette.modbusRx;
-    case NativeLogKind::Error:
-        return palette.error;
-    }
-    return palette.normal;
-}
 
 HBRUSH formBackgroundBrush() {
     static HBRUSH brush = CreateSolidBrush(kFormBackgroundColor);
@@ -1999,7 +1923,7 @@ void NativeMainWindow::createControls() {
     SendMessageW(targetValueEdit_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(tx(T::TargetValueCue)));
     SendMessageW(targetUnitEdit_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(tx(T::TargetUnitCue)));
     SendMessageW(toleranceEdit_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(tx(T::ToleranceCue)));
-    SendMessageW(receiveLog_, EM_EXLIMITTEXT, 0, static_cast<LPARAM>(logVisibleCharLimit_ + kMaxRenderedLogLineChars));
+    nativeLogSetTextLimit(receiveLog_, logVisibleCharLimit_ + kMaxRenderedLogLineChars);
 
     for (const wchar_t* label : {tx(T::WorkbenchTabSingle), tx(T::WorkbenchTabQuick), tx(T::WorkbenchTabFile), tx(T::WorkbenchTabScan), tx(T::WorkbenchTabSettings)}) {
         TCITEMW tab = {};
@@ -3487,7 +3411,7 @@ std::size_t NativeMainWindow::rebuildLogView() {
     pendingLogLines_.clear();
     pendingLogChars_ = 0;
     logTrimmedSinceRebuild_ = 0;
-    const int firstVisibleLine = currentLogFirstVisibleLine();
+    const int firstVisibleLine = nativeLogFirstVisibleLine(receiveLog_);
     std::deque<std::pair<NativeLogKind, std::wstring>> visibleLines;
     std::size_t visibleChars = 0;
     for (const NativeLogEntry& entry : logEntries_) {
@@ -3506,7 +3430,7 @@ std::size_t NativeMainWindow::rebuildLogView() {
         }
     }
 
-    ScopedWindowRedraw redraw(receiveLog_);
+    NativeLogRedrawGuard redraw(receiveLog_);
     SetWindowTextW(receiveLog_, L"");
     visibleLogChars_ = 0;
     for (const auto& line : visibleLines) {
@@ -3515,9 +3439,9 @@ std::size_t NativeMainWindow::rebuildLogView() {
     lastLogSearchOffset_ = 0;
     visibleLogLineCount_ = visibleLines.size();
     if (logAutoFollow_) {
-        scrollLogToBottom();
+        nativeLogScrollToBottom(receiveLog_);
     } else {
-        restoreLogFirstVisibleLine(firstVisibleLine);
+        nativeLogRestoreFirstVisibleLine(receiveLog_, firstVisibleLine);
     }
     return visibleLogLineCount_;
 }
@@ -3559,19 +3483,17 @@ void NativeMainWindow::flushPendingLogEntries() {
         return;
     }
 
-    const bool atBottom = logIsAtBottom();
+    const bool atBottom = nativeLogIsAtBottom(receiveLog_);
     if (atBottom) {
         logAutoFollow_ = true;
         logHistoryReadNoticeShown_ = false;
     }
     const bool shouldFollow = logAutoFollow_ && atBottom;
-    const int firstVisibleLine = currentLogFirstVisibleLine();
-    DWORD selectionStart = 0;
-    DWORD selectionEnd = 0;
-    SendMessageW(receiveLog_, EM_GETSEL, reinterpret_cast<WPARAM>(&selectionStart), reinterpret_cast<LPARAM>(&selectionEnd));
+    const int firstVisibleLine = nativeLogFirstVisibleLine(receiveLog_);
+    const NativeLogSelection selection = nativeLogSelection(receiveLog_);
 
     {
-        ScopedWindowRedraw redraw(receiveLog_);
+        NativeLogRedrawGuard redraw(receiveLog_);
         while (!pendingLogLines_.empty()) {
             const NativeLogKind batchKind = pendingLogLines_.front().kind;
             std::wstring batchText;
@@ -3597,12 +3519,12 @@ void NativeMainWindow::flushPendingLogEntries() {
     }
 
     if (shouldFollow) {
-        scrollLogToBottom();
+        nativeLogScrollToBottom(receiveLog_);
         return;
     }
     logAutoFollow_ = false;
-    restoreLogFirstVisibleLine(firstVisibleLine);
-    SendMessageW(receiveLog_, EM_SETSEL, selectionStart, selectionEnd);
+    nativeLogRestoreFirstVisibleLine(receiveLog_, firstVisibleLine);
+    nativeLogSetSelection(receiveLog_, selection.start, selection.end);
     if (!logHistoryReadNoticeShown_) {
         setStatus(tx(T::LogHistoryReadStatus));
         logHistoryReadNoticeShown_ = true;
@@ -3617,24 +3539,22 @@ void NativeMainWindow::appendVisibleLogText(NativeLogKind kind, const std::wstri
     if (receiveLog_ == nullptr) {
         return;
     }
-    const bool atBottom = logIsAtBottom();
+    const bool atBottom = nativeLogIsAtBottom(receiveLog_);
     if (atBottom) {
         logAutoFollow_ = true;
         logHistoryReadNoticeShown_ = false;
     }
     const bool shouldFollow = logAutoFollow_ && atBottom;
-    const int firstVisibleLine = currentLogFirstVisibleLine();
-    DWORD selectionStart = 0;
-    DWORD selectionEnd = 0;
-    SendMessageW(receiveLog_, EM_GETSEL, reinterpret_cast<WPARAM>(&selectionStart), reinterpret_cast<LPARAM>(&selectionEnd));
+    const int firstVisibleLine = nativeLogFirstVisibleLine(receiveLog_);
+    const NativeLogSelection selection = nativeLogSelection(receiveLog_);
     insertVisibleLogText(kind, text);
     if (shouldFollow) {
-        scrollLogToBottom();
+        nativeLogScrollToBottom(receiveLog_);
         return;
     }
     logAutoFollow_ = false;
-    restoreLogFirstVisibleLine(firstVisibleLine);
-    SendMessageW(receiveLog_, EM_SETSEL, selectionStart, selectionEnd);
+    nativeLogRestoreFirstVisibleLine(receiveLog_, firstVisibleLine);
+    nativeLogSetSelection(receiveLog_, selection.start, selection.end);
     if (!logHistoryReadNoticeShown_) {
         setStatus(tx(T::LogHistoryReadStatus));
         logHistoryReadNoticeShown_ = true;
@@ -3645,15 +3565,7 @@ void NativeMainWindow::insertVisibleLogText(NativeLogKind kind, const std::wstri
     if (receiveLog_ == nullptr) {
         return;
     }
-    SendMessageW(receiveLog_, EM_SETSEL, static_cast<WPARAM>(-1), static_cast<LPARAM>(-1));
-    if (receiveLogUsesRichEdit_) {
-        CHARFORMAT2W format = {};
-        format.cbSize = sizeof(format);
-        format.dwMask = CFM_COLOR;
-        format.crTextColor = logColorForKind(kind, logThemeIndex_);
-        SendMessageW(receiveLog_, EM_SETCHARFORMAT, SCF_SELECTION, reinterpret_cast<LPARAM>(&format));
-    }
-    SendMessageW(receiveLog_, EM_REPLACESEL, FALSE, reinterpret_cast<LPARAM>(text.c_str()));
+    nativeLogInsertText(receiveLog_, receiveLogUsesRichEdit_, logThemeIndex_, kind, text);
     visibleLogChars_ += text.size();
 }
 
@@ -3742,56 +3654,12 @@ void NativeMainWindow::findNextLogMatch() {
         return;
     }
 
-    SendMessageW(receiveLog_, EM_SETSEL, static_cast<WPARAM>(position), static_cast<LPARAM>(position + needle.size()));
-    SendMessageW(receiveLog_, EM_SCROLLCARET, 0, 0);
+    nativeLogSetSelection(receiveLog_, position, position + needle.size());
+    nativeLogScrollCaret(receiveLog_);
     logAutoFollow_ = false;
     logHistoryReadNoticeShown_ = true;
     lastLogSearchOffset_ = position + needle.size();
     setStatus(uiString(T::LogFindMatchedPrefix) + needle + uiString(T::ChinesePeriod));
-}
-
-bool NativeMainWindow::logIsAtBottom() const {
-    if (receiveLog_ == nullptr) {
-        return true;
-    }
-
-    SCROLLINFO scrollInfo = {};
-    scrollInfo.cbSize = sizeof(scrollInfo);
-    scrollInfo.fMask = SIF_PAGE | SIF_POS | SIF_RANGE;
-    if (!GetScrollInfo(receiveLog_, SB_VERT, &scrollInfo)) {
-        return true;
-    }
-
-    const int page = scrollInfo.nPage > 0 ? static_cast<int>(scrollInfo.nPage) : 1;
-    return scrollInfo.nPos + page >= scrollInfo.nMax - 1;
-}
-
-int NativeMainWindow::currentLogFirstVisibleLine() const {
-    if (receiveLog_ == nullptr) {
-        return 0;
-    }
-    const LRESULT line = SendMessageW(receiveLog_, EM_GETFIRSTVISIBLELINE, 0, 0);
-    return line < 0 ? 0 : static_cast<int>(line);
-}
-
-void NativeMainWindow::restoreLogFirstVisibleLine(int firstVisibleLine) {
-    if (receiveLog_ == nullptr) {
-        return;
-    }
-    const int currentFirstLine = currentLogFirstVisibleLine();
-    const int delta = firstVisibleLine - currentFirstLine;
-    if (delta != 0) {
-        SendMessageW(receiveLog_, EM_LINESCROLL, 0, delta);
-    }
-}
-
-void NativeMainWindow::scrollLogToBottom() {
-    if (receiveLog_ == nullptr) {
-        return;
-    }
-    SendMessageW(receiveLog_, EM_SETSEL, static_cast<WPARAM>(-1), static_cast<LPARAM>(-1));
-    SendMessageW(receiveLog_, EM_SCROLLCARET, 0, 0);
-    SendMessageW(receiveLog_, WM_VSCROLL, SB_BOTTOM, 0);
 }
 
 void NativeMainWindow::followLatestLog() {
@@ -3803,7 +3671,7 @@ void NativeMainWindow::followLatestLog() {
     }
     logAutoFollow_ = true;
     logHistoryReadNoticeShown_ = false;
-    scrollLogToBottom();
+    nativeLogScrollToBottom(receiveLog_);
     setStatus(tx(T::FollowLatestLogStatus));
 }
 
@@ -3916,7 +3784,7 @@ void NativeMainWindow::applyLogCacheLimit(std::size_t visibleCharLimit) {
     logVisibleCharLimit_ = std::clamp<std::size_t>(visibleCharLimit, kMinLogVisibleChars, kMaxLogVisibleChars);
     logEntryLimit_ = std::clamp<std::size_t>(logVisibleCharLimit_ / 160, 1000, kMaxLogEntryLimit);
     if (receiveLog_ != nullptr) {
-        SendMessageW(receiveLog_, EM_EXLIMITTEXT, 0, static_cast<LPARAM>(logVisibleCharLimit_ + kMaxRenderedLogLineChars));
+        nativeLogSetTextLimit(receiveLog_, logVisibleCharLimit_ + kMaxRenderedLogLineChars);
     }
 }
 
@@ -4114,18 +3982,7 @@ void NativeMainWindow::applyLogTheme(int themeIndex) {
             MF_BYCOMMAND);
     }
 
-    if (receiveLog_ == nullptr || !receiveLogUsesRichEdit_) {
-        return;
-    }
-
-    const NativeLogPalette palette = logPalette(logThemeIndex_);
-    SendMessageW(receiveLog_, EM_SETBKGNDCOLOR, 0, static_cast<LPARAM>(palette.background));
-    CHARFORMAT2W format = {};
-    format.cbSize = sizeof(format);
-    format.dwMask = CFM_COLOR;
-    format.crTextColor = palette.normal;
-    SendMessageW(receiveLog_, EM_SETCHARFORMAT, SCF_DEFAULT, reinterpret_cast<LPARAM>(&format));
-    InvalidateRect(receiveLog_, nullptr, TRUE);
+    nativeLogApplyTheme(receiveLog_, receiveLogUsesRichEdit_, logThemeIndex_);
 }
 
 void NativeMainWindow::updateLogTimestampMenu() {

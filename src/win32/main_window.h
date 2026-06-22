@@ -128,10 +128,6 @@ private:
     void findNextLogMatch();
     void copyVisibleLogToClipboard();
     void exportVisibleLog();
-    bool logIsAtBottom() const;
-    int currentLogFirstVisibleLine() const;
-    void restoreLogFirstVisibleLine(int firstVisibleLine);
-    void scrollLogToBottom();
     void followLatestLog();
     void setStatus(const std::wstring& text);
     void updateStatusSegments();
