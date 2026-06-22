@@ -16,6 +16,7 @@
 #include "win32/native_modbus_scan_worker.h"
 #include "win32/native_serial_io_state.h"
 #include "win32/native_ui_preferences.h"
+#include "win32/native_send_history_state.h"
 #include "win32/win32_serial_port.h"
 
 #include <array>
@@ -308,7 +309,7 @@ private:
     NativeSerialIoState serialIoState_;
     native_storage::NativeSessionStore store_;
     std::vector<SerialPortDescriptor> availablePorts_;
-    std::vector<native_storage::SendHistoryEntry> sendHistoryEntries_;
+    NativeSendHistoryState sendHistoryState_;
     std::vector<native_storage::MatchCandidateRecord> candidateRecords_;
     std::string sessionId_ = "win32-native-session";
     std::optional<SerialOpenOptions> lastOpenOptions_;

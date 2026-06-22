@@ -91,6 +91,7 @@ if(SVM_BUILD_WIN32_APP)
         src/win32/native_serial_io_state.cpp
         src/win32/native_serial_profile_codec.cpp
         src/win32/native_send_codec.cpp
+        src/win32/native_send_history_state.cpp
         src/win32/native_ui_preferences.cpp
         src/win32/ui_text.cpp
         src/win32/utf8_win32.cpp
@@ -330,6 +331,18 @@ set_target_properties(native_send_codec_tests PROPERTIES
 )
 target_include_directories(native_send_codec_tests PRIVATE src)
 add_test(NAME native_send_codec_tests COMMAND native_send_codec_tests)
+
+add_executable(native_send_history_state_tests
+    tests/native_send_history_state_tests.cpp
+    src/win32/native_send_history_state.cpp
+)
+set_target_properties(native_send_history_state_tests PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+target_include_directories(native_send_history_state_tests PRIVATE src)
+add_test(NAME native_send_history_state_tests COMMAND native_send_history_state_tests)
 
 add_executable(native_win32_serial_tests
     tests/native_win32_serial_tests.cpp

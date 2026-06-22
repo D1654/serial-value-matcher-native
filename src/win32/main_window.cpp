@@ -6,6 +6,7 @@
 #include "win32/native_analysis_workflow.h"
 #include "win32/native_log_view.h"
 #include "win32/native_send_codec.h"
+#include "win32/native_send_history_state.h"
 #include "win32/native_serial_profile_codec.h"
 #include "win32/native_ui_preferences.h"
 #include "win32/resource.h"
@@ -2257,15 +2258,15 @@ void NativeMainWindow::refreshPorts() {
 
 void NativeMainWindow::refreshSendHistory() {
     SendMessageW(historyCombo_, CB_RESETCONTENT, 0, 0);
-    sendHistoryEntries_.clear();
+    sendHistoryState_.clear();
     SendMessageW(historyCombo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(tx(T::SendHistory)));
     if (store_.isOpen()) {
-        sendHistoryEntries_ = store_.recentSendHistory(30);
-        for (std::size_t index = 0; index < sendHistoryEntries_.size(); ++index) {
-            const native_storage::SendHistoryEntry& item = sendHistoryEntries_[index];
+        sendHistoryState_.setEntries(store_.recentSendHistory(30));
+        for (std::size_t index = 0; index < sendHistoryState_.entries().size(); ++index) {
+            const native_storage::SendHistoryEntry& item = sendHistoryState_.entries()[index];
             const LRESULT comboIndex = SendMessageW(historyCombo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(utf8ToWide(item.content).c_str()));
             if (comboIndex >= 0) {
-                SendMessageW(historyCombo_, CB_SETITEMDATA, static_cast<WPARAM>(comboIndex), static_cast<LPARAM>(index + 1));
+                SendMessageW(historyCombo_, CB_SETITEMDATA, static_cast<WPARAM>(comboIndex), static_cast<LPARAM>(sendHistoryState_.itemDataForIndex(index)));
             }
         }
     }
@@ -2282,16 +2283,15 @@ void NativeMainWindow::applySelectedHistory() {
         setControlText(sendEdit_, controlText(historyCombo_));
         return;
     }
-    const std::size_t historyIndex = static_cast<std::size_t>(itemData - 1);
-    if (historyIndex >= sendHistoryEntries_.size()) {
+    const std::optional<native_storage::SendHistoryEntry> history = sendHistoryState_.entryFromItemData(static_cast<NativeSendHistoryItemData>(itemData));
+    if (!history.has_value()) {
         return;
     }
 
-    const native_storage::SendHistoryEntry& history = sendHistoryEntries_[historyIndex];
-    setControlText(sendEdit_, utf8ToWide(history.content));
-    selectComboData(sendModeCombo_, history.payloadMode);
-    selectComboData(lineEndingCombo_, history.lineEnding);
-    selectComboData(textEncodingCombo_, history.textEncodingCodePage);
+    setControlText(sendEdit_, utf8ToWide(history->content));
+    selectComboData(sendModeCombo_, history->payloadMode);
+    selectComboData(lineEndingCombo_, history->lineEnding);
+    selectComboData(textEncodingCombo_, history->textEncodingCodePage);
     setStatus(tx(T::SendHistoryRestored));
 }
 
@@ -2567,12 +2567,12 @@ bool NativeMainWindow::sendPayloadFromText(const std::wstring& text, bool saveHi
 
     saveRawEvent("Tx", payload);
     if (saveHistory && store_.isOpen()) {
-        native_storage::SendHistoryEntry history;
-        history.content = wideToUtf8(text);
-        history.payloadMode = static_cast<int>(selectedComboData(sendModeCombo_, 0));
-        history.lineEnding = static_cast<int>(selectedComboData(lineEndingCombo_, 0));
-        history.textEncodingCodePage = static_cast<int>(selectedTextCodePage());
-        history.sentAtUtc = timestampText();
+        native_storage::SendHistoryEntry history = nativeMakeSendHistoryEntry(
+            wideToUtf8(text),
+            static_cast<int>(selectedComboData(sendModeCombo_, 0)),
+            static_cast<int>(selectedComboData(lineEndingCombo_, 0)),
+            static_cast<int>(selectedTextCodePage()),
+            timestampText());
         store_.saveSendHistory(history);
         refreshSendHistory();
     }
