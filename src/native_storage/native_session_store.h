@@ -298,6 +298,10 @@ private:
     const std::vector<ScanSessionRecord>& cachedScanSessions() const;
     const std::vector<MatchRunRecord>& cachedMatchRuns() const;
     const std::vector<RuleVerificationRunRecord>& cachedRuleVerificationRuns() const;
+    const std::vector<ScanAttemptRecord>& cachedScanAttempts(std::string_view sessionId) const;
+    const std::vector<ScanObservationRecord>& cachedScanObservations(std::string_view sessionId) const;
+    const std::vector<MatchCandidateRecord>& cachedMatchCandidates(std::string_view runId) const;
+    const std::vector<RuleVerificationResultRecord>& cachedRuleVerificationResults(std::string_view verificationRunId) const;
 
     std::filesystem::path storeDirectory_;
     bool opened_ = false;
@@ -312,6 +316,18 @@ private:
     mutable std::vector<MatchRunRecord> matchRunsCache_;
     mutable bool ruleVerificationRunsCacheValid_ = false;
     mutable std::vector<RuleVerificationRunRecord> ruleVerificationRunsCache_;
+    mutable bool scanAttemptsCacheValid_ = false;
+    mutable std::string scanAttemptsCacheSessionId_;
+    mutable std::vector<ScanAttemptRecord> scanAttemptsCache_;
+    mutable bool scanObservationsCacheValid_ = false;
+    mutable std::string scanObservationsCacheSessionId_;
+    mutable std::vector<ScanObservationRecord> scanObservationsCache_;
+    mutable bool matchCandidatesCacheValid_ = false;
+    mutable std::string matchCandidatesCacheRunId_;
+    mutable std::vector<MatchCandidateRecord> matchCandidatesCache_;
+    mutable bool ruleVerificationResultsCacheValid_ = false;
+    mutable std::string ruleVerificationResultsCacheRunId_;
+    mutable std::vector<RuleVerificationResultRecord> ruleVerificationResultsCache_;
 };
 
 } // namespace svm::native_storage

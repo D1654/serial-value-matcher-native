@@ -695,9 +695,17 @@ bool NativeSessionStore::open(const std::filesystem::path& storeDirectory) {
     scanSessionsCacheValid_ = false;
     matchRunsCacheValid_ = false;
     ruleVerificationRunsCacheValid_ = false;
+    scanAttemptsCacheValid_ = false;
+    scanObservationsCacheValid_ = false;
+    matchCandidatesCacheValid_ = false;
+    ruleVerificationResultsCacheValid_ = false;
     scanSessionsCache_.clear();
     matchRunsCache_.clear();
     ruleVerificationRunsCache_.clear();
+    scanAttemptsCache_.clear();
+    scanObservationsCache_.clear();
+    matchCandidatesCache_.clear();
+    ruleVerificationResultsCache_.clear();
     storeDirectory_ = storeDirectory;
     opened_ = true;
     if (!initializeSchema()) {
@@ -1010,53 +1018,14 @@ std::vector<ScanAttemptRecord> NativeSessionStore::scanAttempts(std::string_view
     if (sessionId.empty() || !scanSession(sessionId).has_value()) {
         return {};
     }
-
-    std::vector<ScanAttemptRecord> attempts;
-    const bool ok = visitRecords(kScanAttemptsFile, [&](const Record& record) {
-        ScanAttemptRecord attempt = scanAttemptFromRecord(record);
-        if (attempt.sessionId == sessionId) {
-            attempts.push_back(std::move(attempt));
-        }
-        return true;
-    });
-    if (!ok) {
-        return {};
-    }
-    std::sort(attempts.begin(), attempts.end(), [](const ScanAttemptRecord& left, const ScanAttemptRecord& right) {
-        if (left.blockIndex != right.blockIndex) {
-            return left.blockIndex < right.blockIndex;
-        }
-        if (left.attemptIndex != right.attemptIndex) {
-            return left.attemptIndex < right.attemptIndex;
-        }
-        return left.id < right.id;
-    });
-    return attempts;
+    return cachedScanAttempts(sessionId);
 }
 
 std::vector<ScanObservationRecord> NativeSessionStore::scanObservations(std::string_view sessionId) const {
     if (sessionId.empty() || !scanSession(sessionId).has_value()) {
         return {};
     }
-
-    std::vector<ScanObservationRecord> observations;
-    const bool ok = visitRecords(kScanObservationsFile, [&](const Record& record) {
-        ScanObservationRecord observation = scanObservationFromRecord(record);
-        if (observation.sessionId == sessionId) {
-            observations.push_back(std::move(observation));
-        }
-        return true;
-    });
-    if (!ok) {
-        return {};
-    }
-    std::sort(observations.begin(), observations.end(), [](const ScanObservationRecord& left, const ScanObservationRecord& right) {
-        if (left.address != right.address) {
-            return left.address < right.address;
-        }
-        return left.id < right.id;
-    });
-    return observations;
+    return cachedScanObservations(sessionId);
 }
 
 bool NativeSessionStore::saveMatchRun(MatchRunRecord run, std::vector<MatchCandidateRecord> candidates) {
@@ -1148,25 +1117,7 @@ std::vector<MatchCandidateRecord> NativeSessionStore::matchCandidates(std::strin
     if (runId.empty() || !matchRun(runId).has_value()) {
         return {};
     }
-
-    std::vector<MatchCandidateRecord> candidates;
-    const bool ok = visitRecords(kMatchCandidatesFile, [&](const Record& record) {
-        MatchCandidateRecord candidate = matchCandidateFromRecord(record);
-        if (candidate.runId == runId) {
-            candidates.push_back(std::move(candidate));
-        }
-        return true;
-    });
-    if (!ok) {
-        return {};
-    }
-    std::sort(candidates.begin(), candidates.end(), [](const MatchCandidateRecord& left, const MatchCandidateRecord& right) {
-        if (left.rankIndex != right.rankIndex) {
-            return left.rankIndex < right.rankIndex;
-        }
-        return left.id < right.id;
-    });
-    return candidates;
+    return cachedMatchCandidates(runId);
 }
 
 bool NativeSessionStore::saveProtocolFieldRule(ProtocolFieldRuleRecord rule) {
@@ -1305,22 +1256,7 @@ std::vector<RuleVerificationResultRecord> NativeSessionStore::ruleVerificationRe
     if (verificationRunId.empty() || !ruleVerificationRun(verificationRunId).has_value()) {
         return {};
     }
-
-    std::vector<RuleVerificationResultRecord> results;
-    const bool ok = visitRecords(kRuleVerificationResultsFile, [&](const Record& record) {
-        RuleVerificationResultRecord result = verificationResultFromRecord(record);
-        if (result.verificationRunId == verificationRunId) {
-            results.push_back(std::move(result));
-        }
-        return true;
-    });
-    if (!ok) {
-        return {};
-    }
-    std::sort(results.begin(), results.end(), [](const RuleVerificationResultRecord& left, const RuleVerificationResultRecord& right) {
-        return left.id < right.id;
-    });
-    return results;
+    return cachedRuleVerificationResults(verificationRunId);
 }
 
 bool NativeSessionStore::ensureOpen(std::string_view operation) const {
@@ -1699,12 +1635,32 @@ void NativeSessionStore::invalidateCachesForFile(std::string_view fileName) cons
     if (fileName == kScanSessionsFile) {
         scanSessionsCacheValid_ = false;
         scanSessionsCache_.clear();
+        scanAttemptsCacheValid_ = false;
+        scanObservationsCacheValid_ = false;
+        scanAttemptsCache_.clear();
+        scanObservationsCache_.clear();
     } else if (fileName == kMatchRunsFile) {
         matchRunsCacheValid_ = false;
         matchRunsCache_.clear();
+        matchCandidatesCacheValid_ = false;
+        matchCandidatesCache_.clear();
     } else if (fileName == kRuleVerificationRunsFile) {
         ruleVerificationRunsCacheValid_ = false;
         ruleVerificationRunsCache_.clear();
+        ruleVerificationResultsCacheValid_ = false;
+        ruleVerificationResultsCache_.clear();
+    } else if (fileName == kScanAttemptsFile) {
+        scanAttemptsCacheValid_ = false;
+        scanAttemptsCache_.clear();
+    } else if (fileName == kScanObservationsFile) {
+        scanObservationsCacheValid_ = false;
+        scanObservationsCache_.clear();
+    } else if (fileName == kMatchCandidatesFile) {
+        matchCandidatesCacheValid_ = false;
+        matchCandidatesCache_.clear();
+    } else if (fileName == kRuleVerificationResultsFile) {
+        ruleVerificationResultsCacheValid_ = false;
+        ruleVerificationResultsCache_.clear();
     }
 }
 
@@ -1757,6 +1713,118 @@ const std::vector<RuleVerificationRunRecord>& NativeSessionStore::cachedRuleVeri
         ruleVerificationRunsCache_.clear();
     }
     return ruleVerificationRunsCache_;
+}
+
+const std::vector<ScanAttemptRecord>& NativeSessionStore::cachedScanAttempts(std::string_view sessionId) const {
+    if (scanAttemptsCacheValid_ && scanAttemptsCacheSessionId_ == sessionId) {
+        return scanAttemptsCache_;
+    }
+    scanAttemptsCacheValid_ = false;
+    scanAttemptsCacheSessionId_ = std::string(sessionId);
+    scanAttemptsCache_.clear();
+    const bool ok = visitRecords(kScanAttemptsFile, [&](const Record& record) {
+        ScanAttemptRecord attempt = scanAttemptFromRecord(record);
+        if (attempt.sessionId == sessionId) {
+            scanAttemptsCache_.push_back(std::move(attempt));
+        }
+        return true;
+    });
+    if (!ok) {
+        scanAttemptsCache_.clear();
+        return scanAttemptsCache_;
+    }
+    std::sort(scanAttemptsCache_.begin(), scanAttemptsCache_.end(), [](const ScanAttemptRecord& left, const ScanAttemptRecord& right) {
+        if (left.blockIndex != right.blockIndex) {
+            return left.blockIndex < right.blockIndex;
+        }
+        if (left.attemptIndex != right.attemptIndex) {
+            return left.attemptIndex < right.attemptIndex;
+        }
+        return left.id < right.id;
+    });
+    scanAttemptsCacheValid_ = true;
+    return scanAttemptsCache_;
+}
+
+const std::vector<ScanObservationRecord>& NativeSessionStore::cachedScanObservations(std::string_view sessionId) const {
+    if (scanObservationsCacheValid_ && scanObservationsCacheSessionId_ == sessionId) {
+        return scanObservationsCache_;
+    }
+    scanObservationsCacheValid_ = false;
+    scanObservationsCacheSessionId_ = std::string(sessionId);
+    scanObservationsCache_.clear();
+    const bool ok = visitRecords(kScanObservationsFile, [&](const Record& record) {
+        ScanObservationRecord observation = scanObservationFromRecord(record);
+        if (observation.sessionId == sessionId) {
+            scanObservationsCache_.push_back(std::move(observation));
+        }
+        return true;
+    });
+    if (!ok) {
+        scanObservationsCache_.clear();
+        return scanObservationsCache_;
+    }
+    std::sort(scanObservationsCache_.begin(), scanObservationsCache_.end(), [](const ScanObservationRecord& left, const ScanObservationRecord& right) {
+        if (left.address != right.address) {
+            return left.address < right.address;
+        }
+        return left.id < right.id;
+    });
+    scanObservationsCacheValid_ = true;
+    return scanObservationsCache_;
+}
+
+const std::vector<MatchCandidateRecord>& NativeSessionStore::cachedMatchCandidates(std::string_view runId) const {
+    if (matchCandidatesCacheValid_ && matchCandidatesCacheRunId_ == runId) {
+        return matchCandidatesCache_;
+    }
+    matchCandidatesCacheValid_ = false;
+    matchCandidatesCacheRunId_ = std::string(runId);
+    matchCandidatesCache_.clear();
+    const bool ok = visitRecords(kMatchCandidatesFile, [&](const Record& record) {
+        MatchCandidateRecord candidate = matchCandidateFromRecord(record);
+        if (candidate.runId == runId) {
+            matchCandidatesCache_.push_back(std::move(candidate));
+        }
+        return true;
+    });
+    if (!ok) {
+        matchCandidatesCache_.clear();
+        return matchCandidatesCache_;
+    }
+    std::sort(matchCandidatesCache_.begin(), matchCandidatesCache_.end(), [](const MatchCandidateRecord& left, const MatchCandidateRecord& right) {
+        if (left.rankIndex != right.rankIndex) {
+            return left.rankIndex < right.rankIndex;
+        }
+        return left.id < right.id;
+    });
+    matchCandidatesCacheValid_ = true;
+    return matchCandidatesCache_;
+}
+
+const std::vector<RuleVerificationResultRecord>& NativeSessionStore::cachedRuleVerificationResults(std::string_view verificationRunId) const {
+    if (ruleVerificationResultsCacheValid_ && ruleVerificationResultsCacheRunId_ == verificationRunId) {
+        return ruleVerificationResultsCache_;
+    }
+    ruleVerificationResultsCacheValid_ = false;
+    ruleVerificationResultsCacheRunId_ = std::string(verificationRunId);
+    ruleVerificationResultsCache_.clear();
+    const bool ok = visitRecords(kRuleVerificationResultsFile, [&](const Record& record) {
+        RuleVerificationResultRecord result = verificationResultFromRecord(record);
+        if (result.verificationRunId == verificationRunId) {
+            ruleVerificationResultsCache_.push_back(std::move(result));
+        }
+        return true;
+    });
+    if (!ok) {
+        ruleVerificationResultsCache_.clear();
+        return ruleVerificationResultsCache_;
+    }
+    std::sort(ruleVerificationResultsCache_.begin(), ruleVerificationResultsCache_.end(), [](const RuleVerificationResultRecord& left, const RuleVerificationResultRecord& right) {
+        return left.id < right.id;
+    });
+    ruleVerificationResultsCacheValid_ = true;
+    return ruleVerificationResultsCache_;
 }
 
 std::filesystem::path NativeSessionStore::filePath(std::string_view fileName) const {
