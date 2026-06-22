@@ -5,6 +5,7 @@
 #include "win32/native_layout_metrics.h"
 #include "win32/native_analysis_workflow.h"
 #include "win32/native_log_view.h"
+#include "win32/native_log_scroll_state.h"
 #include "win32/native_send_codec.h"
 #include "win32/native_send_control_state.h"
 #include "win32/native_send_history_state.h"
@@ -987,17 +988,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             saveCurrentSerialProfile();
             return 0;
         case IDC_PAUSE_SCROLL_BUTTON:
-            if (!scrollPaused_) {
-                flushPendingLogEntries();
-            }
-            scrollPaused_ = !scrollPaused_;
-            SetWindowTextW(pauseScrollButton_, scrollPaused_ ? tx(T::ResumeScrollButton) : tx(T::PauseScrollButton));
-            if (!scrollPaused_) {
-                rebuildLogView();
-                hiddenLogLineCount_ = 0;
-                followLatestLog();
-            }
-            setStatus(scrollPaused_ ? tx(T::PauseScrollStatus) : tx(T::ResumeScrollStatus));
+            toggleLogScrollPause();
             return 0;
         case IDC_HISTORY_COMBO:
             if (HIWORD(wParam) == CBN_SELCHANGE) {
@@ -1043,17 +1034,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             sendPayload();
             return 0;
         case IDM_TOOLS_PAUSE_SCROLL:
-            if (!scrollPaused_) {
-                flushPendingLogEntries();
-            }
-            scrollPaused_ = !scrollPaused_;
-            SetWindowTextW(pauseScrollButton_, scrollPaused_ ? tx(T::ResumeScrollButton) : tx(T::PauseScrollButton));
-            if (!scrollPaused_) {
-                rebuildLogView();
-                hiddenLogLineCount_ = 0;
-                followLatestLog();
-            }
-            setStatus(scrollPaused_ ? tx(T::PauseScrollStatus) : tx(T::ResumeScrollStatus));
+            toggleLogScrollPause();
             return 0;
         case IDM_TOOLS_FOLLOW_LATEST_LOG:
             followLatestLog();
@@ -2912,10 +2893,8 @@ void NativeMainWindow::clearLog() {
     visibleLogLineCount_ = 0;
     logTrimmedSinceRebuild_ = 0;
     SetWindowTextW(receiveLog_, L"");
-    hiddenLogLineCount_ = 0;
     logFilterState_.clear();
-    logAutoFollow_ = true;
-    logHistoryReadNoticeShown_ = false;
+    logScrollState_.clearContent();
     setStatus(tx(T::ClearLogStatus));
 }
 
@@ -2957,7 +2936,7 @@ std::size_t NativeMainWindow::rebuildLogView() {
     }
     logFilterState_.resetSearch();
     visibleLogLineCount_ = visibleLines.size();
-    if (logAutoFollow_) {
+    if (logScrollState_.autoFollow()) {
         nativeLogScrollToBottom(receiveLog_);
     } else {
         nativeLogRestoreFirstVisibleLine(receiveLog_, firstVisibleLine);
@@ -3002,12 +2981,7 @@ void NativeMainWindow::flushPendingLogEntries() {
         return;
     }
 
-    const bool atBottom = nativeLogIsAtBottom(receiveLog_);
-    if (atBottom) {
-        logAutoFollow_ = true;
-        logHistoryReadNoticeShown_ = false;
-    }
-    const bool shouldFollow = logAutoFollow_ && atBottom;
+    const NativeLogFollowDecision followDecision = logScrollState_.followDecision(nativeLogIsAtBottom(receiveLog_));
     const int firstVisibleLine = nativeLogFirstVisibleLine(receiveLog_);
     const NativeLogSelection selection = nativeLogSelection(receiveLog_);
 
@@ -3037,16 +3011,14 @@ void NativeMainWindow::flushPendingLogEntries() {
         return;
     }
 
-    if (shouldFollow) {
+    if (followDecision.shouldFollow) {
         nativeLogScrollToBottom(receiveLog_);
         return;
     }
-    logAutoFollow_ = false;
     nativeLogRestoreFirstVisibleLine(receiveLog_, firstVisibleLine);
     nativeLogSetSelection(receiveLog_, selection.start, selection.end);
-    if (!logHistoryReadNoticeShown_) {
+    if (followDecision.shouldShowHistoryNotice) {
         setStatus(tx(T::LogHistoryReadStatus));
-        logHistoryReadNoticeShown_ = true;
     }
 }
 
@@ -3058,25 +3030,18 @@ void NativeMainWindow::appendVisibleLogText(NativeLogKind kind, const std::wstri
     if (receiveLog_ == nullptr) {
         return;
     }
-    const bool atBottom = nativeLogIsAtBottom(receiveLog_);
-    if (atBottom) {
-        logAutoFollow_ = true;
-        logHistoryReadNoticeShown_ = false;
-    }
-    const bool shouldFollow = logAutoFollow_ && atBottom;
+    const NativeLogFollowDecision followDecision = logScrollState_.followDecision(nativeLogIsAtBottom(receiveLog_));
     const int firstVisibleLine = nativeLogFirstVisibleLine(receiveLog_);
     const NativeLogSelection selection = nativeLogSelection(receiveLog_);
     insertVisibleLogText(kind, text);
-    if (shouldFollow) {
+    if (followDecision.shouldFollow) {
         nativeLogScrollToBottom(receiveLog_);
         return;
     }
-    logAutoFollow_ = false;
     nativeLogRestoreFirstVisibleLine(receiveLog_, firstVisibleLine);
     nativeLogSetSelection(receiveLog_, selection.start, selection.end);
-    if (!logHistoryReadNoticeShown_) {
+    if (followDecision.shouldShowHistoryNotice) {
         setStatus(tx(T::LogHistoryReadStatus));
-        logHistoryReadNoticeShown_ = true;
     }
 }
 
@@ -3098,9 +3063,9 @@ void NativeMainWindow::addLogEntry(NativeLogEntry entry) {
     }
     logTrimmedSinceRebuild_ += trimmedCount;
 
-    if (scrollPaused_) {
-        ++hiddenLogLineCount_;
-        setStatus(uiString(T::ScrollPausedPrefix) + std::to_wstring(hiddenLogLineCount_) + uiString(T::HiddenLinesSuffix));
+    if (logScrollState_.paused()) {
+        const std::size_t hiddenLineCount = logScrollState_.noteHiddenLine();
+        setStatus(uiString(T::ScrollPausedPrefix) + std::to_wstring(hiddenLineCount) + uiString(T::HiddenLinesSuffix));
         return;
     }
 
@@ -3169,21 +3134,35 @@ void NativeMainWindow::findNextLogMatch() {
 
     nativeLogSetSelection(receiveLog_, search.position, search.position + search.length);
     nativeLogScrollCaret(receiveLog_);
-    logAutoFollow_ = false;
-    logHistoryReadNoticeShown_ = true;
+    logScrollState_.markHistoryRead();
     setStatus(uiString(T::LogFindMatchedPrefix) + needle + uiString(T::ChinesePeriod));
 }
 
-void NativeMainWindow::followLatestLog() {
-    if (scrollPaused_) {
-        scrollPaused_ = false;
+void NativeMainWindow::toggleLogScrollPause() {
+    if (!logScrollState_.paused()) {
+        flushPendingLogEntries();
+    }
+    const bool paused = logScrollState_.togglePause();
+    SetWindowTextW(pauseScrollButton_, paused ? tx(T::ResumeScrollButton) : tx(T::PauseScrollButton));
+    if (!paused) {
+        rebuildLogView();
+        followLatestLogSilently();
+    }
+    setStatus(paused ? tx(T::PauseScrollStatus) : tx(T::ResumeScrollStatus));
+}
+
+void NativeMainWindow::followLatestLogSilently() {
+    if (logScrollState_.paused()) {
+        logScrollState_.resume();
         SetWindowTextW(pauseScrollButton_, tx(T::PauseScrollButton));
-        hiddenLogLineCount_ = 0;
         rebuildLogView();
     }
-    logAutoFollow_ = true;
-    logHistoryReadNoticeShown_ = false;
+    logScrollState_.followLatest();
     nativeLogScrollToBottom(receiveLog_);
+}
+
+void NativeMainWindow::followLatestLog() {
+    followLatestLogSilently();
     setStatus(tx(T::FollowLatestLogStatus));
 }
 

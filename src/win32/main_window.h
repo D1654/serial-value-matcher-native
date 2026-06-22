@@ -13,6 +13,7 @@
 #include "native_storage/native_session_store.h"
 #include "win32/native_file_send_state.h"
 #include "win32/native_log_model.h"
+#include "win32/native_log_scroll_state.h"
 #include "win32/native_modbus_scan_worker.h"
 #include "win32/native_serial_io_state.h"
 #include "win32/native_ui_preferences.h"
@@ -140,6 +141,8 @@ private:
     void findNextLogMatch();
     void copyVisibleLogToClipboard();
     void exportVisibleLog();
+    void toggleLogScrollPause();
+    void followLatestLogSilently();
     void followLatestLog();
     void setStatus(const std::wstring& text);
     void updateStatusSegments();
@@ -319,10 +322,7 @@ private:
     std::string cachedCandidateRunId_;
     std::string latestVerificationRunId_;
     bool waitingReconnect_ = false;
-    bool scrollPaused_ = false;
-    bool logAutoFollow_ = true;
-    bool logHistoryReadNoticeShown_ = false;
-    std::size_t hiddenLogLineCount_ = 0;
+    NativeLogScrollState logScrollState_;
     std::uint64_t txByteCount_ = 0;
     std::uint64_t rxByteCount_ = 0;
     NativeSendControlState sendControlState_;
