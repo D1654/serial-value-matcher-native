@@ -12,6 +12,7 @@
 
 #include "native_storage/native_session_store.h"
 #include "win32/native_candidate_cache_state.h"
+#include "win32/native_connection_ui_state.h"
 #include "win32/native_file_send_state.h"
 #include "win32/native_log_model.h"
 #include "win32/native_log_scroll_state.h"
@@ -161,6 +162,7 @@ private:
     std::string selectedPortName() const;
     SerialOpenOptions currentOpenOptions() const;
     void applySerialLineControl(WORD controlId);
+    void updateConnectionButtonState();
     void updateRtsControlState();
     void applyLogTheme(int themeIndex);
     void applyLogCacheLimit(std::size_t visibleCharLimit);
@@ -318,6 +320,7 @@ private:
     std::vector<SerialPortDescriptor> availablePorts_;
     NativeSendHistoryState sendHistoryState_;
     NativeCandidateCacheState candidateCacheState_;
+    NativeConnectionUiState connectionUiState_;
     std::string sessionId_ = "win32-native-session";
     NativeReconnectState reconnectState_;
     NativeLogScrollState logScrollState_;
