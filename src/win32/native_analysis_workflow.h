@@ -34,6 +34,13 @@ struct NativeRuleVerificationBuildResult {
     std::vector<native_storage::RuleVerificationResultRecord> results;
 };
 
+struct NativeCandidateAnalysisBuildResult {
+    bool success = false;
+    std::string errorMessage;
+    native_storage::MatchRunRecord run;
+    std::vector<native_storage::MatchCandidateRecord> candidates;
+};
+
 core::analysis::RegisterSample nativeSampleFromObservation(const native_storage::ScanObservationRecord& observation);
 NativeObservationAddressIndex nativeBuildObservationAddressIndex(const std::vector<native_storage::ScanObservationRecord>& observations);
 const native_storage::ScanObservationRecord* nativeFindIndexedObservation(
@@ -58,6 +65,17 @@ NativeRuleVerificationBuildResult nativeBuildRuleVerificationResult(
     const std::vector<native_storage::ScanObservationRecord>& observations,
     const std::string& verificationRunId,
     const std::string& createdAtUtc);
+NativeCandidateAnalysisBuildResult nativeBuildCandidateAnalysisRun(
+    const native_storage::ScanSessionRecord& session,
+    const std::vector<native_storage::ScanObservationRecord>& observations,
+    const std::string& targetLabel,
+    double targetValue,
+    const std::string& targetUnit,
+    double toleranceAbsolute,
+    const std::string& runId,
+    const std::string& sampledAtUtc,
+    const std::string& createdAtUtc,
+    const std::string& observedAtUtc);
 
 } // namespace svm::win32
 

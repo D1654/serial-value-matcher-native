@@ -11,7 +11,6 @@
 #include "win32/win32_serial_enumerator.h"
 #include "win32/win32_serial_types.h"
 
-#include "core/analysis_core.h"
 #include "core/modbus_core.h"
 
 #include <algorithm>
@@ -36,7 +35,6 @@ namespace {
 
 using T = TextId;
 
-namespace analysis_core = ::svm::core::analysis;
 namespace modbus_core = ::svm::core::modbus;
 
 constexpr wchar_t kWindowClassName[] = L"SvmNativeMainWindow";
@@ -4144,55 +4142,28 @@ void NativeMainWindow::showAnalysisWorkspace() {
     bool toleranceOk = false;
     const double tolerance = std::max(0.0, textToDouble(toleranceEdit_, 0.0, &toleranceOk));
 
-    std::vector<analysis_core::RegisterSample> samples;
-    samples.reserve(observations.size());
-    for (const native_storage::ScanObservationRecord& observation : observations) {
-        samples.push_back(nativeSampleFromObservation(observation));
-    }
-
-    analysis_core::TargetValue target;
-    target.label = wideToUtf8(analysisInputText(targetLabelEdit_));
-    target.value = targetValue;
-    target.unit = wideToUtf8(analysisInputText(targetUnitEdit_));
-
-    analysis_core::CandidateGenerationOptions options;
-    options.scaleTransforms = {{1.0, 0.0}, {0.1, 0.0}, {0.01, 0.0}, {0.001, 0.0}, {10.0, 0.0}};
-    options.tolerance.absolute = toleranceOk ? tolerance : 0.0;
-    options.maxCandidates = 30;
-
-    const auto result = analysis_core::generateValueCandidates(samples, target, options);
-    if (!result.success) {
-        setStatus(utf8ToWide(result.errorMessage));
+    const std::string runId = "match-" + timestampIdText();
+    const NativeCandidateAnalysisBuildResult analysis = nativeBuildCandidateAnalysisRun(
+        *session,
+        observations,
+        wideToUtf8(analysisInputText(targetLabelEdit_)),
+        targetValue,
+        wideToUtf8(analysisInputText(targetUnitEdit_)),
+        toleranceOk ? tolerance : 0.0,
+        runId,
+        timestampText(),
+        timestampText(),
+        timestampText());
+    if (!analysis.success) {
+        setStatus(utf8ToWide(analysis.errorMessage));
         return;
     }
-    if (result.candidates.empty()) {
+    if (analysis.candidates.empty()) {
         setStatus(tx(T::AnalysisNoCandidates));
         return;
     }
 
-    const std::string runId = "match-" + timestampIdText();
-    native_storage::MatchRunRecord run;
-    run.runId = runId;
-    run.sourceScanSessionId = session->sessionId;
-    run.targetLabel = target.label;
-    run.targetValue = target.value;
-    run.targetUnit = target.unit;
-    run.sampledAtUtc = timestampText();
-    run.toleranceAbsolute = options.tolerance.absolute;
-    run.toleranceRelativeRatio = options.tolerance.relativeRatio;
-    run.createdAtUtc = timestampText();
-
-    std::vector<native_storage::MatchCandidateRecord> candidateRecords;
-    candidateRecords.reserve(result.candidates.size());
-    for (std::size_t index = 0; index < result.candidates.size(); ++index) {
-        candidateRecords.push_back(nativeCandidateRecordFromCore(
-            result.candidates[index],
-            runId,
-            static_cast<int>(index),
-            timestampText()));
-    }
-
-    if (!store_.saveMatchRun(run, candidateRecords)) {
+    if (!store_.saveMatchRun(analysis.run, analysis.candidates)) {
         setStatus(utf8ToWide(store_.lastErrorText()));
         return;
     }
@@ -4202,7 +4173,7 @@ void NativeMainWindow::showAnalysisWorkspace() {
     const std::wstring summary = uiString(T::AnalysisSavedPrefix)
         + utf8ToWide(session->sessionId)
         + uiString(T::AnalysisSavedMid)
-        + std::to_wstring(result.candidates.size())
+        + std::to_wstring(analysis.candidates.size())
         + uiString(T::AnalysisSavedRun)
         + utf8ToWide(runId)
         + uiString(T::ChinesePeriod);

@@ -173,6 +173,62 @@ std::string nativeRenderRuleVerificationMarkdownReport(
     return core::report::renderRuleVerificationMarkdownReport(reportRun, reportResults);
 }
 
+NativeCandidateAnalysisBuildResult nativeBuildCandidateAnalysisRun(
+    const native_storage::ScanSessionRecord& session,
+    const std::vector<native_storage::ScanObservationRecord>& observations,
+    const std::string& targetLabel,
+    double targetValue,
+    const std::string& targetUnit,
+    double toleranceAbsolute,
+    const std::string& runId,
+    const std::string& sampledAtUtc,
+    const std::string& createdAtUtc,
+    const std::string& observedAtUtc) {
+    std::vector<core::analysis::RegisterSample> samples;
+    samples.reserve(observations.size());
+    for (const native_storage::ScanObservationRecord& observation : observations) {
+        samples.push_back(nativeSampleFromObservation(observation));
+    }
+
+    core::analysis::TargetValue target;
+    target.label = targetLabel;
+    target.value = targetValue;
+    target.unit = targetUnit;
+
+    core::analysis::CandidateGenerationOptions options;
+    options.scaleTransforms = {{1.0, 0.0}, {0.1, 0.0}, {0.01, 0.0}, {0.001, 0.0}, {10.0, 0.0}};
+    options.tolerance.absolute = toleranceAbsolute;
+    options.maxCandidates = 30;
+
+    const auto result = core::analysis::generateValueCandidates(samples, target, options);
+    NativeCandidateAnalysisBuildResult build;
+    build.success = result.success;
+    build.errorMessage = result.errorMessage;
+    if (!result.success) {
+        return build;
+    }
+
+    build.run.runId = runId;
+    build.run.sourceScanSessionId = session.sessionId;
+    build.run.targetLabel = target.label;
+    build.run.targetValue = target.value;
+    build.run.targetUnit = target.unit;
+    build.run.sampledAtUtc = sampledAtUtc;
+    build.run.toleranceAbsolute = options.tolerance.absolute;
+    build.run.toleranceRelativeRatio = options.tolerance.relativeRatio;
+    build.run.createdAtUtc = createdAtUtc;
+
+    build.candidates.reserve(result.candidates.size());
+    for (std::size_t index = 0; index < result.candidates.size(); ++index) {
+        build.candidates.push_back(nativeCandidateRecordFromCore(
+            result.candidates[index],
+            runId,
+            static_cast<int>(index),
+            observedAtUtc));
+    }
+    return build;
+}
+
 NativeRuleVerificationBuildResult nativeBuildRuleVerificationResult(
     const native_storage::ScanSessionRecord& session,
     const std::vector<native_storage::ProtocolFieldRuleRecord>& rules,
