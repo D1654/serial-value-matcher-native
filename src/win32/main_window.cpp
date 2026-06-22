@@ -24,7 +24,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
-#include <cwctype>
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -660,57 +659,6 @@ std::wstring decodeBytesToText(const std::vector<std::uint8_t>& bytes, UINT code
         static_cast<int>(bytes.size()),
         text.data(),
         required);
-    return text;
-}
-
-std::wstring sanitizeLogText(std::wstring_view text) {
-    std::wstring sanitized;
-    sanitized.reserve(text.size());
-    for (wchar_t ch : text) {
-        switch (ch) {
-        case L'\r':
-            sanitized.append(L"\\r");
-            break;
-        case L'\n':
-            sanitized.append(L"\\n");
-            break;
-        case L'\t':
-            sanitized.append(L"\\t");
-            break;
-        default:
-            sanitized.push_back(ch < 0x20 ? L'.' : ch);
-            break;
-        }
-    }
-    return sanitized;
-}
-
-std::wstring lowerCopy(std::wstring_view text) {
-    std::wstring lowered;
-    lowered.reserve(text.size());
-    for (wchar_t ch : text) {
-        lowered.push_back(static_cast<wchar_t>(std::towlower(ch)));
-    }
-    return lowered;
-}
-
-bool containsCaseInsensitive(std::wstring_view haystack, std::wstring_view needle) {
-    if (needle.empty()) {
-        return true;
-    }
-    return lowerCopy(haystack).find(lowerCopy(needle)) != std::wstring::npos;
-}
-
-std::wstring clipRenderedLogLine(std::wstring text) {
-    if (text.size() <= kMaxRenderedLogLineChars) {
-        return text;
-    }
-    const std::wstring suffix = tx(T::LogEntryClippedSuffix);
-    const std::size_t keep = kMaxRenderedLogLineChars > suffix.size()
-        ? kMaxRenderedLogLineChars - suffix.size()
-        : kMaxRenderedLogLineChars;
-    text.resize(keep);
-    text += suffix;
     return text;
 }
 
@@ -3528,31 +3476,10 @@ void NativeMainWindow::appendLog(NativeLogKind kind, const std::wstring& line) {
 }
 
 void NativeMainWindow::appendPayloadLog(NativeLogKind kind, const std::vector<std::uint8_t>& payload) {
-    const wchar_t* prefix = L"[DATA]";
-    switch (kind) {
-    case NativeLogKind::Tx:
-        prefix = L"[TX]";
-        break;
-    case NativeLogKind::Rx:
-        prefix = L"[RX]";
-        break;
-    case NativeLogKind::ModbusTx:
-        prefix = L"[Modbus TX]";
-        break;
-    case NativeLogKind::ModbusRx:
-        prefix = L"[Modbus RX]";
-        break;
-    case NativeLogKind::System:
-        prefix = L"[\u7CFB\u7EDF]";
-        break;
-    case NativeLogKind::Error:
-        prefix = L"[\u9519\u8BEF]";
-        break;
-    }
     NativeLogEntry entry;
     entry.kind = kind;
     entry.timestamp = localClockText();
-    entry.payloadPrefix = prefix;
+    entry.payloadPrefix = std::wstring(nativeLogPayloadPrefix(kind));
     entry.payload = payload;
     entry.hasPayload = true;
     addLogEntry(std::move(entry));
@@ -3628,7 +3555,7 @@ void NativeMainWindow::queueVisibleLogEntry(const NativeLogEntry& entry) {
 
 void NativeMainWindow::queueVisibleLogText(NativeLogKind kind, std::wstring text) {
     pendingLogChars_ += text.size();
-    pendingLogLines_.push_back(PendingLogLine{kind, std::move(text)});
+    pendingLogLines_.push_back(NativePendingLogLine{kind, std::move(text)});
     ++logQueuedLineCount_;
     scheduleLogFlush();
 }
@@ -3677,7 +3604,7 @@ void NativeMainWindow::flushPendingLogEntries() {
             std::wstring batchText;
             std::size_t batchLineCount = 0;
             while (!pendingLogLines_.empty() && pendingLogLines_.front().kind == batchKind) {
-                PendingLogLine& nextLine = pendingLogLines_.front();
+                NativePendingLogLine& nextLine = pendingLogLines_.front();
                 if (!batchText.empty() && batchText.size() + nextLine.text.size() > kLogInsertBatchChars) {
                     break;
                 }
@@ -3795,7 +3722,7 @@ std::wstring NativeMainWindow::renderLogEntry(const NativeLogEntry& entry) const
     } else {
         line += entry.text;
     }
-    line = clipRenderedLogLine(sanitizeLogText(line));
+    line = clipRenderedLogLine(sanitizeLogText(line), kMaxRenderedLogLineChars, tx(T::LogEntryClippedSuffix));
     line += L"\r\n";
     return line;
 }

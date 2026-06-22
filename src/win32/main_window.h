@@ -11,6 +11,7 @@
 #include <windows.h>
 
 #include "native_storage/native_session_store.h"
+#include "win32/native_log_model.h"
 #include "win32/win32_serial_port.h"
 
 #include <array>
@@ -25,24 +26,6 @@
 
 namespace svm::win32 {
 
-enum class NativeLogKind {
-    System,
-    Tx,
-    Rx,
-    ModbusTx,
-    ModbusRx,
-    Error,
-};
-
-struct NativeLogEntry {
-    NativeLogKind kind = NativeLogKind::System;
-    std::wstring timestamp;
-    std::wstring text;
-    std::wstring payloadPrefix;
-    std::vector<std::uint8_t> payload;
-    bool hasPayload = false;
-};
-
 class NativeMainWindow final {
 public:
     bool create(HINSTANCE instance);
@@ -56,10 +39,6 @@ private:
     struct ModbusWorkerResult;
     struct ModbusWorkerContext;
     struct ModbusWorkerProgress;
-    struct PendingLogLine {
-        NativeLogKind kind = NativeLogKind::System;
-        std::wstring text;
-    };
     struct WorkbenchVisibility {
         bool pageVisible = false;
         bool singleFormatRow = false;
@@ -316,7 +295,7 @@ private:
     std::size_t lastLogSearchOffset_ = 0;
     std::size_t visibleLogChars_ = 0;
     std::size_t visibleLogLineCount_ = 0;
-    std::deque<PendingLogLine> pendingLogLines_;
+    std::deque<NativePendingLogLine> pendingLogLines_;
     std::size_t pendingLogChars_ = 0;
     std::size_t logTrimmedSinceRebuild_ = 0;
     bool logFlushTimerActive_ = false;
