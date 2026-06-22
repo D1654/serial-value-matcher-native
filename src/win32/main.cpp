@@ -15,7 +15,7 @@
 
 namespace {
 
-bool hasSelfTestArgument() {
+bool hasArgument(const wchar_t* expected) {
     int argumentCount = 0;
     LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
     if (arguments == nullptr) {
@@ -23,7 +23,7 @@ bool hasSelfTestArgument() {
     }
     bool found = false;
     for (int index = 1; index < argumentCount; ++index) {
-        if (lstrcmpiW(arguments[index], L"--self-test") == 0) {
+        if (lstrcmpiW(arguments[index], expected) == 0) {
             found = true;
             break;
         }
@@ -35,14 +35,17 @@ bool hasSelfTestArgument() {
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int commandShow) {
-    if (hasSelfTestArgument()) {
-        return svm::win32::NativeMainWindow::runSelfTest() ? 0 : 2;
-    }
-
     INITCOMMONCONTROLSEX controls = {};
     controls.dwSize = sizeof(controls);
     controls.dwICC = ICC_STANDARD_CLASSES | ICC_TAB_CLASSES | ICC_PROGRESS_CLASS;
     InitCommonControlsEx(&controls);
+
+    if (hasArgument(L"--self-test")) {
+        return svm::win32::NativeMainWindow::runSelfTest() ? 0 : 2;
+    }
+    if (hasArgument(L"--ui-perf-test")) {
+        return svm::win32::NativeMainWindow::runUiPerformanceTest() ? 0 : 3;
+    }
 
     svm::win32::NativeMainWindow window;
     if (!window.create(instance)) {

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -58,6 +59,7 @@ struct UiPreferences {
     int timedSendPeriodMs = 1000;
     int fileSendDelayMs = 0;
     int logVisibleCharLimit = 350000;
+    int rawEventRetentionLimitMb = 100;
     std::vector<std::string> quickSendSlots;
     int windowLeft = -1;
     int windowTop = -1;
@@ -229,6 +231,7 @@ public:
 
     bool appendRawEvent(const RawIoEvent& event);
     bool appendRawEvents(const std::vector<RawIoEvent>& events);
+    void setRawEventRetentionLimit(std::uintmax_t softLimitBytes, std::uintmax_t targetBytes);
     std::int64_t rawEventCount() const;
     std::vector<RawIoEvent> recentRawEvents(std::size_t limit = 100) const;
 
@@ -267,19 +270,38 @@ public:
     std::vector<RuleVerificationResultRecord> ruleVerificationResults(std::string_view verificationRunId) const;
 
 private:
+    struct RewriteRequest {
+        std::string fileName;
+        std::function<bool(const Record&)> keepRecord;
+        std::vector<Record> appendedRecords;
+    };
+
     bool ensureOpen(std::string_view operation) const;
-    bool appendRecord(std::string_view fileName, const Record& record);
     bool appendRecords(std::string_view fileName, const std::vector<Record>& records);
+    bool compactRawEventsIfNeeded();
+    bool visitRecords(std::string_view fileName, const std::function<bool(const Record&)>& visitor) const;
     std::vector<Record> loadRecords(std::string_view fileName) const;
     bool rewriteRecords(std::string_view fileName, const std::vector<Record>& records);
+    bool rewriteRecordsFiltered(
+        std::string_view fileName,
+        const std::function<bool(const Record&)>& keepRecord,
+        const std::vector<Record>& appendedRecords);
+    bool rewriteRecordsFilteredTransaction(std::vector<RewriteRequest> requests);
     std::filesystem::path filePath(std::string_view fileName) const;
+    void absorbRecordIds(std::string_view fileName, const std::vector<Record>& records);
     std::int64_t allocateId(std::string_view fileName);
-    void reloadCounters();
+    std::vector<Record> counterRecords() const;
+    bool loadPersistedCounters();
+    bool persistCounters();
+    bool reloadCounters();
 
     std::filesystem::path storeDirectory_;
     bool opened_ = false;
     mutable std::string lastErrorText_;
     std::unordered_map<std::string, std::int64_t> nextIds_;
+    bool countersDirty_ = false;
+    std::uintmax_t rawEventSoftLimitBytes_ = 100ULL * 1024ULL * 1024ULL;
+    std::uintmax_t rawEventTargetBytes_ = 80ULL * 1024ULL * 1024ULL;
 };
 
 } // namespace svm::native_storage

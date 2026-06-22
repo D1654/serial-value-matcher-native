@@ -60,6 +60,12 @@ if ($selfTest.ExitCode -ne 0) {
     throw "native self-test 失败，退出码：$($selfTest.ExitCode)"
 }
 
+Write-Host "运行 UI 性能门禁..."
+$uiPerfTest = Start-Process -FilePath $exePath -ArgumentList "--ui-perf-test" -Wait -PassThru
+if ($uiPerfTest.ExitCode -ne 0) {
+    throw "UI 性能门禁失败，退出码：$($uiPerfTest.ExitCode)"
+}
+
 New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
 if (Test-Path $stageDir) { Remove-Item $stageDir -Recurse -Force }
 New-Item -ItemType Directory -Path $stageDir | Out-Null

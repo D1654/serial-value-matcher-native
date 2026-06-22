@@ -45,6 +45,7 @@ rm -f \
     "$output_dir"/tab-*.png \
     "$output_dir"/compact-tab-*.png \
     "$output_dir"/self-test.log \
+    "$output_dir"/ui-perf-test.log \
     "$output_dir"/app.stdout \
     "$output_dir"/app.stderr \
     "$output_dir"/window-info.txt \
@@ -73,6 +74,7 @@ wineboot -u >"$output_dir/wineboot.log" 2>&1
 
 self_test_log_windows="$(winepath -w "$output_dir/self-test.log" | tr -d '\r')"
 SVM_NATIVE_SELF_TEST_LOG="$self_test_log_windows" wine "$exe_path" --self-test
+ui_perf_log_windows="$(winepath -w "$output_dir/ui-perf-test.log" | tr -d '\r')"
 
 xvfb-run -a -s "-screen 0 $screen_spec" bash -c '
 set -euo pipefail
@@ -85,6 +87,9 @@ capture_tabs="$5"
 capture_compact="$6"
 capture_fast_frames="$7"
 fast_frame_delay="$8"
+ui_perf_log_windows="$9"
+
+SVM_NATIVE_SELF_TEST_LOG="$ui_perf_log_windows" wine "$exe_path" --ui-perf-test
 
 wine "$exe_path" >"$output_dir/app.stdout" 2>"$output_dir/app.stderr" &
 app_pid=$!
@@ -190,8 +195,9 @@ if [[ "$capture_tabs" != "0" ]]; then
         capture_tab_set "$first_window_id" "compact-tab-" "$capture_fast_frames" "$fast_frame_delay"
     fi
 fi
-' bash "$exe_path" "$output_dir" "$window_name" "$stabilize_seconds" "$capture_tabs" "$capture_compact" "$capture_fast_frames" "$fast_frame_delay"
+' bash "$exe_path" "$output_dir" "$window_name" "$stabilize_seconds" "$capture_tabs" "$capture_compact" "$capture_fast_frames" "$fast_frame_delay" "$ui_perf_log_windows"
 
 echo "Wine UI 截图完成：$output_dir/root.png"
 echo "窗口信息：$output_dir/window-info.txt"
 echo "self-test 日志：$output_dir/self-test.log"
+echo "UI 性能日志：$output_dir/ui-perf-test.log"

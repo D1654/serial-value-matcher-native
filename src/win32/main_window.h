@@ -50,11 +50,33 @@ public:
     int runMessageLoop();
 
     static bool runSelfTest();
+    static bool runUiPerformanceTest();
 
 private:
     struct ModbusWorkerResult;
     struct ModbusWorkerContext;
     struct ModbusWorkerProgress;
+    struct PendingLogLine {
+        NativeLogKind kind = NativeLogKind::System;
+        std::wstring text;
+    };
+    struct WorkbenchVisibility {
+        bool pageVisible = false;
+        bool singleFormatRow = false;
+        bool singleHistory = false;
+        bool singleSend = false;
+        bool singleTimed = false;
+        std::array<bool, 10> quickSlots = {};
+        bool fileFirstRow = false;
+        bool fileSecondRow = false;
+        bool scanSection = false;
+        bool scanParameterRow = false;
+        bool scanProgressRow = false;
+        bool scanAnalysisSection = false;
+        bool scanTargetRow = false;
+        bool scanCandidateRow = false;
+        bool settingsRow = false;
+    };
 
     static LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
     static DWORD WINAPI modbusScanThreadProc(void* parameter);
@@ -73,6 +95,7 @@ private:
     void applyUiPreferences();
     void saveUiPreferences();
     void updateWorkbenchTab();
+    void applyWorkbenchTabVisibility(int tabIndex);
     void toggleConnection();
     void connectSerial();
     void disconnectSerial();
@@ -114,6 +137,10 @@ private:
     void appendPayloadLog(NativeLogKind kind, const std::vector<std::uint8_t>& payload);
     void clearLog();
     std::size_t rebuildLogView();
+    void queueVisibleLogEntry(const NativeLogEntry& entry);
+    void queueVisibleLogText(NativeLogKind kind, std::wstring text);
+    void scheduleLogFlush();
+    void flushPendingLogEntries();
     void appendVisibleLogEntry(const NativeLogEntry& entry);
     void appendVisibleLogText(NativeLogKind kind, const std::wstring& text);
     void insertVisibleLogText(NativeLogKind kind, const std::wstring& text);
@@ -147,8 +174,10 @@ private:
     void updateRtsControlState();
     void applyLogTheme(int themeIndex);
     void applyLogCacheLimit(std::size_t visibleCharLimit);
+    void applyRawEventRetentionLimit(int retentionLimitMb);
     void updateLogTimestampMenu();
     void hideWorkbenchTabControls();
+    void setWorkbenchTabControlsVisible(int tabIndex, bool visible);
     void updateSideHelp(int tabIndex);
     std::filesystem::path defaultStoreDirectory() const;
     void saveRawEvent(std::string direction, const std::vector<std::uint8_t>& payload);
@@ -223,6 +252,8 @@ private:
     HWND fileProgress_ = nullptr;
     HWND logCacheLabel_ = nullptr;
     HWND logCacheCombo_ = nullptr;
+    HWND rawEventRetentionLabel_ = nullptr;
+    HWND rawEventRetentionCombo_ = nullptr;
     HWND sideActionSeparator_ = nullptr;
     HWND pauseScrollButton_ = nullptr;
     HWND sideHelpSeparator_ = nullptr;
@@ -267,6 +298,15 @@ private:
     bool ownsUiFont_ = false;
     bool receiveLogUsesRichEdit_ = false;
     bool showLogTimestamps_ = true;
+    WorkbenchVisibility workbenchVisibility_;
+    bool workbenchVisibilityReady_ = false;
+    RECT workbenchRedrawRect_ = {};
+    int lastSideHelpTabIndex_ = -1;
+    int activeWorkbenchTabIndex_ = -1;
+    std::uint64_t layoutPassCount_ = 0;
+    std::uint64_t workbenchLayoutRevision_ = 0;
+    std::uint64_t workbenchAppliedRevision_ = 0;
+    std::uint64_t workbenchTabApplyCount_ = 0;
     int logThemeIndex_ = 0;
     std::size_t logVisibleCharLimit_ = 350000;
     std::size_t logEntryLimit_ = 2000;
@@ -276,6 +316,13 @@ private:
     std::size_t lastLogSearchOffset_ = 0;
     std::size_t visibleLogChars_ = 0;
     std::size_t visibleLogLineCount_ = 0;
+    std::deque<PendingLogLine> pendingLogLines_;
+    std::size_t pendingLogChars_ = 0;
+    std::size_t logTrimmedSinceRebuild_ = 0;
+    bool logFlushTimerActive_ = false;
+    std::uint64_t logFlushPassCount_ = 0;
+    std::uint64_t logRebuildPassCount_ = 0;
+    std::uint64_t logQueuedLineCount_ = 0;
     bool uiPreferenceSaveFailureShown_ = false;
     Win32SerialPort serialPort_;
     native_storage::NativeSessionStore store_;

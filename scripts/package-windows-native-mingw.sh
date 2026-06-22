@@ -54,19 +54,19 @@ fi
 
 if [[ "$skip_wine" != "1" ]]; then
     if command -v wine >/dev/null 2>&1 && command -v xvfb-run >/dev/null 2>&1; then
-        echo "运行 Wine/Xvfb native self-test..."
+        echo "运行 Wine/Xvfb native self-test 和 UI 性能门禁..."
         mkdir -p "$wine_prefix" "$xdg_runtime_dir"
         chmod 700 "$xdg_runtime_dir"
         if ! env WINEPREFIX="$wine_prefix" WINEARCH=win64 XDG_RUNTIME_DIR="$xdg_runtime_dir" \
-            xvfb-run -a wine "$exe_path" --self-test; then
+            xvfb-run -a bash -c 'wine "$1" --self-test && wine "$1" --ui-perf-test' bash "$exe_path"; then
             if [[ "$strict_wine" == "1" ]]; then
-                echo "Wine/Xvfb native self-test 失败。" >&2
+                echo "Wine/Xvfb native self-test 或 UI 性能门禁失败。" >&2
                 exit 4
             fi
-            echo "警告：Wine/Xvfb native self-test 失败，继续执行静态打包检查。设置 SVM_STRICT_WINE_TEST=1 可将其作为硬门禁。" >&2
+            echo "警告：Wine/Xvfb native self-test 或 UI 性能门禁失败，继续执行静态打包检查。设置 SVM_STRICT_WINE_TEST=1 可将其作为硬门禁。" >&2
         fi
     else
-        echo "跳过 Wine/Xvfb self-test：wine 或 xvfb-run 不可用。"
+        echo "跳过 Wine/Xvfb self-test 和 UI 性能门禁：wine 或 xvfb-run 不可用。"
     fi
 fi
 

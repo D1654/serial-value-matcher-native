@@ -50,6 +50,10 @@ jobs:
         shell: pwsh
         run: '& (Join-Path $env:BUILD_DIR "Release\svm-native-win32.exe") --self-test'
 
+      - name: Run native UI performance gate
+        shell: pwsh
+        run: '& (Join-Path $env:BUILD_DIR "Release\svm-native-win32.exe") --ui-perf-test'
+
       - name: Capture native UI screenshots
         shell: pwsh
         run: >
@@ -74,6 +78,7 @@ jobs:
           path: |
             artifacts/windows-native-ui/*.png
             artifacts/windows-native-ui/capture-status.txt
+            artifacts/windows-native-ui/ui-perf-test.log
             artifacts/windows-native-ui/window-info.txt
           if-no-files-found: error
           retention-days: 14

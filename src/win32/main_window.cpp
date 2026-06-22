@@ -2,6 +2,7 @@
 
 #if defined(_WIN32)
 
+#include "win32/native_layout_metrics.h"
 #include "win32/resource.h"
 #include "win32/ui_text.h"
 #include "win32/utf8_win32.h"
@@ -28,6 +29,7 @@
 #include <memory>
 #include <sstream>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 
 namespace svm::win32 {
@@ -43,17 +45,17 @@ constexpr wchar_t kWindowClassName[] = L"SvmNativeMainWindow";
 constexpr std::size_t kMinLogVisibleChars = 200000;
 constexpr std::size_t kMaxLogVisibleChars = 100000000;
 constexpr std::size_t kMaxLogEntryLimit = 200000;
+constexpr std::size_t kLogTrimRebuildBatch = 256;
+constexpr std::size_t kLogInsertBatchChars = 65536;
 constexpr std::size_t kMaxRenderedLogLineChars = 4096;
 constexpr UINT kCodePageGbk = 936;
 constexpr UINT kCodePageAscii = 20127;
-constexpr int kMinTrackWidth = 760;
-constexpr int kMinTrackHeight = 520;
-constexpr int kMinLayoutWidth = 760;
-constexpr int kMinLayoutHeight = 520;
 constexpr UINT kModbusScanDoneMessage = WM_APP + 14;
 constexpr UINT kModbusScanProgressMessage = WM_APP + 15;
 constexpr int kFileSendChunkBytes = 1024;
+constexpr ULONGLONG kModbusProgressMinIntervalMs = 80;
 constexpr std::size_t kDefaultLogVisibleChars = 350000;
+constexpr int kDefaultRawEventRetentionMb = 100;
 constexpr COLORREF kFormBackgroundColor = RGB(228, 228, 228);
 constexpr wchar_t kNativeProgressClassName[] = L"SvmNativeProgress";
 constexpr COLORREF kNativeProgressBorderColor = RGB(96, 96, 96);
@@ -152,109 +154,6 @@ HBRUSH formBackgroundBrush() {
     return brush;
 }
 
-struct NativeRect {
-    int x = 0;
-    int y = 0;
-    int width = 0;
-    int height = 0;
-
-    int right() const {
-        return x + width;
-    }
-
-    int bottom() const {
-        return y + height;
-    }
-};
-
-struct SendControlLayout {
-    NativeRect modeLabel;
-    NativeRect modeCombo;
-    NativeRect encodingLabel;
-    NativeRect encodingCombo;
-    NativeRect lineEndingLabel;
-    NativeRect lineEndingCombo;
-    NativeRect historyLabel;
-    NativeRect historyCombo;
-};
-
-struct LogToolbarLayout {
-    NativeRect formatLabel;
-    NativeRect formatCombo;
-    NativeRect encodingLabel;
-    NativeRect encodingCombo;
-    NativeRect copyButton;
-    NativeRect exportButton;
-    NativeRect filterLabel;
-    NativeRect filterEdit;
-    NativeRect searchLabel;
-    NativeRect searchEdit;
-    NativeRect findButton;
-};
-
-struct MainLayoutProbe {
-    int requestedWidth = 0;
-    int requestedHeight = 0;
-    int width = 0;
-    int height = 0;
-    bool compact = false;
-    bool forcedSmall = false;
-    int margin = 0;
-    int groupPad = 0;
-    int row = 0;
-    int connectionWidth = 0;
-    int connectionHeight = 0;
-    int statusY = 0;
-    int contentY = 0;
-    int contentHeight = 0;
-    int leftWidth = 0;
-    int rightWidth = 0;
-    int sendHeight = 0;
-    int workflowY = 0;
-    int workflowHeight = 0;
-    int sendInnerWidth = 0;
-    int logInnerWidth = 0;
-    int logContentHeight = 0;
-};
-
-struct NativeUiMetrics {
-    bool compact = false;
-    bool tight = false;
-    int margin = 0;
-    int row = 0;
-    int gap = 0;
-    int labelHeight = 0;
-    int titleHeight = 0;
-    int statusHeight = 0;
-    int sideGap = 0;
-    int smallButtonWidth = 0;
-    int desiredSideWidth = 0;
-    int minSideWidth = 0;
-    int desiredWorkHeight = 0;
-    int minimumLogHeight = 0;
-    int logActionWidth = 0;
-};
-
-NativeUiMetrics nativeUiMetricsForSize(int width, int height) {
-    NativeUiMetrics metrics;
-    metrics.compact = width < 1040 || height < 720;
-    metrics.tight = width < 860;
-    metrics.margin = metrics.tight ? 3 : (metrics.compact ? 4 : 6);
-    metrics.row = metrics.compact ? 22 : 23;
-    metrics.gap = metrics.tight ? 2 : (metrics.compact ? 3 : 4);
-    metrics.labelHeight = metrics.compact ? 15 : 16;
-    metrics.titleHeight = metrics.compact ? 16 : 18;
-    metrics.statusHeight = metrics.compact ? 20 : 22;
-    metrics.sideGap = metrics.tight ? 4 : (metrics.compact ? 5 : 6);
-    metrics.smallButtonWidth = metrics.tight ? 44 : (metrics.compact ? 48 : 52);
-    metrics.desiredSideWidth = metrics.tight ? 150 : (metrics.compact ? 154 : 170);
-    metrics.minSideWidth = metrics.tight ? 112 : 140;
-    metrics.desiredWorkHeight = metrics.compact ? 192 : 190;
-    metrics.minimumLogHeight = metrics.compact ? 150 : 210;
-    metrics.logActionWidth = metrics.compact ? 38 : 42;
-    return metrics;
-}
-
 HFONT createSystemUiFont() {
     NONCLIENTMETRICSW metrics = {};
     metrics.cbSize = sizeof(metrics);
@@ -265,17 +164,6 @@ HFONT createSystemUiFont() {
     return nullptr;
 }
 
-bool rectIsValid(const NativeRect& rect) {
-    return rect.width > 0 && rect.height > 0;
-}
-
-bool sameRowAndAdjacent(const NativeRect& left, const NativeRect& right, int maxGap) {
-    return left.y == right.y
-        && left.height == right.height
-        && right.x >= left.right()
-        && right.x - left.right() <= maxGap;
-}
-
 void showControl(HWND control, bool visible) {
     if (control == nullptr) {
         return;
@@ -284,6 +172,20 @@ void showControl(HWND control, bool visible) {
     if (currentlyVisible != visible) {
         ShowWindow(control, visible ? SW_SHOWNA : SW_HIDE);
     }
+}
+
+void showControlFast(HWND control, bool visible) {
+    if (control == nullptr) {
+        return;
+    }
+    const auto style = static_cast<LONG_PTR>(GetWindowLongPtrW(control, GWL_STYLE));
+    const bool currentlyVisible = (style & WS_VISIBLE) != 0;
+    if (currentlyVisible == visible) {
+        return;
+    }
+    const UINT flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+        | (visible ? SWP_SHOWWINDOW : SWP_HIDEWINDOW);
+    SetWindowPos(control, nullptr, 0, 0, 0, 0, flags);
 }
 
 void enableControl(HWND control, bool enabled) {
@@ -467,175 +369,6 @@ int singleLineEditHeight(HFONT font, int row) {
     return std::clamp(naturalHeight, std::max(14, row - 5), row);
 }
 
-SendControlLayout calculateSendControlLayout(int x, int y, int innerWidth, int row, int gap, int labelHeight) {
-    const bool compact = innerWidth < 390;
-    const int sendModeWidth = compact ? 90 : 110;
-    const int sendEncodingWidth = compact ? 58 : 70;
-    const int lineEndingWidth = compact ? 50 : 64;
-    const int historyWidth = std::max(68, innerWidth - sendModeWidth - sendEncodingWidth - lineEndingWidth - gap * 3);
-
-    SendControlLayout layout;
-    int cursor = x;
-    layout.modeLabel = {cursor, y, sendModeWidth, labelHeight};
-    layout.modeCombo = {cursor, y + labelHeight, sendModeWidth, row};
-    cursor += sendModeWidth + gap;
-    layout.encodingLabel = {cursor, y, sendEncodingWidth, labelHeight};
-    layout.encodingCombo = {cursor, y + labelHeight, sendEncodingWidth, row};
-    cursor += sendEncodingWidth + gap;
-    layout.lineEndingLabel = {cursor, y, lineEndingWidth, labelHeight};
-    layout.lineEndingCombo = {cursor, y + labelHeight, lineEndingWidth, row};
-    cursor += lineEndingWidth + gap;
-    layout.historyLabel = {cursor, y, historyWidth, labelHeight};
-    layout.historyCombo = {cursor, y + labelHeight, historyWidth, row};
-    return layout;
-}
-
-LogToolbarLayout calculateLogToolbarLayout(int x, int y, int innerWidth, int row, int gap, int preferredActionWidth) {
-    const bool compact = innerWidth < 620;
-    const int usableWidth = std::max(7, innerWidth - gap * 6);
-    const int formatPreferredWidth = compact ? 86 : 94;
-    const int encodingPreferredWidth = compact ? 60 : 66;
-    const int formatMinimumWidth = compact ? 80 : 88;
-    const int encodingMinimumWidth = compact ? 56 : 60;
-    const int editMinimumWidth = compact ? 34 : 38;
-    const int actionBudget = std::max(
-        1,
-        (usableWidth - formatMinimumWidth - encodingMinimumWidth - editMinimumWidth * 2) / 3);
-    const int actionWidth = std::max(1, std::min(preferredActionWidth, actionBudget));
-    const int selectorBudget = usableWidth - actionWidth * 3 - editMinimumWidth * 2;
-    int formatWidth = formatPreferredWidth;
-    int encodingWidth = encodingPreferredWidth;
-    if (selectorBudget < formatWidth + encodingWidth) {
-        int deficit = formatWidth + encodingWidth - selectorBudget;
-        const int formatShrink = std::min(deficit, formatWidth - formatMinimumWidth);
-        formatWidth -= formatShrink;
-        deficit -= formatShrink;
-        const int encodingShrink = std::min(deficit, encodingWidth - encodingMinimumWidth);
-        encodingWidth -= encodingShrink;
-        deficit -= encodingShrink;
-        if (deficit > 0) {
-            const int tightSelectorBudget = std::max(2, selectorBudget);
-            formatWidth = std::max(1, tightSelectorBudget * 64 / 100);
-            encodingWidth = std::max(1, tightSelectorBudget - formatWidth);
-        }
-    }
-    const int variableWidth = std::max(2, usableWidth - formatWidth - encodingWidth - actionWidth * 3);
-    const int searchPreferredWidth = compact ? 96 : 110;
-    const int searchBaseWidth = std::min(searchPreferredWidth, variableWidth * 42 / 100);
-    const int searchWidth = variableWidth >= editMinimumWidth * 2
-        ? std::clamp(searchBaseWidth, editMinimumWidth, variableWidth - editMinimumWidth)
-        : std::clamp(searchBaseWidth, 1, variableWidth - 1);
-    const int filterWidth = variableWidth - searchWidth;
-
-    LogToolbarLayout layout;
-    int cursor = x;
-    layout.formatLabel = {x, y, 0, 0};
-    layout.formatCombo = {cursor, y, formatWidth, row};
-    cursor += formatWidth + gap;
-    layout.encodingLabel = {cursor, y, 0, 0};
-    layout.encodingCombo = {cursor, y, encodingWidth, row};
-    cursor += encodingWidth + gap;
-    layout.filterLabel = {cursor, y, 0, 0};
-    layout.filterEdit = {cursor, y, filterWidth, row};
-    cursor += filterWidth + gap;
-    layout.searchLabel = {cursor, y, 0, 0};
-    layout.searchEdit = {cursor, y, searchWidth, row};
-    cursor += searchWidth + gap;
-    layout.findButton = {cursor, y, actionWidth, row};
-    cursor += actionWidth + gap;
-    layout.copyButton = {cursor, y, actionWidth, row};
-    cursor += actionWidth + gap;
-    layout.exportButton = {cursor, y, actionWidth, row};
-    return layout;
-}
-
-bool logToolbarLayoutIsSane(int innerWidth) {
-    const NativeUiMetrics metrics = nativeUiMetricsForSize(innerWidth + 260, 520);
-    const LogToolbarLayout layout = calculateLogToolbarLayout(0, 0, innerWidth, metrics.row, metrics.gap, metrics.logActionWidth);
-    return rectIsValid(layout.formatCombo)
-        && rectIsValid(layout.encodingCombo)
-        && rectIsValid(layout.filterEdit)
-        && rectIsValid(layout.searchEdit)
-        && rectIsValid(layout.findButton)
-        && layout.exportButton.right() <= innerWidth
-        && layout.findButton.right() <= innerWidth
-        && layout.encodingCombo.right() + metrics.gap <= layout.filterEdit.x
-        && sameRowAndAdjacent(layout.filterEdit, layout.searchEdit, metrics.gap)
-        && sameRowAndAdjacent(layout.searchEdit, layout.findButton, metrics.gap);
-}
-
-bool sendControlLayoutIsSane(int innerWidth) {
-    const NativeUiMetrics metrics = nativeUiMetricsForSize(innerWidth + 260, 520);
-    const SendControlLayout layout = calculateSendControlLayout(0, 0, innerWidth, metrics.row, metrics.gap, metrics.labelHeight);
-    return rectIsValid(layout.modeCombo)
-        && rectIsValid(layout.encodingCombo)
-        && rectIsValid(layout.lineEndingCombo)
-        && rectIsValid(layout.historyCombo)
-        && layout.historyCombo.right() <= innerWidth;
-}
-
-bool scanTabLayoutIsSane(int pageWidth, int pageHeight) {
-    const NativeUiMetrics metrics = nativeUiMetricsForSize(pageWidth + 200, 520);
-    const int row = metrics.row;
-    const int gap = metrics.gap;
-    const int labelHeight = metrics.labelHeight;
-    const int formFieldGap = metrics.compact ? 2 : 3;
-    const int scanSectionGap = metrics.compact ? 2 : 3;
-    const int scanBlockGap = metrics.compact ? 3 : 4;
-
-    const int shortLabelWidth = metrics.compact ? 28 : 32;
-    const int scanSlaveEditWidth = metrics.compact ? 34 : 40;
-    const int scanFunctionLabelWidth = metrics.compact ? 32 : 36;
-    const int addressLabelWidth = metrics.compact ? 52 : 58;
-    const int addressEditWidth = metrics.compact ? 46 : 52;
-    const int scanFunctionWidth = metrics.compact ? 144 : 168;
-    const int parameterRowWidth =
-        shortLabelWidth + scanSlaveEditWidth
-        + scanFunctionLabelWidth + scanFunctionWidth
-        + (addressLabelWidth + addressEditWidth) * 2
-        + gap * 4
-        + formFieldGap * 4;
-
-    const int targetNameLabelWidth = metrics.compact ? 42 : 48;
-    const int targetValueLabelWidth = metrics.compact ? 42 : 48;
-    const int targetUnitLabelWidth = metrics.compact ? 28 : 32;
-    const int toleranceLabelWidth = metrics.compact ? 28 : 32;
-    const int targetNameEditWidth = metrics.compact ? 100 : 126;
-    const int targetValueEditWidth = metrics.compact ? 84 : 96;
-    const int targetUnitEditWidth = metrics.compact ? 52 : 64;
-    const int toleranceEditWidth = metrics.compact ? 58 : 68;
-    const int targetRowWidth =
-        targetNameLabelWidth + targetNameEditWidth
-        + targetValueLabelWidth + targetValueEditWidth
-        + targetUnitLabelWidth + targetUnitEditWidth
-        + toleranceLabelWidth + toleranceEditWidth
-        + gap * 3
-        + formFieldGap * 4;
-
-    const int candidateLabelWidth = metrics.compact ? 32 : 36;
-    const int modbusButtonWidth = metrics.compact ? 94 : 102;
-    const int analysisButtonWidth = metrics.compact ? 66 : 76;
-    const int ruleButtonWidth = metrics.compact ? 66 : 76;
-    const int exportButtonWidth = metrics.compact ? 66 : 76;
-    const int candidateMinimumWidth =
-        candidateLabelWidth + 120
-        + modbusButtonWidth + analysisButtonWidth + ruleButtonWidth + exportButtonWidth
-        + gap * 5
-        + formFieldGap;
-
-    const int requiredHeight =
-        labelHeight + scanSectionGap
-        + row + scanBlockGap
-        + row + scanBlockGap
-        + labelHeight + scanSectionGap
-        + row + scanBlockGap
-        + row;
-    return pageWidth >= parameterRowWidth
-        && pageWidth >= targetRowWidth
-        && pageWidth >= candidateMinimumWidth
-        && pageHeight >= requiredHeight;
-}
-
 std::wstring formatLogCacheLimit(std::size_t charLimit) {
     if (charLimit >= 1000000 && charLimit % 1000000 == 0) {
         return std::to_wstring(charLimit / 1000000) + L"M";
@@ -646,68 +379,16 @@ std::wstring formatLogCacheLimit(std::size_t charLimit) {
     return std::to_wstring(charLimit);
 }
 
-MainLayoutProbe calculateMainLayoutProbe(int requestedWidth, int requestedHeight) {
-    MainLayoutProbe probe;
-    probe.requestedWidth = requestedWidth;
-    probe.requestedHeight = requestedHeight;
-    probe.width = std::max(requestedWidth, kMinLayoutWidth);
-    probe.height = std::max(requestedHeight, kMinLayoutHeight);
-    probe.forcedSmall = requestedWidth < kMinLayoutWidth || requestedHeight < kMinLayoutHeight;
-    const NativeUiMetrics metrics = nativeUiMetricsForSize(probe.width, probe.height);
-    probe.compact = metrics.compact;
-    probe.margin = metrics.margin;
-    probe.groupPad = 0;
-    probe.row = metrics.row;
-
-    probe.statusY = probe.height - metrics.statusHeight - 4;
-    probe.rightWidth = metrics.desiredSideWidth;
-    probe.leftWidth = std::max(360, probe.width - probe.margin * 2 - metrics.sideGap - probe.rightWidth);
-    probe.connectionWidth = probe.rightWidth;
-    probe.connectionHeight = std::max(240, probe.statusY - probe.margin);
-    probe.contentY = probe.margin;
-    probe.contentHeight = std::max(280, probe.statusY - probe.margin);
-
-    probe.sendHeight = metrics.desiredWorkHeight;
-    probe.workflowY = probe.margin;
-    probe.workflowHeight = std::max(150, probe.contentHeight - probe.sendHeight - metrics.sideGap);
-    probe.sendInnerWidth = probe.leftWidth - probe.groupPad * 2;
-    probe.logInnerWidth = probe.leftWidth - probe.groupPad * 2;
-
-    const LogToolbarLayout logLayout = calculateLogToolbarLayout(0, 0, probe.logInnerWidth, probe.row, metrics.gap, metrics.logActionWidth);
-    const int logContentY = std::max(logLayout.filterEdit.bottom(), logLayout.findButton.bottom()) + (probe.compact ? 5 : 6);
-    probe.logContentHeight = std::max(120, probe.workflowHeight - logContentY - probe.groupPad);
-    return probe;
-}
-
-bool mainLayoutProbeHasStableGeometry(const MainLayoutProbe& probe) {
-    return probe.width >= kMinLayoutWidth
-        && probe.height >= kMinLayoutHeight
-        && probe.connectionWidth > 0
-        && probe.contentY >= probe.margin
-        && probe.contentHeight > 0
-        && probe.leftWidth > 0
-        && probe.rightWidth > 0
-        && probe.sendInnerWidth > 0
-        && probe.logInnerWidth > 0
-        && probe.workflowHeight > 0
-        && probe.logContentHeight > 0
-        && sendControlLayoutIsSane(probe.sendInnerWidth)
-        && logToolbarLayoutIsSane(probe.logInnerWidth);
-}
-
-bool mainLayoutProbeSupportsFullInteraction(const MainLayoutProbe& probe) {
-    return !probe.forcedSmall
-        && mainLayoutProbeHasStableGeometry(probe)
-        && probe.workflowY + probe.workflowHeight <= probe.statusY
-        && probe.contentY + probe.contentHeight <= probe.statusY;
-}
-
-bool mainLayoutProbeIsStableAtSize(int width, int height) {
-    return mainLayoutProbeHasStableGeometry(calculateMainLayoutProbe(width, height));
-}
-
-bool mainLayoutProbeIsFullyUsableAtSize(int width, int height) {
-    return mainLayoutProbeSupportsFullInteraction(calculateMainLayoutProbe(width, height));
+int normalizedRawEventRetentionMb(int value) {
+    switch (value) {
+    case 0:
+    case 100:
+    case 500:
+    case 1000:
+        return value;
+    default:
+        return kDefaultRawEventRetentionMb;
+    }
 }
 
 void writeSelfTestTrace(const char* message) {
@@ -1286,6 +967,62 @@ analysis_core::RegisterSample sampleFromObservation(const native_storage::ScanOb
     return sample;
 }
 
+struct ObservationAddressKey {
+    int slaveId = 0;
+    int functionCode = 0;
+    int address = 0;
+
+    bool operator==(const ObservationAddressKey& other) const noexcept {
+        return slaveId == other.slaveId
+            && functionCode == other.functionCode
+            && address == other.address;
+    }
+};
+
+struct ObservationAddressKeyHash {
+    std::size_t operator()(const ObservationAddressKey& key) const noexcept {
+        std::size_t value = static_cast<std::size_t>(key.slaveId);
+        value = value * 1315423911u + static_cast<std::size_t>(key.functionCode);
+        value = value * 1315423911u + static_cast<std::size_t>(key.address);
+        return value;
+    }
+};
+
+using ObservationAddressIndex = std::unordered_map<
+    ObservationAddressKey,
+    const native_storage::ScanObservationRecord*,
+    ObservationAddressKeyHash>;
+
+ObservationAddressIndex buildObservationAddressIndex(const std::vector<native_storage::ScanObservationRecord>& observations) {
+    ObservationAddressIndex index;
+    index.reserve(observations.size());
+    for (const native_storage::ScanObservationRecord& observation : observations) {
+        const ObservationAddressKey key {
+            observation.slaveId,
+            observation.functionCode,
+            observation.address,
+        };
+        auto [iterator, inserted] = index.emplace(key, &observation);
+        if (!inserted && observation.id > iterator->second->id) {
+            iterator->second = &observation;
+        }
+    }
+    return index;
+}
+
+const native_storage::ScanObservationRecord* findIndexedObservation(
+    const ObservationAddressIndex& index,
+    const native_storage::ProtocolFieldRuleRecord& rule,
+    int address) {
+    const ObservationAddressKey key {
+        rule.slaveId,
+        rule.functionCode,
+        address,
+    };
+    const auto iterator = index.find(key);
+    return iterator == index.cend() ? nullptr : iterator->second;
+}
+
 native_storage::MatchCandidateRecord candidateRecordFromCore(
     const analysis_core::ValueMatchCandidate& candidate,
     const std::string& runId,
@@ -1559,6 +1296,121 @@ bool NativeMainWindow::runSelfTest() {
     return ok;
 }
 
+bool NativeMainWindow::runUiPerformanceTest() {
+    const auto fail = [](const char* step) {
+        writeSelfTestTrace(step);
+        return false;
+    };
+
+    NativeMainWindow window;
+    if (!window.create(GetModuleHandleW(nullptr))) {
+        return fail("ui-perf-create-window");
+    }
+
+    ShowWindow(window.window_, SW_SHOWNOACTIVATE);
+    UpdateWindow(window.window_);
+    window.layoutControls(kMinTrackWidth, kMinTrackHeight);
+
+    constexpr int kIterations = 300;
+    constexpr auto kMaxElapsed = std::chrono::milliseconds(12000);
+    const std::uint64_t baselineLayoutPasses = window.layoutPassCount_;
+    const std::uint64_t baselineLayoutRevision = window.workbenchLayoutRevision_;
+    const auto start = std::chrono::steady_clock::now();
+    for (int index = 0; index < kIterations; ++index) {
+        const int tabIndex = index % 5;
+        TabCtrl_SetCurSel(window.workTabs_, tabIndex);
+        NMHDR notification = {};
+        notification.hwndFrom = window.workTabs_;
+        notification.idFrom = IDC_WORK_TABS;
+        notification.code = TCN_SELCHANGE;
+        SendMessageW(window.window_, WM_NOTIFY, IDC_WORK_TABS, reinterpret_cast<LPARAM>(&notification));
+    }
+    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start);
+
+    bool ok = true;
+    if (window.layoutPassCount_ != baselineLayoutPasses) {
+        writeSelfTestTrace("ui-perf-layout-regression");
+        ok = false;
+    }
+    if (window.workbenchLayoutRevision_ != baselineLayoutRevision) {
+        writeSelfTestTrace("ui-perf-revision-regression");
+        ok = false;
+    }
+    if (window.workbenchTabApplyCount_ < static_cast<std::uint64_t>(kIterations)) {
+        writeSelfTestTrace("ui-perf-apply-count");
+        ok = false;
+    }
+    if (elapsedMs > kMaxElapsed) {
+        writeSelfTestTrace("ui-perf-too-slow");
+        ok = false;
+    }
+
+    window.clearLog();
+    constexpr int kLogIterations = 1200;
+    constexpr auto kMaxLogElapsed = std::chrono::milliseconds(12000);
+    const auto logStart = std::chrono::steady_clock::now();
+    for (int index = 0; index < kLogIterations; ++index) {
+        window.appendLog(NativeLogKind::Rx, L"[RX] 01 03 02 00 2A 39 84");
+    }
+    window.flushPendingLogEntries();
+    const auto logElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - logStart);
+    if (!window.pendingLogLines_.empty()) {
+        writeSelfTestTrace("ui-perf-log-pending");
+        ok = false;
+    }
+    if (window.visibleLogLineCount_ != static_cast<std::size_t>(kLogIterations)) {
+        writeSelfTestTrace("ui-perf-log-line-count");
+        ok = false;
+    }
+    if (window.logFlushPassCount_ == 0) {
+        writeSelfTestTrace("ui-perf-log-no-flush");
+        ok = false;
+    }
+    if (logElapsedMs > kMaxLogElapsed) {
+        writeSelfTestTrace("ui-perf-log-too-slow");
+        ok = false;
+    }
+
+    window.clearLog();
+    const std::uint64_t trimRebuildBaseline = window.logRebuildPassCount_;
+    const std::size_t trimStressLines = window.logEntryLimit_ + 800;
+    for (std::size_t index = 0; index < trimStressLines; ++index) {
+        window.appendLog(NativeLogKind::Rx, L"[RX] 01");
+    }
+    window.flushPendingLogEntries();
+    const std::uint64_t trimRebuildCount = window.logRebuildPassCount_ - trimRebuildBaseline;
+    if (window.logEntries_.size() > window.logEntryLimit_) {
+        writeSelfTestTrace("ui-perf-log-entry-limit");
+        ok = false;
+    }
+    if (trimRebuildCount > 8) {
+        writeSelfTestTrace("ui-perf-log-rebuild-thrash");
+        ok = false;
+    }
+
+    char message[256] = {};
+    std::snprintf(
+        message,
+        sizeof(message),
+        "ui-perf %s tabs=%d tab-ms=%lld layout-pass=%llu apply=%llu revision=%llu log-lines=%d log-ms=%lld log-flush=%llu log-rebuild=%llu",
+        ok ? "ok" : "failed",
+        kIterations,
+        static_cast<long long>(elapsedMs.count()),
+        static_cast<unsigned long long>(window.layoutPassCount_),
+        static_cast<unsigned long long>(window.workbenchTabApplyCount_),
+        static_cast<unsigned long long>(window.workbenchLayoutRevision_),
+        kLogIterations,
+        static_cast<long long>(logElapsedMs.count()),
+        static_cast<unsigned long long>(window.logFlushPassCount_),
+        static_cast<unsigned long long>(trimRebuildCount));
+    writeSelfTestTrace(message);
+
+    DestroyWindow(window.window_);
+    return ok;
+}
+
 LRESULT CALLBACK NativeMainWindow::windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
     auto* self = reinterpret_cast<NativeMainWindow*>(GetWindowLongPtrW(window, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
@@ -1607,9 +1459,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
     case WM_NOTIFY: {
         const auto* notification = reinterpret_cast<NMHDR*>(lParam);
         if (notification != nullptr && notification->idFrom == IDC_WORK_TABS && notification->code == TCN_SELCHANGE) {
-            RECT client = {};
-            GetClientRect(window_, &client);
-            layoutControls(client.right - client.left, client.bottom - client.top);
+            updateWorkbenchTab();
             return 0;
         }
         break;
@@ -1712,6 +1562,18 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
                 setStatus(status);
             }
             return 0;
+        case IDC_RAW_EVENT_RETENTION_COMBO:
+            if (HIWORD(wParam) == CBN_SELCHANGE) {
+                const int retentionLimitMb = static_cast<int>(selectedComboData(rawEventRetentionCombo_, kDefaultRawEventRetentionMb));
+                applyRawEventRetentionLimit(retentionLimitMb);
+                saveUiPreferences();
+                setStatus(retentionLimitMb <= 0
+                    ? L"\u539F\u59CB\u8BB0\u5F55\u4FDD\u7559\u4E0A\u9650\u5DF2\u8BBE\u4E3A\u4E0D\u9650\u5236\u3002"
+                    : (L"\u539F\u59CB\u8BB0\u5F55\u4FDD\u7559\u4E0A\u9650\u5DF2\u8BBE\u4E3A "
+                        + std::to_wstring(retentionLimitMb)
+                        + L"M\u3002"));
+            }
+            return 0;
         case IDC_SEND_MODE_COMBO:
             if (HIWORD(wParam) == CBN_SELCHANGE) {
                 saveUiPreferences();
@@ -1782,6 +1644,9 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             saveCurrentSerialProfile();
             return 0;
         case IDC_PAUSE_SCROLL_BUTTON:
+            if (!scrollPaused_) {
+                flushPendingLogEntries();
+            }
             scrollPaused_ = !scrollPaused_;
             SetWindowTextW(pauseScrollButton_, scrollPaused_ ? tx(T::ResumeScrollButton) : tx(T::PauseScrollButton));
             if (!scrollPaused_) {
@@ -1835,6 +1700,9 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             sendPayload();
             return 0;
         case IDM_TOOLS_PAUSE_SCROLL:
+            if (!scrollPaused_) {
+                flushPendingLogEntries();
+            }
             scrollPaused_ = !scrollPaused_;
             SetWindowTextW(pauseScrollButton_, scrollPaused_ ? tx(T::ResumeScrollButton) : tx(T::PauseScrollButton));
             if (!scrollPaused_) {
@@ -1926,6 +1794,12 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             updateLogFilter();
             return 0;
         }
+        if (wParam == IDT_LOG_FLUSH) {
+            KillTimer(window_, IDT_LOG_FLUSH);
+            logFlushTimerActive_ = false;
+            flushPendingLogEntries();
+            return 0;
+        }
         if (wParam == IDT_STATUS_CLOCK) {
             updateStatusSegments();
             return 0;
@@ -1956,6 +1830,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         KillTimer(window_, IDT_TIMED_SEND);
         KillTimer(window_, IDT_FILE_SEND);
         KillTimer(window_, IDT_STATUS_CLOCK);
+        KillTimer(window_, IDT_LOG_FLUSH);
         stopFileSend({});
         requestCancelModbusScan();
         if (modbusScanThread_ != nullptr) {
@@ -2126,6 +2001,8 @@ void NativeMainWindow::createControls() {
     fileProgress_ = createProgressControl(window_, instance_, IDC_FILE_PROGRESS);
     logCacheLabel_ = CreateWindowExW(0, L"STATIC", tx(T::LogCacheLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     logCacheCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_CACHE_COMBO), instance_, nullptr);
+    rawEventRetentionLabel_ = CreateWindowExW(0, L"STATIC", tx(T::RawEventRetentionLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
+    rawEventRetentionCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_RAW_EVENT_RETENTION_COMBO), instance_, nullptr);
     sideActionSeparator_ = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     pauseScrollButton_ = CreateWindowExW(0, L"BUTTON", tx(T::PauseScrollButton), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_PAUSE_SCROLL_BUTTON), instance_, nullptr);
     sideHelpSeparator_ = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
@@ -2294,6 +2171,12 @@ void NativeMainWindow::populateSerialOptionControls() {
     addComboItem(logCacheCombo_, L"100M", 100000000);
     selectComboData(logCacheCombo_, static_cast<LPARAM>(kDefaultLogVisibleChars));
 
+    addComboItem(rawEventRetentionCombo_, L"100M", 100);
+    addComboItem(rawEventRetentionCombo_, L"500M", 500);
+    addComboItem(rawEventRetentionCombo_, L"1000M", 1000);
+    addComboItem(rawEventRetentionCombo_, L"\u4E0D\u9650\u5236", 0);
+    selectComboData(rawEventRetentionCombo_, kDefaultRawEventRetentionMb);
+
     addComboItem(fileDelayCombo_, L"0 ms", 0);
     addComboItem(fileDelayCombo_, L"1 ms", 1);
     addComboItem(fileDelayCombo_, L"5 ms", 5);
@@ -2311,17 +2194,17 @@ void NativeMainWindow::populateSerialOptionControls() {
 }
 
 void NativeMainWindow::layoutControls(int width, int height) {
+    ++layoutPassCount_;
+
     width = std::max(width, 1);
     height = std::max(height, 1);
 
     const NativeUiMetrics metrics = nativeUiMetricsForSize(width, height);
     const bool compact = metrics.compact;
-    const bool tight = metrics.tight;
     const int margin = metrics.margin;
     const int row = metrics.row;
     const int gap = metrics.gap;
     const int labelHeight = metrics.labelHeight;
-    const int smallButtonWidth = metrics.smallButtonWidth;
     const int titleHeight = metrics.titleHeight;
     const int editHeight = singleLineEditHeight(uiFont_, row);
     const int editOffsetY = std::max(0, (row - editHeight) / 2);
@@ -2338,12 +2221,6 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int mainX = margin;
     const int mainWidth = std::max(1, sideX - sideGap - mainX);
     const int contentHeight = std::max(1, statusY - margin);
-
-    int activeTab = static_cast<int>(TabCtrl_GetCurSel(workTabs_));
-    if (activeTab < 0) {
-        activeTab = 0;
-    }
-    updateSideHelp(activeTab);
 
     const int desiredWorkHeight = metrics.desiredWorkHeight;
     const int minimumLogHeight = metrics.minimumLogHeight;
@@ -2496,7 +2373,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
         std::max(1, pageBackgroundRight - pageBackgroundX),
         std::max(1, pageBackgroundBottom - pageBackgroundY),
         TRUE);
-    const bool showSingleSendFormatRow = pageHasRoom && activeTab == 0 && pageY + row <= pageBottom;
+    const bool showSingleSendFormatRow = pageHasRoom && pageY + row <= pageBottom;
 
     showControl(sendModeLabel_, false);
     showControl(sendEncodingLabel_, false);
@@ -2520,10 +2397,10 @@ void NativeMainWindow::layoutControls(int width, int height) {
     x += lineEndingWidth + gap;
     MoveWindow(historyCombo_, x, y, historyWidth, 160, TRUE);
 
-    const int contentY = showSingleSendFormatRow ? (pageY + row + gap) : pageY;
+    const int singleContentY = showSingleSendFormatRow ? (pageY + row + gap) : pageY;
 
     x = pageX;
-    y = contentY;
+    y = singleContentY;
     const int sendButtonWidth = std::max(1, std::min(compact ? 54 : 60, pageW / 6));
     const int sendEditWidth = std::max(1, pageW - sendButtonWidth - gap);
     moveWorkEdit(sendEdit_, x, y, sendEditWidth);
@@ -2554,7 +2431,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
         const int column = static_cast<int>(index % quickColumns);
         const int slotRow = static_cast<int>(index / quickColumns);
         const int slotX = pageX + column * (quickColumnWidth + gap);
-        const int slotY = contentY + slotRow * quickSlotHeight;
+        const int slotY = pageY + slotRow * quickSlotHeight;
         const int editWidth = std::max(1, quickColumnWidth - quickButtonWidth - gap);
         quickSlotVisible[index] = slotY + row <= pageBottom && quickColumnWidth > quickButtonWidth + gap;
         moveWorkEdit(quickSendEdits_[index], slotX, slotY, editWidth);
@@ -2562,7 +2439,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     }
 
     x = pageX;
-    y = contentY;
+    y = pageY;
     const int fileLabelWidth = compact ? 30 : 34;
     const int browseWidth = compact ? 44 : 50;
     const int fileSendWidth = compact ? 68 : 76;
@@ -2593,7 +2470,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     moveTopControl(fileProgress_, x, y + progressOffsetY, std::max(1, pageX + pageW - x), progressHeight);
 
     ShowWindow(workflowHint_, SW_HIDE);
-    y = contentY;
+    y = pageY;
     const int scanSectionGap = compact ? 2 : 3;
     const int scanBlockGap = compact ? 3 : 4;
     const bool scanSectionVisible = y + labelHeight <= pageBottom;
@@ -2723,84 +2600,48 @@ void NativeMainWindow::layoutControls(int width, int height) {
     x += ruleButtonWidth + gap;
     MoveWindow(exportReportButton_, x, y, exportButtonWidth, row, TRUE);
 
-    y = contentY;
+    y = pageY;
     x = pageX;
     const int settingsLabelWidth = compact ? 58 : 66;
     const int settingsComboWidth = compact ? 68 : 78;
+    const int rawRetentionLabelWidth = compact ? 58 : 66;
+    const int rawRetentionComboWidth = compact ? 78 : 90;
     const bool settingsRowVisible = y + row <= pageBottom;
     MoveWindow(logCacheLabel_, x, y + labelOffsetY, settingsLabelWidth, labelHeight, TRUE);
     x += settingsLabelWidth + formFieldGap;
     MoveWindow(logCacheCombo_, x, y, settingsComboWidth, 260, TRUE);
+    x += settingsComboWidth + gap;
+    MoveWindow(rawEventRetentionLabel_, x, y + labelOffsetY, rawRetentionLabelWidth, labelHeight, TRUE);
+    x += rawRetentionLabelWidth + formFieldGap;
+    MoveWindow(rawEventRetentionCombo_, x, y, rawRetentionComboWidth, 140, TRUE);
 
-    if (pageBottom <= pageY) {
-        ShowWindow(workTabs_, SW_HIDE);
-        ShowWindow(workPageBackground_, SW_HIDE);
-    } else {
-        ShowWindow(workTabs_, SW_SHOW);
-        ShowWindow(workPageBackground_, SW_SHOW);
+    const bool pageVisible = pageBottom > pageY;
+    showControl(workTabs_, pageVisible);
+    showControl(workPageBackground_, pageVisible);
+    workbenchVisibility_ = {};
+    workbenchVisibility_.pageVisible = pageVisible;
+    workbenchVisibility_.singleFormatRow = showSingleSendFormatRow;
+    workbenchVisibility_.singleHistory = showHistoryCombo;
+    workbenchVisibility_.singleSend = sendContentVisible;
+    workbenchVisibility_.singleTimed = timedY + row <= pageBottom && pageW >= 230;
+    workbenchVisibility_.quickSlots = quickSlotVisible;
+    workbenchVisibility_.fileFirstRow = fileFirstRowVisible;
+    workbenchVisibility_.fileSecondRow = fileSecondRowVisible;
+    workbenchVisibility_.scanSection = scanSectionVisible;
+    workbenchVisibility_.scanParameterRow = scanParameterRowVisible;
+    workbenchVisibility_.scanProgressRow = scanProgressRowVisible;
+    workbenchVisibility_.scanAnalysisSection = scanAnalysisSectionVisible;
+    workbenchVisibility_.scanTargetRow = scanTargetRowVisible;
+    workbenchVisibility_.scanCandidateRow = scanCandidateRowVisible;
+    workbenchVisibility_.settingsRow = settingsRowVisible;
+    workbenchRedrawRect_ = {workInnerX, tabsY, workInnerX + workInnerWidth, tabsY + tabsHeight};
+    workbenchVisibilityReady_ = true;
+    ++workbenchLayoutRevision_;
+    int activeTab = static_cast<int>(TabCtrl_GetCurSel(workTabs_));
+    if (activeTab < 0) {
+        activeTab = 0;
     }
-    hideWorkbenchTabControls();
-    activeTab = static_cast<int>(TabCtrl_GetCurSel(workTabs_));
-    if (activeTab == 0) {
-        const bool timedVisible = timedY + row <= pageBottom && pageW >= 230;
-        showControl(sendModeCombo_, showSingleSendFormatRow);
-        showControl(textEncodingCombo_, showSingleSendFormatRow);
-        showControl(lineEndingCombo_, showSingleSendFormatRow);
-        showControl(historyCombo_, showHistoryCombo);
-        showControl(sendEdit_, sendContentVisible);
-        showControl(sendButton_, sendContentVisible);
-        showControl(timedSendCheck_, timedVisible);
-        showControl(timedPeriodLabel_, timedVisible);
-        showControl(timedPeriodEdit_, timedVisible);
-    } else if (activeTab == 1) {
-        for (std::size_t index = 0; index < quickSendEdits_.size(); ++index) {
-            showControl(quickSendEdits_[index], quickSlotVisible[index]);
-            showControl(quickSendButtons_[index], quickSlotVisible[index]);
-        }
-    } else if (activeTab == 2) {
-        showControl(filePathLabel_, fileFirstRowVisible);
-        showControl(filePathEdit_, fileFirstRowVisible);
-        showControl(fileBrowseButton_, fileFirstRowVisible);
-        showControl(fileSendButton_, fileFirstRowVisible);
-        showControl(fileStopButton_, fileFirstRowVisible);
-        showControl(fileDelayLabel_, fileSecondRowVisible);
-        showControl(fileDelayCombo_, fileSecondRowVisible);
-        showControl(fileProgressLabel_, fileSecondRowVisible);
-        showControl(fileProgress_, fileSecondRowVisible);
-    } else if (activeTab == 3) {
-        showControl(scanSectionLabel_, scanSectionVisible);
-        showControl(scanSlaveLabel_, scanParameterRowVisible);
-        showControl(scanSlaveEdit_, scanParameterRowVisible);
-        showControl(scanFunctionLabel_, scanParameterRowVisible);
-        showControl(scanFunctionCombo_, scanParameterRowVisible);
-        showControl(scanStartLabel_, scanParameterRowVisible);
-        showControl(scanStartEdit_, scanParameterRowVisible);
-        showControl(scanEndLabel_, scanParameterRowVisible);
-        showControl(scanEndEdit_, scanParameterRowVisible);
-        showControl(modbusButton_, scanParameterRowVisible);
-        showControl(modbusProgressLabel_, scanProgressRowVisible);
-        showControl(modbusProgress_, scanProgressRowVisible);
-        showControl(modbusProgressText_, scanProgressRowVisible);
-        showControl(analysisSectionLabel_, scanAnalysisSectionVisible);
-        showControl(targetStatic_, scanTargetRowVisible);
-        showControl(targetLabelEdit_, scanTargetRowVisible);
-        showControl(targetValueStatic_, scanTargetRowVisible);
-        showControl(targetValueEdit_, scanTargetRowVisible);
-        showControl(targetUnitStatic_, scanTargetRowVisible);
-        showControl(targetUnitEdit_, scanTargetRowVisible);
-        showControl(toleranceStatic_, scanTargetRowVisible);
-        showControl(toleranceEdit_, scanTargetRowVisible);
-        showControl(candidateStatic_, scanCandidateRowVisible);
-        showControl(candidateCombo_, scanCandidateRowVisible);
-        showControl(analysisButton_, scanCandidateRowVisible);
-        showControl(ruleVerifyButton_, scanCandidateRowVisible);
-        showControl(exportReportButton_, scanCandidateRowVisible);
-    } else if (activeTab == 4) {
-        showControl(logCacheLabel_, settingsRowVisible);
-        showControl(logCacheCombo_, settingsRowVisible);
-    }
-    RECT workRect = {workInnerX, tabsY, workInnerX + workInnerWidth, tabsY + tabsHeight};
-    RedrawWindow(window_, &workRect, nullptr, RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN);
+    applyWorkbenchTabVisibility(activeTab);
     const int clockWidth = compact ? 78 : 88;
     const int counterWidth = compact ? 76 : 86;
     int statusRight = width - margin;
@@ -2879,14 +2720,82 @@ void NativeMainWindow::hideWorkbenchTabControls() {
              exportReportButton_,
              logCacheLabel_,
              logCacheCombo_,
+             rawEventRetentionLabel_,
+             rawEventRetentionCombo_,
          }) {
-        showControl(control, false);
+        showControlFast(control, false);
     }
     for (HWND control : quickSendEdits_) {
-        showControl(control, false);
+        showControlFast(control, false);
     }
     for (HWND control : quickSendButtons_) {
-        showControl(control, false);
+        showControlFast(control, false);
+    }
+}
+
+void NativeMainWindow::setWorkbenchTabControlsVisible(int tabIndex, bool visible) {
+    const auto showCached = [&](HWND control, bool cachedVisible) {
+        showControlFast(control, visible && cachedVisible);
+    };
+
+    if (tabIndex == 0) {
+        showCached(sendModeCombo_, workbenchVisibility_.singleFormatRow);
+        showCached(textEncodingCombo_, workbenchVisibility_.singleFormatRow);
+        showCached(lineEndingCombo_, workbenchVisibility_.singleFormatRow);
+        showCached(historyCombo_, workbenchVisibility_.singleHistory);
+        showCached(sendEdit_, workbenchVisibility_.singleSend);
+        showCached(sendButton_, workbenchVisibility_.singleSend);
+        showCached(timedSendCheck_, workbenchVisibility_.singleTimed);
+        showCached(timedPeriodLabel_, workbenchVisibility_.singleTimed);
+        showCached(timedPeriodEdit_, workbenchVisibility_.singleTimed);
+    } else if (tabIndex == 1) {
+        for (std::size_t index = 0; index < quickSendEdits_.size(); ++index) {
+            showCached(quickSendEdits_[index], workbenchVisibility_.quickSlots[index]);
+            showCached(quickSendButtons_[index], workbenchVisibility_.quickSlots[index]);
+        }
+    } else if (tabIndex == 2) {
+        showCached(filePathLabel_, workbenchVisibility_.fileFirstRow);
+        showCached(filePathEdit_, workbenchVisibility_.fileFirstRow);
+        showCached(fileBrowseButton_, workbenchVisibility_.fileFirstRow);
+        showCached(fileSendButton_, workbenchVisibility_.fileFirstRow);
+        showCached(fileStopButton_, workbenchVisibility_.fileFirstRow);
+        showCached(fileDelayLabel_, workbenchVisibility_.fileSecondRow);
+        showCached(fileDelayCombo_, workbenchVisibility_.fileSecondRow);
+        showCached(fileProgressLabel_, workbenchVisibility_.fileSecondRow);
+        showCached(fileProgress_, workbenchVisibility_.fileSecondRow);
+    } else if (tabIndex == 3) {
+        showCached(scanSectionLabel_, workbenchVisibility_.scanSection);
+        showCached(scanSlaveLabel_, workbenchVisibility_.scanParameterRow);
+        showCached(scanSlaveEdit_, workbenchVisibility_.scanParameterRow);
+        showCached(scanFunctionLabel_, workbenchVisibility_.scanParameterRow);
+        showCached(scanFunctionCombo_, workbenchVisibility_.scanParameterRow);
+        showCached(scanStartLabel_, workbenchVisibility_.scanParameterRow);
+        showCached(scanStartEdit_, workbenchVisibility_.scanParameterRow);
+        showCached(scanEndLabel_, workbenchVisibility_.scanParameterRow);
+        showCached(scanEndEdit_, workbenchVisibility_.scanParameterRow);
+        showCached(modbusButton_, workbenchVisibility_.scanParameterRow);
+        showCached(modbusProgressLabel_, workbenchVisibility_.scanProgressRow);
+        showCached(modbusProgress_, workbenchVisibility_.scanProgressRow);
+        showCached(modbusProgressText_, workbenchVisibility_.scanProgressRow);
+        showCached(analysisSectionLabel_, workbenchVisibility_.scanAnalysisSection);
+        showCached(targetStatic_, workbenchVisibility_.scanTargetRow);
+        showCached(targetLabelEdit_, workbenchVisibility_.scanTargetRow);
+        showCached(targetValueStatic_, workbenchVisibility_.scanTargetRow);
+        showCached(targetValueEdit_, workbenchVisibility_.scanTargetRow);
+        showCached(targetUnitStatic_, workbenchVisibility_.scanTargetRow);
+        showCached(targetUnitEdit_, workbenchVisibility_.scanTargetRow);
+        showCached(toleranceStatic_, workbenchVisibility_.scanTargetRow);
+        showCached(toleranceEdit_, workbenchVisibility_.scanTargetRow);
+        showCached(candidateStatic_, workbenchVisibility_.scanCandidateRow);
+        showCached(candidateCombo_, workbenchVisibility_.scanCandidateRow);
+        showCached(analysisButton_, workbenchVisibility_.scanCandidateRow);
+        showCached(ruleVerifyButton_, workbenchVisibility_.scanCandidateRow);
+        showCached(exportReportButton_, workbenchVisibility_.scanCandidateRow);
+    } else if (tabIndex == 4) {
+        showCached(logCacheLabel_, workbenchVisibility_.settingsRow);
+        showCached(logCacheCombo_, workbenchVisibility_.settingsRow);
+        showCached(rawEventRetentionLabel_, workbenchVisibility_.settingsRow);
+        showCached(rawEventRetentionCombo_, workbenchVisibility_.settingsRow);
     }
 }
 
@@ -2914,8 +2823,56 @@ void NativeMainWindow::updateSideHelp(int tabIndex) {
         break;
     }
 
+    if (lastSideHelpTabIndex_ == tabIndex) {
+        return;
+    }
     SetWindowTextW(sideHelpTitle_, tx(T::SideHelpTitle));
     SetWindowTextW(sideHelpText_, tx(helpId));
+    lastSideHelpTabIndex_ = tabIndex;
+}
+
+void NativeMainWindow::applyWorkbenchTabVisibility(int tabIndex) {
+    if (activeWorkbenchTabIndex_ == tabIndex && workbenchAppliedRevision_ == workbenchLayoutRevision_) {
+        return;
+    }
+
+    ++workbenchTabApplyCount_;
+    updateSideHelp(tabIndex);
+    const bool canRedrawWorkbench = workbenchRedrawRect_.right > workbenchRedrawRect_.left
+        && workbenchRedrawRect_.bottom > workbenchRedrawRect_.top;
+    const bool suspendRedraw = canRedrawWorkbench && IsWindowVisible(window_) != FALSE;
+    if (suspendRedraw) {
+        SendMessageW(window_, WM_SETREDRAW, FALSE, 0);
+    }
+    const auto resumeRedraw = [&]() {
+        if (suspendRedraw) {
+            SendMessageW(window_, WM_SETREDRAW, TRUE, 0);
+            RedrawWindow(window_, &workbenchRedrawRect_, nullptr, RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN);
+        }
+    };
+
+    const bool layoutChanged = workbenchAppliedRevision_ != workbenchLayoutRevision_;
+    if (layoutChanged) {
+        hideWorkbenchTabControls();
+    } else if (activeWorkbenchTabIndex_ >= 0 && activeWorkbenchTabIndex_ != tabIndex) {
+        setWorkbenchTabControlsVisible(activeWorkbenchTabIndex_, false);
+    }
+
+    if (!workbenchVisibilityReady_ || !workbenchVisibility_.pageVisible) {
+        activeWorkbenchTabIndex_ = tabIndex;
+        workbenchAppliedRevision_ = workbenchLayoutRevision_;
+        resumeRedraw();
+        return;
+    }
+
+    setWorkbenchTabControlsVisible(tabIndex, true);
+
+    if (layoutChanged && !suspendRedraw && canRedrawWorkbench) {
+        RedrawWindow(window_, &workbenchRedrawRect_, nullptr, RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN);
+    }
+    activeWorkbenchTabIndex_ = tabIndex;
+    workbenchAppliedRevision_ = workbenchLayoutRevision_;
+    resumeRedraw();
 }
 
 void NativeMainWindow::updateWorkbenchTab() {
@@ -2923,75 +2880,7 @@ void NativeMainWindow::updateWorkbenchTab() {
     if (tabIndex < 0) {
         tabIndex = 0;
     }
-    updateSideHelp(tabIndex);
-
-    hideWorkbenchTabControls();
-    const bool singleVisible = tabIndex == 0;
-    const bool quickVisible = tabIndex == 1;
-    const bool fileVisible = tabIndex == 2;
-    const bool scanVisible = tabIndex == 3;
-    const bool settingsVisible = tabIndex == 4;
-
-    for (HWND control : {
-             sendModeCombo_,
-             textEncodingCombo_,
-             lineEndingCombo_,
-             historyCombo_,
-             sendEdit_,
-             sendButton_,
-             timedSendCheck_,
-             timedPeriodLabel_,
-             timedPeriodEdit_,
-         }) {
-        showControl(control, singleVisible);
-    }
-
-    for (HWND control : quickSendEdits_) {
-        showControl(control, quickVisible);
-    }
-    for (HWND control : quickSendButtons_) {
-        showControl(control, quickVisible);
-    }
-
-    for (HWND control : {filePathLabel_, filePathEdit_, fileBrowseButton_, fileSendButton_, fileStopButton_, fileDelayLabel_, fileDelayCombo_, fileProgressLabel_, fileProgress_}) {
-        showControl(control, fileVisible);
-    }
-
-    for (HWND control : {
-             scanSectionLabel_,
-             scanSlaveLabel_,
-             scanSlaveEdit_,
-             scanFunctionLabel_,
-             scanFunctionCombo_,
-             scanStartLabel_,
-             scanStartEdit_,
-             scanEndLabel_,
-             scanEndEdit_,
-             modbusProgressLabel_,
-             modbusProgress_,
-             modbusProgressText_,
-             modbusButton_,
-             analysisSectionLabel_,
-             targetStatic_,
-             targetLabelEdit_,
-             targetValueStatic_,
-             targetValueEdit_,
-             targetUnitStatic_,
-             targetUnitEdit_,
-             toleranceStatic_,
-             toleranceEdit_,
-             candidateStatic_,
-             candidateCombo_,
-             analysisButton_,
-             ruleVerifyButton_,
-             exportReportButton_,
-         }) {
-        showControl(control, scanVisible);
-    }
-
-    for (HWND control : {logCacheLabel_, logCacheCombo_}) {
-        showControl(control, settingsVisible);
-    }
+    applyWorkbenchTabVisibility(tabIndex);
 }
 
 void NativeMainWindow::refreshPorts() {
@@ -3144,6 +3033,9 @@ void NativeMainWindow::applyUiPreferences() {
     selectComboData(fileDelayCombo_, std::clamp(preferences->fileSendDelayMs, 0, 1000));
     applyLogCacheLimit(static_cast<std::size_t>(std::clamp(preferences->logVisibleCharLimit, static_cast<int>(kMinLogVisibleChars), static_cast<int>(kMaxLogVisibleChars))));
     selectComboData(logCacheCombo_, static_cast<LPARAM>(logVisibleCharLimit_));
+    const int rawEventRetentionLimitMb = normalizedRawEventRetentionMb(preferences->rawEventRetentionLimitMb);
+    applyRawEventRetentionLimit(rawEventRetentionLimitMb);
+    selectComboData(rawEventRetentionCombo_, rawEventRetentionLimitMb);
     for (std::size_t index = 0; index < quickSendEdits_.size() && index < preferences->quickSendSlots.size(); ++index) {
         setControlText(quickSendEdits_[index], utf8ToWide(preferences->quickSendSlots[index]));
     }
@@ -3186,6 +3078,8 @@ void NativeMainWindow::saveUiPreferences() {
     preferences.timedSendPeriodMs = std::clamp(textToInt(timedPeriodEdit_, 1000), 50, 3600000);
     preferences.fileSendDelayMs = static_cast<int>(selectedComboData(fileDelayCombo_, 0));
     preferences.logVisibleCharLimit = static_cast<int>(logVisibleCharLimit_);
+    preferences.rawEventRetentionLimitMb = normalizedRawEventRetentionMb(
+        static_cast<int>(selectedComboData(rawEventRetentionCombo_, kDefaultRawEventRetentionMb)));
     preferences.quickSendSlots.clear();
     preferences.quickSendSlots.reserve(quickSendEdits_.size());
     for (HWND edit : quickSendEdits_) {
@@ -3665,9 +3559,14 @@ void NativeMainWindow::appendPayloadLog(NativeLogKind kind, const std::vector<st
 }
 
 void NativeMainWindow::clearLog() {
+    KillTimer(window_, IDT_LOG_FLUSH);
+    logFlushTimerActive_ = false;
+    pendingLogLines_.clear();
+    pendingLogChars_ = 0;
     logEntries_.clear();
     visibleLogChars_ = 0;
     visibleLogLineCount_ = 0;
+    logTrimmedSinceRebuild_ = 0;
     SetWindowTextW(receiveLog_, L"");
     hiddenLogLineCount_ = 0;
     lastLogSearchOffset_ = 0;
@@ -3682,6 +3581,12 @@ std::size_t NativeMainWindow::rebuildLogView() {
         return 0;
     }
 
+    ++logRebuildPassCount_;
+    KillTimer(window_, IDT_LOG_FLUSH);
+    logFlushTimerActive_ = false;
+    pendingLogLines_.clear();
+    pendingLogChars_ = 0;
+    logTrimmedSinceRebuild_ = 0;
     const int firstVisibleLine = currentLogFirstVisibleLine();
     std::deque<std::pair<NativeLogKind, std::wstring>> visibleLines;
     std::size_t visibleChars = 0;
@@ -3715,6 +3620,93 @@ std::size_t NativeMainWindow::rebuildLogView() {
         restoreLogFirstVisibleLine(firstVisibleLine);
     }
     return visibleLogLineCount_;
+}
+
+void NativeMainWindow::queueVisibleLogEntry(const NativeLogEntry& entry) {
+    queueVisibleLogText(entry.kind, renderLogEntry(entry));
+}
+
+void NativeMainWindow::queueVisibleLogText(NativeLogKind kind, std::wstring text) {
+    pendingLogChars_ += text.size();
+    pendingLogLines_.push_back(PendingLogLine{kind, std::move(text)});
+    ++logQueuedLineCount_;
+    scheduleLogFlush();
+}
+
+void NativeMainWindow::scheduleLogFlush() {
+    if (window_ == nullptr || logFlushTimerActive_) {
+        return;
+    }
+    logFlushTimerActive_ = SetTimer(window_, IDT_LOG_FLUSH, 40, nullptr) != 0;
+}
+
+void NativeMainWindow::flushPendingLogEntries() {
+    if (receiveLog_ == nullptr) {
+        return;
+    }
+
+    const bool needsTrimRebuild = logTrimmedSinceRebuild_ >= kLogTrimRebuildBatch;
+    if (pendingLogLines_.empty() && !needsTrimRebuild) {
+        return;
+    }
+
+    KillTimer(window_, IDT_LOG_FLUSH);
+    logFlushTimerActive_ = false;
+    ++logFlushPassCount_;
+
+    if (pendingLogLines_.empty()) {
+        rebuildLogView();
+        return;
+    }
+
+    const bool atBottom = logIsAtBottom();
+    if (atBottom) {
+        logAutoFollow_ = true;
+        logHistoryReadNoticeShown_ = false;
+    }
+    const bool shouldFollow = logAutoFollow_ && atBottom;
+    const int firstVisibleLine = currentLogFirstVisibleLine();
+    DWORD selectionStart = 0;
+    DWORD selectionEnd = 0;
+    SendMessageW(receiveLog_, EM_GETSEL, reinterpret_cast<WPARAM>(&selectionStart), reinterpret_cast<LPARAM>(&selectionEnd));
+
+    {
+        ScopedWindowRedraw redraw(receiveLog_);
+        while (!pendingLogLines_.empty()) {
+            const NativeLogKind batchKind = pendingLogLines_.front().kind;
+            std::wstring batchText;
+            std::size_t batchLineCount = 0;
+            while (!pendingLogLines_.empty() && pendingLogLines_.front().kind == batchKind) {
+                PendingLogLine& nextLine = pendingLogLines_.front();
+                if (!batchText.empty() && batchText.size() + nextLine.text.size() > kLogInsertBatchChars) {
+                    break;
+                }
+                batchText += nextLine.text;
+                pendingLogChars_ -= std::min(pendingLogChars_, nextLine.text.size());
+                pendingLogLines_.pop_front();
+                ++batchLineCount;
+            }
+            insertVisibleLogText(batchKind, batchText);
+            visibleLogLineCount_ += batchLineCount;
+        }
+    }
+
+    if (visibleLogChars_ > logVisibleCharLimit_ || needsTrimRebuild) {
+        rebuildLogView();
+        return;
+    }
+
+    if (shouldFollow) {
+        scrollLogToBottom();
+        return;
+    }
+    logAutoFollow_ = false;
+    restoreLogFirstVisibleLine(firstVisibleLine);
+    SendMessageW(receiveLog_, EM_SETSEL, selectionStart, selectionEnd);
+    if (!logHistoryReadNoticeShown_) {
+        setStatus(tx(T::LogHistoryReadStatus));
+        logHistoryReadNoticeShown_ = true;
+    }
 }
 
 void NativeMainWindow::appendVisibleLogEntry(const NativeLogEntry& entry) {
@@ -3767,12 +3759,13 @@ void NativeMainWindow::insertVisibleLogText(NativeLogKind kind, const std::wstri
 
 void NativeMainWindow::addLogEntry(NativeLogEntry entry) {
     entry.text = sanitizeLogText(entry.text);
-    bool trimmed = false;
+    std::size_t trimmedCount = 0;
     logEntries_.push_back(std::move(entry));
     while (logEntries_.size() > logEntryLimit_) {
         logEntries_.pop_front();
-        trimmed = true;
+        ++trimmedCount;
     }
+    logTrimmedSinceRebuild_ += trimmedCount;
 
     if (scrollPaused_) {
         ++hiddenLogLineCount_;
@@ -3780,18 +3773,11 @@ void NativeMainWindow::addLogEntry(NativeLogEntry entry) {
         return;
     }
 
-    if (trimmed) {
-        rebuildLogView();
-        return;
-    }
-
     const NativeLogEntry& latest = logEntries_.back();
     if (logEntryMatchesFilter(latest)) {
-        appendVisibleLogEntry(latest);
-        ++visibleLogLineCount_;
-        if (visibleLogChars_ > logVisibleCharLimit_) {
-            rebuildLogView();
-        }
+        queueVisibleLogEntry(latest);
+    } else if (logTrimmedSinceRebuild_ >= kLogTrimRebuildBatch) {
+        scheduleLogFlush();
     }
 }
 
@@ -3832,6 +3818,7 @@ void NativeMainWindow::updateLogFilter() {
 }
 
 void NativeMainWindow::findNextLogMatch() {
+    flushPendingLogEntries();
     const std::wstring needle = controlText(logSearchEdit_);
     if (needle.empty()) {
         setStatus(tx(T::LogFindEmptyStatus));
@@ -3921,6 +3908,7 @@ void NativeMainWindow::followLatestLog() {
 }
 
 void NativeMainWindow::copyVisibleLogToClipboard() {
+    flushPendingLogEntries();
     const std::wstring text = visibleLogText();
     if (!OpenClipboard(window_)) {
         setStatus(tx(T::LogCopyFailedStatus));
@@ -3954,6 +3942,7 @@ void NativeMainWindow::copyVisibleLogToClipboard() {
 }
 
 void NativeMainWindow::exportVisibleLog() {
+    flushPendingLogEntries();
     const std::wstring text = visibleLogText();
     if (text.empty()) {
         setStatus(tx(T::LogExportEmptyStatus));
@@ -4029,6 +4018,20 @@ void NativeMainWindow::applyLogCacheLimit(std::size_t visibleCharLimit) {
     if (receiveLog_ != nullptr) {
         SendMessageW(receiveLog_, EM_EXLIMITTEXT, 0, static_cast<LPARAM>(logVisibleCharLimit_ + kMaxRenderedLogLineChars));
     }
+}
+
+void NativeMainWindow::applyRawEventRetentionLimit(int retentionLimitMb) {
+    if (!store_.isOpen()) {
+        return;
+    }
+    retentionLimitMb = normalizedRawEventRetentionMb(retentionLimitMb);
+    if (retentionLimitMb <= 0) {
+        store_.setRawEventRetentionLimit(0, 0);
+        return;
+    }
+    const std::uintmax_t softLimitBytes = static_cast<std::uintmax_t>(retentionLimitMb) * 1024ULL * 1024ULL;
+    const std::uintmax_t targetBytes = softLimitBytes * 4ULL / 5ULL;
+    store_.setRawEventRetentionLimit(softLimitBytes, targetBytes);
 }
 
 void NativeMainWindow::setSendModeStatus() {
@@ -4337,7 +4340,17 @@ DWORD WINAPI NativeMainWindow::modbusScanThreadProc(void* parameter) {
         entry.hasPayload = true;
         result->logEntries.push_back(std::move(entry));
     };
-    const auto postProgress = [&]() {
+    ULONGLONG lastProgressPostTick = 0;
+    const auto postProgress = [&](bool force = false) {
+        const ULONGLONG now = GetTickCount64();
+        const bool complete = result->execution.attempts.size() >= context->plan.blocks.size();
+        if (!force
+            && !complete
+            && lastProgressPostTick != 0
+            && now - lastProgressPostTick < kModbusProgressMinIntervalMs) {
+            return;
+        }
+        lastProgressPostTick = now;
         auto* progress = new ModbusWorkerProgress;
         progress->completedBlocks = result->execution.attempts.size();
         progress->totalBlocks = context->plan.blocks.size();
@@ -4353,7 +4366,7 @@ DWORD WINAPI NativeMainWindow::modbusScanThreadProc(void* parameter) {
         for (const modbus_core::ScanBlock& block : context->plan.blocks) {
             if (self->modbusScanCancelRequested_) {
                 result->cancelled = true;
-                postProgress();
+                postProgress(true);
                 break;
             }
 
@@ -4375,7 +4388,7 @@ DWORD WINAPI NativeMainWindow::modbusScanThreadProc(void* parameter) {
                 ++result->execution.session.failedBlockCount;
                 result->errorMessage = writeResult.errorMessage;
                 result->serialFailed = true;
-                postProgress();
+                postProgress(true);
                 break;
             }
 
@@ -4415,14 +4428,14 @@ DWORD WINAPI NativeMainWindow::modbusScanThreadProc(void* parameter) {
             if (result->cancelled) {
                 attempt.status = "cancelled";
                 result->execution.attempts.push_back(std::move(attempt));
-                postProgress();
+                postProgress(true);
                 break;
             }
             if (result->serialFailed) {
                 attempt.status = "read-error";
                 result->execution.attempts.push_back(std::move(attempt));
                 ++result->execution.session.failedBlockCount;
-                postProgress();
+                postProgress(true);
                 break;
             }
             if (response.empty()) {
@@ -4956,17 +4969,7 @@ bool NativeMainWindow::runRuleVerification(const native_storage::ScanSessionReco
         setStatus(tx(T::RuleVerifyNoObservations));
         return false;
     }
-
-    auto findObservation = [&observations](const native_storage::ProtocolFieldRuleRecord& rule, int address) -> std::optional<native_storage::ScanObservationRecord> {
-        for (auto iterator = observations.rbegin(); iterator != observations.rend(); ++iterator) {
-            if (iterator->slaveId == rule.slaveId
-                && iterator->functionCode == rule.functionCode
-                && iterator->address == address) {
-                return *iterator;
-            }
-        }
-        return std::nullopt;
-    };
+    const ObservationAddressIndex observationIndex = buildObservationAddressIndex(observations);
 
     native_storage::RuleVerificationRunRecord run;
     run.verificationRunId = "verify-" + timestampIdText();
@@ -4995,8 +4998,8 @@ bool NativeMainWindow::runRuleVerification(const native_storage::ScanSessionReco
         int missingAddress = rule.startAddress;
         for (int offset = 0; offset < rule.registerCount; ++offset) {
             const int address = rule.startAddress + offset;
-            const auto observation = findObservation(rule, address);
-            if (!observation.has_value()) {
+            const native_storage::ScanObservationRecord* observation = findIndexedObservation(observationIndex, rule, address);
+            if (observation == nullptr) {
                 missing = true;
                 missingAddress = address;
                 break;

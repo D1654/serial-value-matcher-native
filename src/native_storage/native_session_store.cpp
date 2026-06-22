@@ -1,18 +1,21 @@
 #include "native_storage/native_session_store.h"
+#include "native_storage/native_store_file_ops.h"
+#include "native_storage/native_store_record_io.h"
 
 #include <algorithm>
 #include <charconv>
+#include <deque>
 #include <fstream>
 #include <iomanip>
-#include <limits>
 #include <sstream>
 #include <system_error>
+#include <utility>
 
 namespace svm::native_storage {
 namespace {
 
-constexpr std::string_view kHeader = "SVM_NATIVE_STORE_V1\n";
 constexpr std::string_view kSchemaFile = "schema.txt";
+constexpr std::string_view kIdCountersFile = "id_counters.svmr";
 constexpr std::string_view kRawEventsFile = "raw_io_events.svmr";
 constexpr std::string_view kSendHistoryFile = "send_history.svmr";
 constexpr std::string_view kSerialProfilesFile = "serial_profiles.svmr";
@@ -43,6 +46,21 @@ const std::vector<std::string_view>& storeFiles() {
     };
     return files;
 }
+
+using store_io::RecordSpan;
+using store_io::copyFileTailWithHeader;
+using store_io::kHeader;
+using store_io::parseRecords;
+using store_io::readNextRecordFromStream;
+using store_io::readNextRecordSpan;
+using store_io::skipStoreHeader;
+using store_io::writeRecord;
+using store_file_ops::ReplacementTarget;
+using store_file_ops::commitReplacementTargets;
+using store_file_ops::recoverReplacementArtifacts;
+using store_file_ops::replaceFileWithTemp;
+using store_file_ops::replacementBackupPath;
+using store_file_ops::replacementTempPath;
 
 std::string toString(std::int64_t value) {
     return std::to_string(value);
@@ -140,83 +158,27 @@ std::vector<std::int64_t> parseInt64List(const std::string& value) {
     return result;
 }
 
-bool writeRecord(std::ostream& output, const NativeSessionStore::Record& record) {
-    output << record.size() << '|';
-    for (const std::string& field : record) {
-        output << field.size() << ':';
-        output.write(field.data(), static_cast<std::streamsize>(field.size()));
-        if (!output) {
-            return false;
-        }
-    }
-    output << '\n';
-    return static_cast<bool>(output);
+std::size_t safeRecentLimit(int limit) {
+    return static_cast<std::size_t>(std::max(1, limit));
 }
 
-bool parseUnsigned(const std::string& data, std::size_t& position, char delimiter, std::size_t& value) {
-    const std::size_t delimiterPosition = data.find(delimiter, position);
-    if (delimiterPosition == std::string::npos || delimiterPosition == position) {
-        return false;
-    }
-    std::size_t parsed = 0;
-    const char* begin = data.data() + position;
-    const char* end = data.data() + delimiterPosition;
-    const auto result = std::from_chars(begin, end, parsed);
-    if (result.ec != std::errc{} || result.ptr != end) {
-        return false;
-    }
-    value = parsed;
-    position = delimiterPosition + 1;
-    return true;
-}
-
-std::vector<NativeSessionStore::Record> parseRecords(const std::string& data, std::string* errorText) {
-    std::vector<NativeSessionStore::Record> records;
-    std::size_t position = data.rfind(std::string(kHeader), 0) == 0 ? kHeader.size() : 0;
-    while (position < data.size()) {
-        while (position < data.size() && (data[position] == '\n' || data[position] == '\r')) {
-            ++position;
-        }
-        if (position >= data.size()) {
-            break;
-        }
-
-        std::size_t fieldCount = 0;
-        if (!parseUnsigned(data, position, '|', fieldCount)) {
-            if (errorText != nullptr) {
-                *errorText = "读取 native 存储失败：记录字段数量损坏。";
-            }
-            return {};
-        }
-
-        NativeSessionStore::Record record;
-        record.reserve(fieldCount);
-        for (std::size_t fieldIndex = 0; fieldIndex < fieldCount; ++fieldIndex) {
-            std::size_t fieldLength = 0;
-            if (!parseUnsigned(data, position, ':', fieldLength) || position + fieldLength > data.size()) {
-                if (errorText != nullptr) {
-                    *errorText = "读取 native 存储失败：记录字段长度损坏。";
-                }
-                return {};
-            }
-            record.push_back(data.substr(position, fieldLength));
-            position += fieldLength;
-        }
-
-        if (position < data.size() && data[position] == '\n') {
-            ++position;
-        }
-        records.push_back(std::move(record));
-    }
-    return records;
+std::size_t safeRecentLimit(std::size_t limit) {
+    return std::max<std::size_t>(1, limit);
 }
 
 template <typename T>
-std::vector<T> recentLastFirst(std::vector<T> values, int limit) {
-    const std::size_t safeLimit = static_cast<std::size_t>(std::max(1, limit));
+void appendBoundedRecent(std::deque<T>& values, T value, std::size_t limit) {
+    values.push_back(std::move(value));
+    while (values.size() > limit) {
+        values.pop_front();
+    }
+}
+
+template <typename T>
+std::vector<T> recentLastFirstFromDeque(const std::deque<T>& values) {
     std::vector<T> result;
-    result.reserve(std::min(safeLimit, values.size()));
-    for (auto iterator = values.rbegin(); iterator != values.rend() && result.size() < safeLimit; ++iterator) {
+    result.reserve(values.size());
+    for (auto iterator = values.rbegin(); iterator != values.rend(); ++iterator) {
         result.push_back(*iterator);
     }
     return result;
@@ -344,6 +306,9 @@ UiPreferences uiPreferencesFromRecord(const NativeSessionStore::Record& record) 
             preferences.quickSendSlots.push_back(record[index]);
         }
     }
+    if (record.size() >= 30) {
+        preferences.rawEventRetentionLimitMb = toInt(record[29], 100);
+    }
     return preferences;
 }
 
@@ -372,6 +337,7 @@ NativeSessionStore::Record recordFromUiPreferences(const UiPreferences& preferen
     for (std::size_t index = 0; index < 10; ++index) {
         record.push_back(index < preferences.quickSendSlots.size() ? preferences.quickSendSlots[index] : std::string{});
     }
+    record.push_back(toString(preferences.rawEventRetentionLimitMb));
     return record;
 }
 
@@ -758,10 +724,14 @@ bool NativeSessionStore::initializeSchema() {
         schema << "format=SVM_NATIVE_STORE_V1\n";
         schema << "engine=length-prefixed-files\n";
         schema << "storage_choice=file-store-first-stage\n";
+        schema << "id_counters=id_counters.svmr\n";
     }
 
     for (std::string_view fileName : storeFiles()) {
         const auto path = filePath(fileName);
+        if (!recoverReplacementArtifacts(path, lastErrorText_)) {
+            return false;
+        }
         if (std::filesystem::exists(path, error)) {
             continue;
         }
@@ -773,7 +743,10 @@ bool NativeSessionStore::initializeSchema() {
         output << kHeader;
     }
 
-    reloadCounters();
+    if (!loadPersistedCounters() && !reloadCounters()) {
+        return false;
+    }
+    lastErrorText_.clear();
     return true;
 }
 
@@ -801,19 +774,31 @@ bool NativeSessionStore::appendRawEvents(const std::vector<RawIoEvent>& events) 
         }
         records.push_back(recordFromRawEvent(event));
     }
-    return appendRecords(kRawEventsFile, records);
+    return appendRecords(kRawEventsFile, records) && compactRawEventsIfNeeded();
+}
+
+void NativeSessionStore::setRawEventRetentionLimit(std::uintmax_t softLimitBytes, std::uintmax_t targetBytes) {
+    rawEventSoftLimitBytes_ = softLimitBytes;
+    rawEventTargetBytes_ = std::min(targetBytes, softLimitBytes);
 }
 
 std::int64_t NativeSessionStore::rawEventCount() const {
-    return static_cast<std::int64_t>(loadRecords(kRawEventsFile).size());
+    std::int64_t count = 0;
+    const bool ok = visitRecords(kRawEventsFile, [&](const Record&) {
+        ++count;
+        return true;
+    });
+    return ok ? count : 0;
 }
 
 std::vector<RawIoEvent> NativeSessionStore::recentRawEvents(std::size_t limit) const {
-    std::vector<RawIoEvent> events;
-    for (const Record& record : loadRecords(kRawEventsFile)) {
-        events.push_back(rawEventFromRecord(record));
-    }
-    return recentLastFirst(std::move(events), static_cast<int>(limit));
+    std::deque<RawIoEvent> events;
+    const std::size_t safeLimit = safeRecentLimit(limit);
+    const bool ok = visitRecords(kRawEventsFile, [&](const Record& record) {
+        appendBoundedRecent(events, rawEventFromRecord(record), safeLimit);
+        return true;
+    });
+    return ok ? recentLastFirstFromDeque(events) : std::vector<RawIoEvent>{};
 }
 
 bool NativeSessionStore::saveSendHistory(SendHistoryEntry entry, int limit) {
@@ -824,38 +809,43 @@ bool NativeSessionStore::saveSendHistory(SendHistoryEntry entry, int limit) {
         entry.id = allocateId(kSendHistoryFile);
     }
 
-    std::vector<SendHistoryEntry> entries;
-    for (const Record& record : loadRecords(kSendHistoryFile)) {
+    const std::size_t safeLimit = safeRecentLimit(limit);
+    const std::size_t existingLimit = safeLimit > 0 ? safeLimit - 1 : 0;
+    std::deque<Record> retainedRecords;
+    const bool ok = visitRecords(kSendHistoryFile, [&](const Record& record) {
         SendHistoryEntry existing = sendHistoryFromRecord(record);
         if (existing.content == entry.content
             && existing.payloadMode == entry.payloadMode
             && existing.lineEnding == entry.lineEnding
             && existing.textEncodingCodePage == entry.textEncodingCodePage) {
-            continue;
+            return true;
         }
-        entries.push_back(std::move(existing));
-    }
-    entries.push_back(std::move(entry));
-
-    const std::size_t safeLimit = static_cast<std::size_t>(std::max(1, limit));
-    if (entries.size() > safeLimit) {
-        entries.erase(entries.begin(), entries.end() - static_cast<std::ptrdiff_t>(safeLimit));
+        if (existingLimit > 0) {
+            appendBoundedRecent(retainedRecords, record, existingLimit);
+        }
+        return true;
+    });
+    if (!ok) {
+        return false;
     }
 
     std::vector<Record> records;
-    records.reserve(entries.size());
-    for (const SendHistoryEntry& item : entries) {
-        records.push_back(recordFromSendHistory(item));
+    records.reserve(retainedRecords.size() + 1);
+    for (const Record& record : retainedRecords) {
+        records.push_back(record);
     }
+    records.push_back(recordFromSendHistory(entry));
     return rewriteRecords(kSendHistoryFile, records);
 }
 
 std::vector<SendHistoryEntry> NativeSessionStore::recentSendHistory(int limit) const {
-    std::vector<SendHistoryEntry> entries;
-    for (const Record& record : loadRecords(kSendHistoryFile)) {
-        entries.push_back(sendHistoryFromRecord(record));
-    }
-    return recentLastFirst(std::move(entries), limit);
+    std::deque<SendHistoryEntry> entries;
+    const std::size_t safeLimit = safeRecentLimit(limit);
+    const bool ok = visitRecords(kSendHistoryFile, [&](const Record& record) {
+        appendBoundedRecent(entries, sendHistoryFromRecord(record), safeLimit);
+        return true;
+    });
+    return ok ? recentLastFirstFromDeque(entries) : std::vector<SendHistoryEntry>{};
 }
 
 bool NativeSessionStore::saveSerialProfile(SerialProfile profile) {
@@ -869,29 +859,19 @@ bool NativeSessionStore::saveSerialProfile(SerialProfile profile) {
         profile.id = allocateId(kSerialProfilesFile);
     }
 
-    std::vector<SerialProfile> profiles;
-    for (const Record& record : loadRecords(kSerialProfilesFile)) {
-        SerialProfile existing = serialProfileFromRecord(record);
-        if (existing.name != profile.name) {
-            profiles.push_back(std::move(existing));
-        }
-    }
-    profiles.push_back(std::move(profile));
-
-    std::vector<Record> records;
-    records.reserve(profiles.size());
-    for (const SerialProfile& item : profiles) {
-        records.push_back(recordFromSerialProfile(item));
-    }
-    return rewriteRecords(kSerialProfilesFile, records);
+    const std::vector<Record> profileRecord = {recordFromSerialProfile(profile)};
+    return rewriteRecordsFiltered(kSerialProfilesFile,
+        [&](const Record& record) { return serialProfileFromRecord(record).name != profile.name; },
+        profileRecord);
 }
 
 std::optional<SerialProfile> NativeSessionStore::latestSerialProfile() const {
     std::optional<SerialProfile> latest;
-    for (const Record& record : loadRecords(kSerialProfilesFile)) {
+    const bool ok = visitRecords(kSerialProfilesFile, [&](const Record& record) {
         latest = serialProfileFromRecord(record);
-    }
-    return latest;
+        return true;
+    });
+    return ok ? latest : std::nullopt;
 }
 
 bool NativeSessionStore::saveUiPreferences(UiPreferences preferences) {
@@ -905,29 +885,19 @@ bool NativeSessionStore::saveUiPreferences(UiPreferences preferences) {
         preferences.id = allocateId(kUiPreferencesFile);
     }
 
-    std::vector<UiPreferences> allPreferences;
-    for (const Record& record : loadRecords(kUiPreferencesFile)) {
-        UiPreferences existing = uiPreferencesFromRecord(record);
-        if (existing.name != preferences.name) {
-            allPreferences.push_back(std::move(existing));
-        }
-    }
-    allPreferences.push_back(std::move(preferences));
-
-    std::vector<Record> records;
-    records.reserve(allPreferences.size());
-    for (const UiPreferences& item : allPreferences) {
-        records.push_back(recordFromUiPreferences(item));
-    }
-    return rewriteRecords(kUiPreferencesFile, records);
+    const std::vector<Record> preferenceRecord = {recordFromUiPreferences(preferences)};
+    return rewriteRecordsFiltered(kUiPreferencesFile,
+        [&](const Record& record) { return uiPreferencesFromRecord(record).name != preferences.name; },
+        preferenceRecord);
 }
 
 std::optional<UiPreferences> NativeSessionStore::latestUiPreferences() const {
     std::optional<UiPreferences> latest;
-    for (const Record& record : loadRecords(kUiPreferencesFile)) {
+    const bool ok = visitRecords(kUiPreferencesFile, [&](const Record& record) {
         latest = uiPreferencesFromRecord(record);
-    }
-    return latest;
+        return true;
+    });
+    return ok ? latest : std::nullopt;
 }
 
 bool NativeSessionStore::saveScanExecution(const ScanExecutionRecord& execution) {
@@ -939,20 +909,19 @@ bool NativeSessionStore::saveScanExecution(const ScanExecutionRecord& execution)
         return false;
     }
 
-    std::vector<Record> sessions;
-    for (const Record& record : loadRecords(kScanSessionsFile)) {
-        if (scanSessionFromRecord(record).sessionId != execution.session.sessionId) {
-            sessions.push_back(record);
+    bool replacesExistingSession = false;
+    if (!visitRecords(kScanSessionsFile, [&](const Record& record) {
+        if (scanSessionFromRecord(record).sessionId == execution.session.sessionId) {
+            replacesExistingSession = true;
+            return false;
         }
+        return true;
+    })) {
+        return false;
     }
-    sessions.push_back(recordFromScanSession(execution.session));
 
     std::vector<Record> attempts;
-    for (const Record& record : loadRecords(kScanAttemptsFile)) {
-        if (scanAttemptFromRecord(record).sessionId != execution.session.sessionId) {
-            attempts.push_back(record);
-        }
-    }
+    attempts.reserve(execution.attempts.size());
     for (ScanAttemptRecord attempt : execution.attempts) {
         if (attempt.sessionId.empty()) {
             attempt.sessionId = execution.session.sessionId;
@@ -964,11 +933,7 @@ bool NativeSessionStore::saveScanExecution(const ScanExecutionRecord& execution)
     }
 
     std::vector<Record> observations;
-    for (const Record& record : loadRecords(kScanObservationsFile)) {
-        if (scanObservationFromRecord(record).sessionId != execution.session.sessionId) {
-            observations.push_back(record);
-        }
-    }
+    observations.reserve(execution.observations.size());
     for (ScanObservationRecord observation : execution.observations) {
         if (observation.sessionId.empty()) {
             observation.sessionId = execution.session.sessionId;
@@ -979,45 +944,79 @@ bool NativeSessionStore::saveScanExecution(const ScanExecutionRecord& execution)
         observations.push_back(recordFromScanObservation(observation));
     }
 
-    return rewriteRecords(kScanSessionsFile, sessions)
-        && rewriteRecords(kScanAttemptsFile, attempts)
-        && rewriteRecords(kScanObservationsFile, observations);
+    const std::vector<Record> sessionRecord = {recordFromScanSession(execution.session)};
+    if (!replacesExistingSession) {
+        return appendRecords(kScanAttemptsFile, attempts)
+            && appendRecords(kScanObservationsFile, observations)
+            && appendRecords(kScanSessionsFile, sessionRecord);
+    }
+
+    const std::string sessionId = execution.session.sessionId;
+    return rewriteRecordsFilteredTransaction({
+        RewriteRequest{
+            std::string(kScanSessionsFile),
+            [sessionId](const Record& record) { return scanSessionFromRecord(record).sessionId != sessionId; },
+            sessionRecord,
+        },
+        RewriteRequest{
+            std::string(kScanAttemptsFile),
+            [sessionId](const Record& record) { return scanAttemptFromRecord(record).sessionId != sessionId; },
+            attempts,
+        },
+        RewriteRequest{
+            std::string(kScanObservationsFile),
+            [sessionId](const Record& record) { return scanObservationFromRecord(record).sessionId != sessionId; },
+            observations,
+        },
+    });
 }
 
 std::vector<ScanSessionRecord> NativeSessionStore::recentScanSessions(int limit) const {
-    std::vector<ScanSessionRecord> sessions;
-    for (const Record& record : loadRecords(kScanSessionsFile)) {
-        sessions.push_back(scanSessionFromRecord(record));
-    }
-    return recentLastFirst(std::move(sessions), limit);
+    std::deque<ScanSessionRecord> sessions;
+    const std::size_t safeLimit = safeRecentLimit(limit);
+    const bool ok = visitRecords(kScanSessionsFile, [&](const Record& record) {
+        appendBoundedRecent(sessions, scanSessionFromRecord(record), safeLimit);
+        return true;
+    });
+    return ok ? recentLastFirstFromDeque(sessions) : std::vector<ScanSessionRecord>{};
 }
 
 std::optional<ScanSessionRecord> NativeSessionStore::latestScanSession() const {
-    const auto sessions = recentScanSessions(1);
-    if (sessions.empty()) {
-        return std::nullopt;
-    }
-    return sessions.front();
+    std::optional<ScanSessionRecord> latest;
+    const bool ok = visitRecords(kScanSessionsFile, [&](const Record& record) {
+        latest = scanSessionFromRecord(record);
+        return true;
+    });
+    return ok ? latest : std::nullopt;
 }
 
 std::optional<ScanSessionRecord> NativeSessionStore::scanSession(std::string_view sessionId) const {
     std::optional<ScanSessionRecord> found;
-    for (const Record& record : loadRecords(kScanSessionsFile)) {
+    const bool ok = visitRecords(kScanSessionsFile, [&](const Record& record) {
         ScanSessionRecord session = scanSessionFromRecord(record);
         if (session.sessionId == sessionId) {
             found = std::move(session);
         }
-    }
-    return found;
+        return true;
+    });
+    return ok ? found : std::nullopt;
 }
 
 std::vector<ScanAttemptRecord> NativeSessionStore::scanAttempts(std::string_view sessionId) const {
+    if (sessionId.empty() || !scanSession(sessionId).has_value()) {
+        return {};
+    }
+
     std::vector<ScanAttemptRecord> attempts;
-    for (const Record& record : loadRecords(kScanAttemptsFile)) {
+    const bool ok = visitRecords(kScanAttemptsFile, [&](const Record& record) {
         ScanAttemptRecord attempt = scanAttemptFromRecord(record);
         if (attempt.sessionId == sessionId) {
             attempts.push_back(std::move(attempt));
         }
+        return true;
+    });
+    if (!ok) {
+        return {};
     }
     std::sort(attempts.begin(), attempts.end(), [](const ScanAttemptRecord& left, const ScanAttemptRecord& right) {
         if (left.blockIndex != right.blockIndex) {
@@ -1032,12 +1031,20 @@ std::vector<ScanAttemptRecord> NativeSessionStore::scanAttempts(std::string_view
 }
 
 std::vector<ScanObservationRecord> NativeSessionStore::scanObservations(std::string_view sessionId) const {
+    if (sessionId.empty() || !scanSession(sessionId).has_value()) {
+        return {};
+    }
+
     std::vector<ScanObservationRecord> observations;
-    for (const Record& record : loadRecords(kScanObservationsFile)) {
+    const bool ok = visitRecords(kScanObservationsFile, [&](const Record& record) {
         ScanObservationRecord observation = scanObservationFromRecord(record);
         if (observation.sessionId == sessionId) {
             observations.push_back(std::move(observation));
         }
+        return true;
+    });
+    if (!ok) {
+        return {};
     }
     std::sort(observations.begin(), observations.end(), [](const ScanObservationRecord& left, const ScanObservationRecord& right) {
         if (left.address != right.address) {
@@ -1058,20 +1065,19 @@ bool NativeSessionStore::saveMatchRun(MatchRunRecord run, std::vector<MatchCandi
     }
     run.candidateCount = static_cast<int>(candidates.size());
 
-    std::vector<Record> runs;
-    for (const Record& record : loadRecords(kMatchRunsFile)) {
-        if (matchRunFromRecord(record).runId != run.runId) {
-            runs.push_back(record);
+    bool replacesExistingRun = false;
+    if (!visitRecords(kMatchRunsFile, [&](const Record& record) {
+        if (matchRunFromRecord(record).runId == run.runId) {
+            replacesExistingRun = true;
+            return false;
         }
+        return true;
+    })) {
+        return false;
     }
-    runs.push_back(recordFromMatchRun(run));
 
     std::vector<Record> candidateRecords;
-    for (const Record& record : loadRecords(kMatchCandidatesFile)) {
-        if (matchCandidateFromRecord(record).runId != run.runId) {
-            candidateRecords.push_back(record);
-        }
-    }
+    candidateRecords.reserve(candidates.size());
     for (std::size_t index = 0; index < candidates.size(); ++index) {
         MatchCandidateRecord candidate = candidates[index];
         if (candidate.runId.empty()) {
@@ -1084,44 +1090,73 @@ bool NativeSessionStore::saveMatchRun(MatchRunRecord run, std::vector<MatchCandi
         candidateRecords.push_back(recordFromMatchCandidate(candidate));
     }
 
-    return rewriteRecords(kMatchRunsFile, runs)
-        && rewriteRecords(kMatchCandidatesFile, candidateRecords);
+    const std::vector<Record> runRecord = {recordFromMatchRun(run)};
+    if (!replacesExistingRun) {
+        return appendRecords(kMatchCandidatesFile, candidateRecords)
+            && appendRecords(kMatchRunsFile, runRecord);
+    }
+
+    const std::string runId = run.runId;
+    return rewriteRecordsFilteredTransaction({
+        RewriteRequest{
+            std::string(kMatchRunsFile),
+            [runId](const Record& record) { return matchRunFromRecord(record).runId != runId; },
+            runRecord,
+        },
+        RewriteRequest{
+            std::string(kMatchCandidatesFile),
+            [runId](const Record& record) { return matchCandidateFromRecord(record).runId != runId; },
+            candidateRecords,
+        },
+    });
 }
 
 std::vector<MatchRunRecord> NativeSessionStore::recentMatchRuns(int limit) const {
-    std::vector<MatchRunRecord> runs;
-    for (const Record& record : loadRecords(kMatchRunsFile)) {
-        runs.push_back(matchRunFromRecord(record));
-    }
-    return recentLastFirst(std::move(runs), limit);
+    std::deque<MatchRunRecord> runs;
+    const std::size_t safeLimit = safeRecentLimit(limit);
+    const bool ok = visitRecords(kMatchRunsFile, [&](const Record& record) {
+        appendBoundedRecent(runs, matchRunFromRecord(record), safeLimit);
+        return true;
+    });
+    return ok ? recentLastFirstFromDeque(runs) : std::vector<MatchRunRecord>{};
 }
 
 std::optional<MatchRunRecord> NativeSessionStore::latestMatchRun() const {
-    const auto runs = recentMatchRuns(1);
-    if (runs.empty()) {
-        return std::nullopt;
-    }
-    return runs.front();
+    std::optional<MatchRunRecord> latest;
+    const bool ok = visitRecords(kMatchRunsFile, [&](const Record& record) {
+        latest = matchRunFromRecord(record);
+        return true;
+    });
+    return ok ? latest : std::nullopt;
 }
 
 std::optional<MatchRunRecord> NativeSessionStore::matchRun(std::string_view runId) const {
     std::optional<MatchRunRecord> found;
-    for (const Record& record : loadRecords(kMatchRunsFile)) {
+    const bool ok = visitRecords(kMatchRunsFile, [&](const Record& record) {
         MatchRunRecord run = matchRunFromRecord(record);
         if (run.runId == runId) {
             found = std::move(run);
         }
-    }
-    return found;
+        return true;
+    });
+    return ok ? found : std::nullopt;
 }
 
 std::vector<MatchCandidateRecord> NativeSessionStore::matchCandidates(std::string_view runId) const {
+    if (runId.empty() || !matchRun(runId).has_value()) {
+        return {};
+    }
+
     std::vector<MatchCandidateRecord> candidates;
-    for (const Record& record : loadRecords(kMatchCandidatesFile)) {
+    const bool ok = visitRecords(kMatchCandidatesFile, [&](const Record& record) {
         MatchCandidateRecord candidate = matchCandidateFromRecord(record);
         if (candidate.runId == runId) {
             candidates.push_back(std::move(candidate));
         }
+        return true;
+    });
+    if (!ok) {
+        return {};
     }
     std::sort(candidates.begin(), candidates.end(), [](const MatchCandidateRecord& left, const MatchCandidateRecord& right) {
         if (left.rankIndex != right.rankIndex) {
@@ -1148,46 +1183,41 @@ bool NativeSessionStore::saveProtocolFieldRule(ProtocolFieldRuleRecord rule) {
         rule.id = allocateId(kProtocolRulesFile);
     }
 
-    std::vector<Record> records;
-    for (const Record& record : loadRecords(kProtocolRulesFile)) {
-        if (protocolRuleFromRecord(record).ruleId != rule.ruleId) {
-            records.push_back(record);
-        }
-    }
-    records.push_back(recordFromProtocolRule(rule));
-    return rewriteRecords(kProtocolRulesFile, records);
+    const std::vector<Record> ruleRecord = {recordFromProtocolRule(rule)};
+    return rewriteRecordsFiltered(kProtocolRulesFile,
+        [&](const Record& record) { return protocolRuleFromRecord(record).ruleId != rule.ruleId; },
+        ruleRecord);
 }
 
 bool NativeSessionStore::deleteProtocolFieldRule(std::string_view ruleId) {
     if (!ensureOpen("删除协议字段规则")) {
         return false;
     }
-    std::vector<Record> records;
-    for (const Record& record : loadRecords(kProtocolRulesFile)) {
-        if (protocolRuleFromRecord(record).ruleId != ruleId) {
-            records.push_back(record);
-        }
-    }
-    return rewriteRecords(kProtocolRulesFile, records);
+    return rewriteRecordsFiltered(kProtocolRulesFile,
+        [&](const Record& record) { return protocolRuleFromRecord(record).ruleId != ruleId; },
+        {});
 }
 
 std::optional<ProtocolFieldRuleRecord> NativeSessionStore::protocolFieldRule(std::string_view ruleId) const {
     std::optional<ProtocolFieldRuleRecord> found;
-    for (const Record& record : loadRecords(kProtocolRulesFile)) {
+    const bool ok = visitRecords(kProtocolRulesFile, [&](const Record& record) {
         ProtocolFieldRuleRecord rule = protocolRuleFromRecord(record);
         if (rule.ruleId == ruleId) {
             found = std::move(rule);
         }
-    }
-    return found;
+        return true;
+    });
+    return ok ? found : std::nullopt;
 }
 
 std::vector<ProtocolFieldRuleRecord> NativeSessionStore::recentProtocolFieldRules(int limit) const {
-    std::vector<ProtocolFieldRuleRecord> rules;
-    for (const Record& record : loadRecords(kProtocolRulesFile)) {
-        rules.push_back(protocolRuleFromRecord(record));
-    }
-    return recentLastFirst(std::move(rules), limit);
+    std::deque<ProtocolFieldRuleRecord> rules;
+    const std::size_t safeLimit = safeRecentLimit(limit);
+    const bool ok = visitRecords(kProtocolRulesFile, [&](const Record& record) {
+        appendBoundedRecent(rules, protocolRuleFromRecord(record), safeLimit);
+        return true;
+    });
+    return ok ? recentLastFirstFromDeque(rules) : std::vector<ProtocolFieldRuleRecord>{};
 }
 
 bool NativeSessionStore::saveRuleVerificationRun(
@@ -1204,20 +1234,19 @@ bool NativeSessionStore::saveRuleVerificationRun(
         run.id = allocateId(kRuleVerificationRunsFile);
     }
 
-    std::vector<Record> runs;
-    for (const Record& record : loadRecords(kRuleVerificationRunsFile)) {
-        if (verificationRunFromRecord(record).verificationRunId != run.verificationRunId) {
-            runs.push_back(record);
+    bool replacesExistingRun = false;
+    if (!visitRecords(kRuleVerificationRunsFile, [&](const Record& record) {
+        if (verificationRunFromRecord(record).verificationRunId == run.verificationRunId) {
+            replacesExistingRun = true;
+            return false;
         }
+        return true;
+    })) {
+        return false;
     }
-    runs.push_back(recordFromVerificationRun(run));
 
     std::vector<Record> resultRecords;
-    for (const Record& record : loadRecords(kRuleVerificationResultsFile)) {
-        if (verificationResultFromRecord(record).verificationRunId != run.verificationRunId) {
-            resultRecords.push_back(record);
-        }
-    }
+    resultRecords.reserve(results.size());
     for (RuleVerificationResultRecord result : results) {
         if (result.verificationRunId.empty()) {
             result.verificationRunId = run.verificationRunId;
@@ -1228,36 +1257,67 @@ bool NativeSessionStore::saveRuleVerificationRun(
         resultRecords.push_back(recordFromVerificationResult(result));
     }
 
-    return rewriteRecords(kRuleVerificationRunsFile, runs)
-        && rewriteRecords(kRuleVerificationResultsFile, resultRecords);
+    const std::vector<Record> runRecord = {recordFromVerificationRun(run)};
+    if (!replacesExistingRun) {
+        return appendRecords(kRuleVerificationResultsFile, resultRecords)
+            && appendRecords(kRuleVerificationRunsFile, runRecord);
+    }
+
+    const std::string verificationRunId = run.verificationRunId;
+    return rewriteRecordsFilteredTransaction({
+        RewriteRequest{
+            std::string(kRuleVerificationRunsFile),
+            [verificationRunId](const Record& record) {
+                return verificationRunFromRecord(record).verificationRunId != verificationRunId;
+            },
+            runRecord,
+        },
+        RewriteRequest{
+            std::string(kRuleVerificationResultsFile),
+            [verificationRunId](const Record& record) {
+                return verificationResultFromRecord(record).verificationRunId != verificationRunId;
+            },
+            resultRecords,
+        },
+    });
 }
 
 std::optional<RuleVerificationRunRecord> NativeSessionStore::latestRuleVerificationRun() const {
     std::optional<RuleVerificationRunRecord> latest;
-    for (const Record& record : loadRecords(kRuleVerificationRunsFile)) {
+    const bool ok = visitRecords(kRuleVerificationRunsFile, [&](const Record& record) {
         latest = verificationRunFromRecord(record);
-    }
-    return latest;
+        return true;
+    });
+    return ok ? latest : std::nullopt;
 }
 
 std::optional<RuleVerificationRunRecord> NativeSessionStore::ruleVerificationRun(std::string_view verificationRunId) const {
     std::optional<RuleVerificationRunRecord> found;
-    for (const Record& record : loadRecords(kRuleVerificationRunsFile)) {
+    const bool ok = visitRecords(kRuleVerificationRunsFile, [&](const Record& record) {
         RuleVerificationRunRecord run = verificationRunFromRecord(record);
         if (run.verificationRunId == verificationRunId) {
             found = std::move(run);
         }
-    }
-    return found;
+        return true;
+    });
+    return ok ? found : std::nullopt;
 }
 
 std::vector<RuleVerificationResultRecord> NativeSessionStore::ruleVerificationResults(std::string_view verificationRunId) const {
+    if (verificationRunId.empty() || !ruleVerificationRun(verificationRunId).has_value()) {
+        return {};
+    }
+
     std::vector<RuleVerificationResultRecord> results;
-    for (const Record& record : loadRecords(kRuleVerificationResultsFile)) {
+    const bool ok = visitRecords(kRuleVerificationResultsFile, [&](const Record& record) {
         RuleVerificationResultRecord result = verificationResultFromRecord(record);
         if (result.verificationRunId == verificationRunId) {
             results.push_back(std::move(result));
         }
+        return true;
+    });
+    if (!ok) {
+        return {};
     }
     std::sort(results.begin(), results.end(), [](const RuleVerificationResultRecord& left, const RuleVerificationResultRecord& right) {
         return left.id < right.id;
@@ -1273,13 +1333,13 @@ bool NativeSessionStore::ensureOpen(std::string_view operation) const {
     return false;
 }
 
-bool NativeSessionStore::appendRecord(std::string_view fileName, const Record& record) {
-    return appendRecords(fileName, {record});
-}
-
 bool NativeSessionStore::appendRecords(std::string_view fileName, const std::vector<Record>& records) {
     if (records.empty()) {
         return true;
+    }
+    absorbRecordIds(fileName, records);
+    if (fileName != kIdCountersFile && !persistCounters()) {
+        return false;
     }
     const auto path = filePath(fileName);
     std::error_code error;
@@ -1296,6 +1356,102 @@ bool NativeSessionStore::appendRecords(std::string_view fileName, const std::vec
         if (!writeRecord(output, record)) {
             lastErrorText_ = "写入 native 存储失败：记录写入中断。";
             return false;
+        }
+    }
+    lastErrorText_.clear();
+    return true;
+}
+
+bool NativeSessionStore::compactRawEventsIfNeeded() {
+    if (rawEventSoftLimitBytes_ == 0 || rawEventTargetBytes_ == 0) {
+        return true;
+    }
+
+    const auto path = filePath(kRawEventsFile);
+    std::error_code error;
+    const std::uintmax_t currentSize = std::filesystem::file_size(path, error);
+    if (error || currentSize <= rawEventSoftLimitBytes_) {
+        return true;
+    }
+
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        lastErrorText_ = "压缩 native 原始记录失败：无法打开 raw_io_events.svmr。";
+        return false;
+    }
+
+    if (!skipStoreHeader(input)) {
+        lastErrorText_ = "压缩 native 原始记录失败：无法读取文件头。";
+        return false;
+    }
+
+    std::deque<RecordSpan> retainedSpans;
+    std::uintmax_t retainedBytes = kHeader.size();
+    std::size_t recordCount = 0;
+    std::uintmax_t firstRecordOffset = static_cast<std::uintmax_t>(input.tellg());
+    std::string parseError;
+    while (true) {
+        std::optional<RecordSpan> span = readNextRecordSpan(input, &parseError);
+        if (!parseError.empty()) {
+            lastErrorText_ = parseError;
+            return false;
+        }
+        if (!span.has_value()) {
+            break;
+        }
+        ++recordCount;
+        while (!retainedSpans.empty() && retainedBytes + span->size > rawEventTargetBytes_) {
+            retainedBytes -= retainedSpans.front().size;
+            retainedSpans.pop_front();
+        }
+        retainedBytes += span->size;
+        retainedSpans.push_back(*span);
+    }
+
+    if (recordCount == 0) {
+        return rewriteRecords(kRawEventsFile, {});
+    }
+
+    if (retainedSpans.empty() || retainedSpans.front().offset <= firstRecordOffset) {
+        return true;
+    }
+
+    const auto tempPath = replacementTempPath(path);
+    if (!copyFileTailWithHeader(path, tempPath, retainedSpans.front().offset, &lastErrorText_)) {
+        std::filesystem::remove(tempPath);
+        return false;
+    }
+    return replaceFileWithTemp(tempPath, path, lastErrorText_, "压缩 native 原始记录");
+}
+
+bool NativeSessionStore::visitRecords(std::string_view fileName, const std::function<bool(const Record&)>& visitor) const {
+    const auto path = filePath(fileName);
+    if (!std::filesystem::exists(path)) {
+        return true;
+    }
+
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        lastErrorText_ = "读取 native 存储失败：无法打开 " + path.filename().string() + "。";
+        return false;
+    }
+    if (!skipStoreHeader(input)) {
+        lastErrorText_ = "读取 native 存储失败：无法读取 " + path.filename().string() + " 文件头。";
+        return false;
+    }
+
+    std::string errorText;
+    while (true) {
+        std::optional<Record> record = readNextRecordFromStream(input, &errorText, "读取 native 存储");
+        if (!errorText.empty()) {
+            lastErrorText_ = errorText;
+            return false;
+        }
+        if (!record.has_value()) {
+            break;
+        }
+        if (!visitor(*record)) {
+            break;
         }
     }
     lastErrorText_.clear();
@@ -1323,8 +1479,14 @@ std::vector<NativeSessionStore::Record> NativeSessionStore::loadRecords(std::str
 }
 
 bool NativeSessionStore::rewriteRecords(std::string_view fileName, const std::vector<Record>& records) {
+    absorbRecordIds(fileName, records);
+    if (fileName != kIdCountersFile && !persistCounters()) {
+        return false;
+    }
     const auto path = filePath(fileName);
-    const auto tempPath = path.string() + ".tmp";
+    const auto tempPath = replacementTempPath(path);
+    bool writeFailed = false;
+    std::string writeErrorText;
     {
         std::ofstream output(tempPath, std::ios::binary | std::ios::trunc);
         if (!output) {
@@ -1332,41 +1494,221 @@ bool NativeSessionStore::rewriteRecords(std::string_view fileName, const std::ve
             return false;
         }
         output << kHeader;
-        for (const Record& record : records) {
-            if (!writeRecord(output, record)) {
-                lastErrorText_ = "重写 native 存储失败：记录写入中断。";
-                return false;
+        if (!output) {
+            writeFailed = true;
+            writeErrorText = "重写 native 存储失败：文件头写入中断。";
+        } else {
+            for (const Record& record : records) {
+                if (!writeRecord(output, record)) {
+                    writeFailed = true;
+                    writeErrorText = "重写 native 存储失败：记录写入中断。";
+                    break;
+                }
             }
         }
     }
-
-    std::error_code copyError;
-    std::filesystem::copy_file(tempPath, path, std::filesystem::copy_options::overwrite_existing, copyError);
-    if (copyError) {
-        std::error_code removeError;
-        std::filesystem::remove(path, removeError);
-        if (removeError) {
-            std::filesystem::remove(tempPath);
-            lastErrorText_ = "重写 native 存储失败：" + copyError.message() + "；删除旧文件失败：" + removeError.message();
-            return false;
-        }
-
-        std::error_code renameError;
-        std::filesystem::rename(tempPath, path, renameError);
-        if (renameError) {
-            std::filesystem::remove(tempPath);
-            lastErrorText_ = "重写 native 存储失败：" + copyError.message() + "；替换临时文件失败：" + renameError.message();
-            return false;
-        }
-    } else {
+    if (writeFailed) {
         std::filesystem::remove(tempPath);
+        lastErrorText_ = writeErrorText;
+        return false;
     }
-    lastErrorText_.clear();
+
+    return replaceFileWithTemp(tempPath, path, lastErrorText_, "重写 native 存储");
+}
+
+bool NativeSessionStore::rewriteRecordsFiltered(
+    std::string_view fileName,
+    const std::function<bool(const Record&)>& keepRecord,
+    const std::vector<Record>& appendedRecords) {
+    absorbRecordIds(fileName, appendedRecords);
+    if (fileName != kIdCountersFile && !persistCounters()) {
+        return false;
+    }
+
+    const auto path = filePath(fileName);
+    const auto tempPath = replacementTempPath(path);
+    bool writeFailed = false;
+    bool visitFailed = false;
+    std::string writeErrorText;
+    {
+        std::ofstream output(tempPath, std::ios::binary | std::ios::trunc);
+        if (!output) {
+            lastErrorText_ = "重写 native 存储失败：无法创建临时文件 " + std::filesystem::path(tempPath).filename().string() + "。";
+            return false;
+        }
+        output << kHeader;
+        if (!output) {
+            writeFailed = true;
+            writeErrorText = "重写 native 存储失败：文件头写入中断。";
+        } else {
+            const bool visited = visitRecords(fileName, [&](const Record& record) {
+                if (!keepRecord(record)) {
+                    return true;
+                }
+                if (!writeRecord(output, record)) {
+                    writeFailed = true;
+                    writeErrorText = "重写 native 存储失败：记录写入中断。";
+                    return false;
+                }
+                return true;
+            });
+            if (!visited) {
+                visitFailed = true;
+            }
+
+            if (!visitFailed && !writeFailed) {
+                for (const Record& record : appendedRecords) {
+                    if (!writeRecord(output, record)) {
+                        writeFailed = true;
+                        writeErrorText = "重写 native 存储失败：记录写入中断。";
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    if (visitFailed) {
+        std::filesystem::remove(tempPath);
+        return false;
+    }
+    if (writeFailed) {
+        std::filesystem::remove(tempPath);
+        lastErrorText_ = writeErrorText;
+        return false;
+    }
+
+    return replaceFileWithTemp(tempPath, path, lastErrorText_, "重写 native 存储");
+}
+
+bool NativeSessionStore::rewriteRecordsFilteredTransaction(std::vector<RewriteRequest> requests) {
+    if (requests.empty()) {
+        return true;
+    }
+
+    for (const RewriteRequest& request : requests) {
+        absorbRecordIds(request.fileName, request.appendedRecords);
+    }
+
+    if (countersDirty_) {
+        requests.push_back(RewriteRequest{
+            std::string(kIdCountersFile),
+            [](const Record&) { return false; },
+            counterRecords(),
+        });
+    }
+
+    std::vector<ReplacementTarget> targets;
+    targets.reserve(requests.size());
+    bool writeFailed = false;
+    bool visitFailed = false;
+    std::string writeErrorText;
+
+    for (const RewriteRequest& request : requests) {
+        const auto path = filePath(request.fileName);
+        const auto tempPath = replacementTempPath(path);
+        bool requestWriteFailed = false;
+        bool requestVisitFailed = false;
+        {
+            std::ofstream output(tempPath, std::ios::binary | std::ios::trunc);
+            if (!output) {
+                writeFailed = true;
+                writeErrorText = "事务重写 native 存储失败：无法创建临时文件 "
+                    + std::filesystem::path(tempPath).filename().string() + "。";
+            } else {
+                output << kHeader;
+                if (!output) {
+                    requestWriteFailed = true;
+                    writeErrorText = "事务重写 native 存储失败：文件头写入中断。";
+                } else {
+                    const bool visited = visitRecords(request.fileName, [&](const Record& record) {
+                        if (!request.keepRecord(record)) {
+                            return true;
+                        }
+                        if (!writeRecord(output, record)) {
+                            requestWriteFailed = true;
+                            writeErrorText = "事务重写 native 存储失败：记录写入中断。";
+                            return false;
+                        }
+                        return true;
+                    });
+                    if (!visited) {
+                        requestVisitFailed = true;
+                    }
+
+                    if (!requestVisitFailed && !requestWriteFailed) {
+                        for (const Record& record : request.appendedRecords) {
+                            if (!writeRecord(output, record)) {
+                                requestWriteFailed = true;
+                                writeErrorText = "事务重写 native 存储失败：记录写入中断。";
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (writeFailed || requestWriteFailed || requestVisitFailed) {
+            writeFailed = writeFailed || requestWriteFailed;
+            visitFailed = visitFailed || requestVisitFailed;
+            std::filesystem::remove(tempPath);
+            break;
+        }
+
+        targets.push_back(ReplacementTarget{
+            tempPath,
+            path,
+            replacementBackupPath(path),
+            false,
+            false,
+            false,
+        });
+    }
+
+    if (visitFailed || writeFailed) {
+        for (const ReplacementTarget& target : targets) {
+            std::filesystem::remove(target.tempPath);
+        }
+        if (writeFailed) {
+            lastErrorText_ = writeErrorText;
+        }
+        return false;
+    }
+
+    const bool savedCounters = countersDirty_;
+    if (!commitReplacementTargets(targets, lastErrorText_, "事务重写 native 存储")) {
+        return false;
+    }
+    if (savedCounters) {
+        countersDirty_ = false;
+    }
     return true;
 }
 
 std::filesystem::path NativeSessionStore::filePath(std::string_view fileName) const {
     return storeDirectory_ / std::string(fileName);
+}
+
+void NativeSessionStore::absorbRecordIds(std::string_view fileName, const std::vector<Record>& records) {
+    if (fileName == kIdCountersFile || records.empty()) {
+        return;
+    }
+
+    const std::string key(fileName);
+    std::int64_t& nextId = nextIds_[key];
+    if (nextId <= 0) {
+        nextId = 1;
+    }
+    for (const Record& record : records) {
+        if (record.empty()) {
+            continue;
+        }
+        const std::int64_t usedId = toInt64(record[0], 0);
+        if (usedId >= nextId) {
+            nextId = usedId + 1;
+            countersDirty_ = true;
+        }
+    }
 }
 
 std::int64_t NativeSessionStore::allocateId(std::string_view fileName) {
@@ -1377,20 +1719,85 @@ std::int64_t NativeSessionStore::allocateId(std::string_view fileName) {
     }
     const std::int64_t allocated = nextId;
     ++nextId;
+    countersDirty_ = true;
     return allocated;
 }
 
-void NativeSessionStore::reloadCounters() {
+std::vector<NativeSessionStore::Record> NativeSessionStore::counterRecords() const {
+    std::vector<Record> records;
+    records.reserve(storeFiles().size());
+    for (std::string_view fileName : storeFiles()) {
+        const std::string key(fileName);
+        const auto iterator = nextIds_.find(key);
+        const std::int64_t nextId = iterator == nextIds_.end() ? 1 : std::max<std::int64_t>(1, iterator->second);
+        records.push_back({key, toString(nextId)});
+    }
+    return records;
+}
+
+bool NativeSessionStore::loadPersistedCounters() {
+    const auto path = filePath(kIdCountersFile);
+    if (!std::filesystem::exists(path)) {
+        return false;
+    }
+
+    const std::vector<Record> records = loadRecords(kIdCountersFile);
+    std::unordered_map<std::string, std::int64_t> loaded;
+    loaded.reserve(records.size());
+    for (const Record& record : records) {
+        if (record.size() < 2) {
+            lastErrorText_.clear();
+            return false;
+        }
+        const std::int64_t nextId = toInt64(record[1], -1);
+        if (record[0].empty() || nextId <= 0) {
+            lastErrorText_.clear();
+            return false;
+        }
+        loaded[record[0]] = nextId;
+    }
+
+    for (std::string_view fileName : storeFiles()) {
+        if (loaded.find(std::string(fileName)) == loaded.end()) {
+            lastErrorText_.clear();
+            return false;
+        }
+    }
+
+    nextIds_ = std::move(loaded);
+    countersDirty_ = false;
+    lastErrorText_.clear();
+    return true;
+}
+
+bool NativeSessionStore::persistCounters() {
+    if (!countersDirty_) {
+        return true;
+    }
+    const bool saved = rewriteRecords(kIdCountersFile, counterRecords());
+    if (saved) {
+        countersDirty_ = false;
+    }
+    return saved;
+}
+
+bool NativeSessionStore::reloadCounters() {
     nextIds_.clear();
     for (std::string_view fileName : storeFiles()) {
         std::int64_t maxId = 0;
-        for (const Record& record : loadRecords(fileName)) {
+        const bool ok = visitRecords(fileName, [&](const Record& record) {
             if (!record.empty()) {
                 maxId = std::max(maxId, toInt64(record[0]));
             }
+            return true;
+        });
+        if (!ok) {
+            return false;
         }
         nextIds_[std::string(fileName)] = maxId + 1;
     }
+    countersDirty_ = true;
+    return persistCounters();
 }
 
 } // namespace svm::native_storage

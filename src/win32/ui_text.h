@@ -60,6 +60,7 @@ enum class TextId {
     FileDelayLabel,
     FileProgressLabel,
     LogCacheLabel,
+    RawEventRetentionLabel,
     LogFormatLabel,
     LogEncodingLabel,
     LogFilterLabel,
