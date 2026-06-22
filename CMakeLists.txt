@@ -89,6 +89,7 @@ if(SVM_BUILD_WIN32_APP)
         src/win32/native_log_scroll_state.cpp
         src/win32/native_log_view.cpp
         src/win32/native_modbus_scan_worker.cpp
+        src/win32/native_reconnect_state.cpp
         src/win32/native_serial_io_state.cpp
         src/win32/native_serial_profile_codec.cpp
         src/win32/native_send_codec.cpp
@@ -333,6 +334,18 @@ set_target_properties(native_log_scroll_state_tests PROPERTIES
 )
 target_include_directories(native_log_scroll_state_tests PRIVATE src)
 add_test(NAME native_log_scroll_state_tests COMMAND native_log_scroll_state_tests)
+
+add_executable(native_reconnect_state_tests
+    tests/native_reconnect_state_tests.cpp
+    src/win32/native_reconnect_state.cpp
+)
+set_target_properties(native_reconnect_state_tests PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+target_include_directories(native_reconnect_state_tests PRIVATE src)
+add_test(NAME native_reconnect_state_tests COMMAND native_reconnect_state_tests)
 
 add_executable(native_send_codec_tests
     tests/native_send_codec_tests.cpp

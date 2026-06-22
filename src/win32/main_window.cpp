@@ -6,6 +6,7 @@
 #include "win32/native_analysis_workflow.h"
 #include "win32/native_log_view.h"
 #include "win32/native_log_scroll_state.h"
+#include "win32/native_reconnect_state.h"
 #include "win32/native_send_codec.h"
 #include "win32/native_send_control_state.h"
 #include "win32/native_send_history_state.h"
@@ -2455,9 +2456,8 @@ void NativeMainWindow::connectSerial() {
         return;
     }
 
-    lastOpenOptions_ = options;
+    reconnectState_.rememberSuccessfulOpen(options);
     disconnectAfterModbusScan_ = false;
-    waitingReconnect_ = false;
     KillTimer(window_, IDT_RECONNECT);
     appendLog(uiString(T::SystemConnectedPrefix) + utf8ToWide(serialPort_.endpoint()));
     SetWindowTextW(connectButton_, tx(T::DisconnectButton));
@@ -2819,9 +2819,8 @@ void NativeMainWindow::handleSerialFailure(const std::string& message) {
     updateRtsControlState();
     appendLog(NativeLogKind::Error, uiString(T::SystemSerialFailedPrefix) + utf8ToWide(message));
     const bool autoReconnect = SendMessageW(autoReconnectCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED;
-    if (autoReconnect && lastOpenOptions_.has_value()) {
-        reconnectPortName_ = endpoint;
-        waitingReconnect_ = true;
+    if (autoReconnect && reconnectState_.hasLastOpenOptions()) {
+        reconnectState_.startWaiting(endpoint);
         SetTimer(window_, IDT_RECONNECT, 2000, nullptr);
         setStatus(uiString(T::ReconnectWaitingPrefix) + utf8ToWide(endpoint));
     } else {
@@ -2830,30 +2829,34 @@ void NativeMainWindow::handleSerialFailure(const std::string& message) {
 }
 
 void NativeMainWindow::tryAutoReconnect() {
-    if (!waitingReconnect_ || !lastOpenOptions_.has_value() || serialPort_.isOpen()) {
+    if (!reconnectState_.shouldTryReconnect(serialPort_.isOpen())) {
         KillTimer(window_, IDT_RECONNECT);
         return;
     }
 
     const auto ports = Win32SerialEnumerator::availablePorts();
     const bool present = std::any_of(ports.begin(), ports.end(), [this](const SerialPortDescriptor& port) {
-        return normalizedComPortName(port.portName) == normalizedComPortName(reconnectPortName_);
+        return normalizedComPortName(port.portName) == normalizedComPortName(reconnectState_.reconnectPortName());
     });
     if (!present) {
-        setStatus(uiString(T::WaitingReconnectPrefix) + utf8ToWide(reconnectPortName_) + uiString(T::PortNotReadySuffix));
+        setStatus(uiString(T::WaitingReconnectPrefix) + utf8ToWide(reconnectState_.reconnectPortName()) + uiString(T::PortNotReadySuffix));
         return;
     }
 
-    SerialOpenOptions options = *lastOpenOptions_;
-    options.portName = reconnectPortName_;
-    if (!serialPort_.open(options)) {
+    const std::optional<SerialOpenOptions> options = reconnectState_.reconnectOptions();
+    if (!options.has_value()) {
+        reconnectState_.markReconnectFailed();
+        KillTimer(window_, IDT_RECONNECT);
+        return;
+    }
+    if (!serialPort_.open(*options)) {
         setStatus(uiString(T::AutoReconnectFailedPrefix) + utf8ToWide(serialPort_.lastErrorText()));
-        waitingReconnect_ = false;
+        reconnectState_.markReconnectFailed();
         KillTimer(window_, IDT_RECONNECT);
         return;
     }
 
-    waitingReconnect_ = false;
+    reconnectState_.markReconnectSucceeded();
     KillTimer(window_, IDT_RECONNECT);
     SetWindowTextW(connectButton_, tx(T::DisconnectButton));
     updateRtsControlState();
@@ -3430,13 +3433,13 @@ void NativeMainWindow::applySerialLineControl(WORD controlId) {
     bool ok = false;
     if (controlId == IDC_DTR_CHECK) {
         ok = serialPort_.setDataTerminalReady(enabled);
-        if (ok && lastOpenOptions_.has_value()) {
-            lastOpenOptions_->dataTerminalReady = enabled;
+        if (ok) {
+            reconnectState_.updateDataTerminalReady(enabled);
         }
     } else {
         ok = serialPort_.setRequestToSend(enabled);
-        if (ok && lastOpenOptions_.has_value()) {
-            lastOpenOptions_->requestToSend = enabled;
+        if (ok) {
+            reconnectState_.updateRequestToSend(enabled);
         }
     }
 

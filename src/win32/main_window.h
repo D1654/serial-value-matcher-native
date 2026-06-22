@@ -15,6 +15,7 @@
 #include "win32/native_log_model.h"
 #include "win32/native_log_scroll_state.h"
 #include "win32/native_modbus_scan_worker.h"
+#include "win32/native_reconnect_state.h"
 #include "win32/native_serial_io_state.h"
 #include "win32/native_ui_preferences.h"
 #include "win32/native_send_control_state.h"
@@ -316,12 +317,10 @@ private:
     NativeSendHistoryState sendHistoryState_;
     std::vector<native_storage::MatchCandidateRecord> candidateRecords_;
     std::string sessionId_ = "win32-native-session";
-    std::optional<SerialOpenOptions> lastOpenOptions_;
-    std::string reconnectPortName_;
+    NativeReconnectState reconnectState_;
     std::string latestMatchRunId_;
     std::string cachedCandidateRunId_;
     std::string latestVerificationRunId_;
-    bool waitingReconnect_ = false;
     NativeLogScrollState logScrollState_;
     std::uint64_t txByteCount_ = 0;
     std::uint64_t rxByteCount_ = 0;
