@@ -692,6 +692,12 @@ NativeSessionStore::Record recordFromVerificationResult(const RuleVerificationRe
 } // namespace
 
 bool NativeSessionStore::open(const std::filesystem::path& storeDirectory) {
+    scanSessionsCacheValid_ = false;
+    matchRunsCacheValid_ = false;
+    ruleVerificationRunsCacheValid_ = false;
+    scanSessionsCache_.clear();
+    matchRunsCache_.clear();
+    ruleVerificationRunsCache_.clear();
     storeDirectory_ = storeDirectory;
     opened_ = true;
     if (!initializeSchema()) {
@@ -972,34 +978,32 @@ bool NativeSessionStore::saveScanExecution(const ScanExecutionRecord& execution)
 }
 
 std::vector<ScanSessionRecord> NativeSessionStore::recentScanSessions(int limit) const {
-    std::deque<ScanSessionRecord> sessions;
+    const auto& sessions = cachedScanSessions();
     const std::size_t safeLimit = safeRecentLimit(limit);
-    const bool ok = visitRecords(kScanSessionsFile, [&](const Record& record) {
-        appendBoundedRecent(sessions, scanSessionFromRecord(record), safeLimit);
-        return true;
-    });
-    return ok ? recentLastFirstFromDeque(sessions) : std::vector<ScanSessionRecord>{};
+    std::vector<ScanSessionRecord> result;
+    const std::size_t count = std::min(safeLimit, sessions.size());
+    result.reserve(count);
+    for (std::size_t index = 0; index < count; ++index) {
+        result.push_back(sessions[sessions.size() - index - 1]);
+    }
+    return result;
 }
 
 std::optional<ScanSessionRecord> NativeSessionStore::latestScanSession() const {
-    std::optional<ScanSessionRecord> latest;
-    const bool ok = visitRecords(kScanSessionsFile, [&](const Record& record) {
-        latest = scanSessionFromRecord(record);
-        return true;
-    });
-    return ok ? latest : std::nullopt;
+    const auto& sessions = cachedScanSessions();
+    if (sessions.empty()) {
+        return std::nullopt;
+    }
+    return sessions.back();
 }
 
 std::optional<ScanSessionRecord> NativeSessionStore::scanSession(std::string_view sessionId) const {
-    std::optional<ScanSessionRecord> found;
-    const bool ok = visitRecords(kScanSessionsFile, [&](const Record& record) {
-        ScanSessionRecord session = scanSessionFromRecord(record);
+    for (const ScanSessionRecord& session : cachedScanSessions()) {
         if (session.sessionId == sessionId) {
-            found = std::move(session);
+            return session;
         }
-        return true;
-    });
-    return ok ? found : std::nullopt;
+    }
+    return std::nullopt;
 }
 
 std::vector<ScanAttemptRecord> NativeSessionStore::scanAttempts(std::string_view sessionId) const {
@@ -1112,34 +1116,32 @@ bool NativeSessionStore::saveMatchRun(MatchRunRecord run, std::vector<MatchCandi
 }
 
 std::vector<MatchRunRecord> NativeSessionStore::recentMatchRuns(int limit) const {
-    std::deque<MatchRunRecord> runs;
+    const auto& runs = cachedMatchRuns();
     const std::size_t safeLimit = safeRecentLimit(limit);
-    const bool ok = visitRecords(kMatchRunsFile, [&](const Record& record) {
-        appendBoundedRecent(runs, matchRunFromRecord(record), safeLimit);
-        return true;
-    });
-    return ok ? recentLastFirstFromDeque(runs) : std::vector<MatchRunRecord>{};
+    std::vector<MatchRunRecord> result;
+    const std::size_t count = std::min(safeLimit, runs.size());
+    result.reserve(count);
+    for (std::size_t index = 0; index < count; ++index) {
+        result.push_back(runs[runs.size() - index - 1]);
+    }
+    return result;
 }
 
 std::optional<MatchRunRecord> NativeSessionStore::latestMatchRun() const {
-    std::optional<MatchRunRecord> latest;
-    const bool ok = visitRecords(kMatchRunsFile, [&](const Record& record) {
-        latest = matchRunFromRecord(record);
-        return true;
-    });
-    return ok ? latest : std::nullopt;
+    const auto& runs = cachedMatchRuns();
+    if (runs.empty()) {
+        return std::nullopt;
+    }
+    return runs.back();
 }
 
 std::optional<MatchRunRecord> NativeSessionStore::matchRun(std::string_view runId) const {
-    std::optional<MatchRunRecord> found;
-    const bool ok = visitRecords(kMatchRunsFile, [&](const Record& record) {
-        MatchRunRecord run = matchRunFromRecord(record);
+    for (const MatchRunRecord& run : cachedMatchRuns()) {
         if (run.runId == runId) {
-            found = std::move(run);
+            return run;
         }
-        return true;
-    });
-    return ok ? found : std::nullopt;
+    }
+    return std::nullopt;
 }
 
 std::vector<MatchCandidateRecord> NativeSessionStore::matchCandidates(std::string_view runId) const {
@@ -1283,24 +1285,20 @@ bool NativeSessionStore::saveRuleVerificationRun(
 }
 
 std::optional<RuleVerificationRunRecord> NativeSessionStore::latestRuleVerificationRun() const {
-    std::optional<RuleVerificationRunRecord> latest;
-    const bool ok = visitRecords(kRuleVerificationRunsFile, [&](const Record& record) {
-        latest = verificationRunFromRecord(record);
-        return true;
-    });
-    return ok ? latest : std::nullopt;
+    const auto& runs = cachedRuleVerificationRuns();
+    if (runs.empty()) {
+        return std::nullopt;
+    }
+    return runs.back();
 }
 
 std::optional<RuleVerificationRunRecord> NativeSessionStore::ruleVerificationRun(std::string_view verificationRunId) const {
-    std::optional<RuleVerificationRunRecord> found;
-    const bool ok = visitRecords(kRuleVerificationRunsFile, [&](const Record& record) {
-        RuleVerificationRunRecord run = verificationRunFromRecord(record);
+    for (const RuleVerificationRunRecord& run : cachedRuleVerificationRuns()) {
         if (run.verificationRunId == verificationRunId) {
-            found = std::move(run);
+            return run;
         }
-        return true;
-    });
-    return ok ? found : std::nullopt;
+    }
+    return std::nullopt;
 }
 
 std::vector<RuleVerificationResultRecord> NativeSessionStore::ruleVerificationResults(std::string_view verificationRunId) const {
@@ -1359,6 +1357,7 @@ bool NativeSessionStore::appendRecords(std::string_view fileName, const std::vec
         }
     }
     lastErrorText_.clear();
+    invalidateCachesForFile(fileName);
     return true;
 }
 
@@ -1513,7 +1512,11 @@ bool NativeSessionStore::rewriteRecords(std::string_view fileName, const std::ve
         return false;
     }
 
-    return replaceFileWithTemp(tempPath, path, lastErrorText_, "重写 native 存储");
+    const bool replaced = replaceFileWithTemp(tempPath, path, lastErrorText_, "重写 native 存储");
+    if (replaced) {
+        invalidateCachesForFile(fileName);
+    }
+    return replaced;
 }
 
 bool NativeSessionStore::rewriteRecordsFiltered(
@@ -1577,7 +1580,11 @@ bool NativeSessionStore::rewriteRecordsFiltered(
         return false;
     }
 
-    return replaceFileWithTemp(tempPath, path, lastErrorText_, "重写 native 存储");
+    const bool replaced = replaceFileWithTemp(tempPath, path, lastErrorText_, "重写 native 存储");
+    if (replaced) {
+        invalidateCachesForFile(fileName);
+    }
+    return replaced;
 }
 
 bool NativeSessionStore::rewriteRecordsFilteredTransaction(std::vector<RewriteRequest> requests) {
@@ -1682,7 +1689,74 @@ bool NativeSessionStore::rewriteRecordsFilteredTransaction(std::vector<RewriteRe
     if (savedCounters) {
         countersDirty_ = false;
     }
+    for (const RewriteRequest& request : requests) {
+        invalidateCachesForFile(request.fileName);
+    }
     return true;
+}
+
+void NativeSessionStore::invalidateCachesForFile(std::string_view fileName) const {
+    if (fileName == kScanSessionsFile) {
+        scanSessionsCacheValid_ = false;
+        scanSessionsCache_.clear();
+    } else if (fileName == kMatchRunsFile) {
+        matchRunsCacheValid_ = false;
+        matchRunsCache_.clear();
+    } else if (fileName == kRuleVerificationRunsFile) {
+        ruleVerificationRunsCacheValid_ = false;
+        ruleVerificationRunsCache_.clear();
+    }
+}
+
+const std::vector<ScanSessionRecord>& NativeSessionStore::cachedScanSessions() const {
+    if (scanSessionsCacheValid_) {
+        return scanSessionsCache_;
+    }
+    scanSessionsCache_.clear();
+    const bool ok = visitRecords(kScanSessionsFile, [&](const Record& record) {
+        scanSessionsCache_.push_back(scanSessionFromRecord(record));
+        return true;
+    });
+    if (ok) {
+        scanSessionsCacheValid_ = true;
+    } else {
+        scanSessionsCache_.clear();
+    }
+    return scanSessionsCache_;
+}
+
+const std::vector<MatchRunRecord>& NativeSessionStore::cachedMatchRuns() const {
+    if (matchRunsCacheValid_) {
+        return matchRunsCache_;
+    }
+    matchRunsCache_.clear();
+    const bool ok = visitRecords(kMatchRunsFile, [&](const Record& record) {
+        matchRunsCache_.push_back(matchRunFromRecord(record));
+        return true;
+    });
+    if (ok) {
+        matchRunsCacheValid_ = true;
+    } else {
+        matchRunsCache_.clear();
+    }
+    return matchRunsCache_;
+}
+
+const std::vector<RuleVerificationRunRecord>& NativeSessionStore::cachedRuleVerificationRuns() const {
+    if (ruleVerificationRunsCacheValid_) {
+        return ruleVerificationRunsCache_;
+    }
+    ruleVerificationRunsCache_.clear();
+    const bool ok = visitRecords(kRuleVerificationRunsFile, [&](const Record& record) {
+        ruleVerificationRunsCache_.push_back(verificationRunFromRecord(record));
+        return true;
+    });
+    if (ok) {
+        ruleVerificationRunsCacheValid_ = true;
+    } else {
+        ruleVerificationRunsCache_.clear();
+    }
+    return ruleVerificationRunsCache_;
 }
 
 std::filesystem::path NativeSessionStore::filePath(std::string_view fileName) const {

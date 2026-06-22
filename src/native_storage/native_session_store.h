@@ -294,6 +294,10 @@ private:
     bool loadPersistedCounters();
     bool persistCounters();
     bool reloadCounters();
+    void invalidateCachesForFile(std::string_view fileName) const;
+    const std::vector<ScanSessionRecord>& cachedScanSessions() const;
+    const std::vector<MatchRunRecord>& cachedMatchRuns() const;
+    const std::vector<RuleVerificationRunRecord>& cachedRuleVerificationRuns() const;
 
     std::filesystem::path storeDirectory_;
     bool opened_ = false;
@@ -302,6 +306,12 @@ private:
     bool countersDirty_ = false;
     std::uintmax_t rawEventSoftLimitBytes_ = 100ULL * 1024ULL * 1024ULL;
     std::uintmax_t rawEventTargetBytes_ = 80ULL * 1024ULL * 1024ULL;
+    mutable bool scanSessionsCacheValid_ = false;
+    mutable std::vector<ScanSessionRecord> scanSessionsCache_;
+    mutable bool matchRunsCacheValid_ = false;
+    mutable std::vector<MatchRunRecord> matchRunsCache_;
+    mutable bool ruleVerificationRunsCacheValid_ = false;
+    mutable std::vector<RuleVerificationRunRecord> ruleVerificationRunsCache_;
 };
 
 } // namespace svm::native_storage
