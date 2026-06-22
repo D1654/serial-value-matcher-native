@@ -1656,6 +1656,9 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
     case kNativeModbusScanProgressMessage:
         handleModbusScanProgress(reinterpret_cast<NativeModbusScanProgress*>(lParam));
         return 0;
+    case kNativeModbusScanDataMessage:
+        handleModbusScanDataBatch(reinterpret_cast<NativeModbusScanDataBatch*>(lParam));
+        return 0;
     case WM_CLOSE:
         stopFileSend({});
         requestCancelModbusScan();
@@ -4108,6 +4111,28 @@ void NativeMainWindow::handleModbusScanProgress(NativeModbusScanProgress* progre
     }
 }
 
+void NativeMainWindow::handleModbusScanDataBatch(NativeModbusScanDataBatch* batchPointer) {
+    std::unique_ptr<NativeModbusScanDataBatch> batch(batchPointer);
+    if (!batch) {
+        return;
+    }
+
+    for (const native_storage::RawIoEvent& event : batch->rawEvents) {
+        if (event.direction == "Tx") {
+            txByteCount_ += static_cast<std::uint64_t>(event.payload.size());
+        } else if (event.direction == "Rx") {
+            rxByteCount_ += static_cast<std::uint64_t>(event.payload.size());
+        }
+    }
+    if (!batch->rawEvents.empty()) {
+        updateStatusSegments();
+        saveRawEvents(std::move(batch->rawEvents));
+    }
+    for (NativeLogEntry& entry : batch->logEntries) {
+        addLogEntry(std::move(entry));
+    }
+}
+
 void NativeMainWindow::handleModbusScanDone(NativeModbusScanResult* resultPointer) {
     std::unique_ptr<NativeModbusScanResult> result(resultPointer);
     const bool shouldDisconnectAfterScan = disconnectAfterModbusScan_;
@@ -4128,19 +4153,6 @@ void NativeMainWindow::handleModbusScanDone(NativeModbusScanResult* resultPointe
         static_cast<std::size_t>(std::max(0, result->execution.session.successBlockCount)),
         static_cast<std::size_t>(std::max(0, result->execution.session.failedBlockCount)),
         result->execution.observations.size());
-
-    for (const native_storage::RawIoEvent& event : result->rawEvents) {
-        if (event.direction == "Tx") {
-            txByteCount_ += static_cast<std::uint64_t>(event.payload.size());
-        } else if (event.direction == "Rx") {
-            rxByteCount_ += static_cast<std::uint64_t>(event.payload.size());
-        }
-    }
-    updateStatusSegments();
-    saveRawEvents(std::move(result->rawEvents));
-    for (NativeLogEntry& entry : result->logEntries) {
-        addLogEntry(std::move(entry));
-    }
 
     std::wstring summary;
     if (!store_.saveScanExecution(result->execution)) {

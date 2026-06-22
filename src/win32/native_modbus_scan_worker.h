@@ -24,11 +24,15 @@ namespace svm::win32 {
 
 inline constexpr UINT kNativeModbusScanDoneMessage = WM_APP + 14;
 inline constexpr UINT kNativeModbusScanProgressMessage = WM_APP + 15;
+inline constexpr UINT kNativeModbusScanDataMessage = WM_APP + 16;
+
+struct NativeModbusScanDataBatch {
+    std::vector<native_storage::RawIoEvent> rawEvents;
+    std::vector<NativeLogEntry> logEntries;
+};
 
 struct NativeModbusScanResult {
     native_storage::ScanExecutionRecord execution;
-    std::vector<native_storage::RawIoEvent> rawEvents;
-    std::vector<NativeLogEntry> logEntries;
     std::string errorMessage;
     bool serialFailed = false;
     bool cancelled = false;

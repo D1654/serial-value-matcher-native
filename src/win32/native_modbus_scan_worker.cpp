@@ -12,6 +12,7 @@ namespace svm::win32 {
 namespace {
 
 constexpr ULONGLONG kModbusProgressMinIntervalMs = 80;
+constexpr std::size_t kModbusDataBatchMinItems = 24;
 
 std::wstring localClockText() {
     SYSTEMTIME now = {};
@@ -49,6 +50,19 @@ DWORD WINAPI nativeModbusScanThreadProc(void* parameter) {
     result->execution = std::move(context->execution);
     const std::string scanSessionId = context->scanSessionId;
     const std::string endpoint = context->serialPort->endpoint();
+    NativeModbusScanDataBatch dataBatch;
+
+    const auto postDataBatch = [&](bool force = false) {
+        const std::size_t itemCount = dataBatch.rawEvents.size() + dataBatch.logEntries.size();
+        if (itemCount == 0 || (!force && itemCount < kModbusDataBatchMinItems)) {
+            return;
+        }
+        auto* postedBatch = new NativeModbusScanDataBatch(std::move(dataBatch));
+        dataBatch = {};
+        if (!PostMessageW(context->notifyWindow, kNativeModbusScanDataMessage, 0, reinterpret_cast<LPARAM>(postedBatch))) {
+            delete postedBatch;
+        }
+    };
 
     const auto appendRawEvent = [&](std::string direction, const std::vector<std::uint8_t>& payload) {
         native_storage::RawIoEvent event;
@@ -57,7 +71,8 @@ DWORD WINAPI nativeModbusScanThreadProc(void* parameter) {
         event.timestampUtc = timestampText();
         event.endpoint = endpoint;
         event.payload = payload;
-        result->rawEvents.push_back(std::move(event));
+        dataBatch.rawEvents.push_back(std::move(event));
+        postDataBatch();
     };
     const auto appendPayloadEntry = [&](NativeLogKind kind, const wchar_t* prefix, const std::vector<std::uint8_t>& payload) {
         NativeLogEntry entry;
@@ -66,7 +81,8 @@ DWORD WINAPI nativeModbusScanThreadProc(void* parameter) {
         entry.payloadPrefix = prefix;
         entry.payload = payload;
         entry.hasPayload = true;
-        result->logEntries.push_back(std::move(entry));
+        dataBatch.logEntries.push_back(std::move(entry));
+        postDataBatch();
     };
     ULONGLONG lastProgressPostTick = 0;
     const auto postProgress = [&](bool force = false) {
@@ -230,6 +246,7 @@ DWORD WINAPI nativeModbusScanThreadProc(void* parameter) {
         result->errorMessage = context->threadExceptionMessage;
     }
 
+    postDataBatch(true);
     if (!PostMessageW(context->notifyWindow, kNativeModbusScanDoneMessage, 0, reinterpret_cast<LPARAM>(result))) {
         delete result;
     }

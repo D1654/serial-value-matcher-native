@@ -91,6 +91,7 @@ private:
     void runModbusScan();
     void requestCancelModbusScan();
     void handleModbusScanProgress(NativeModbusScanProgress* progress);
+    void handleModbusScanDataBatch(NativeModbusScanDataBatch* batch);
     void handleModbusScanDone(NativeModbusScanResult* result);
     void setModbusScanRunningUi(bool running);
     void updateModbusScanProgress(
