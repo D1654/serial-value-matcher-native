@@ -196,6 +196,7 @@ const wchar_t* uiText(TextId id) {
     case TextId::FileSendDonePrefix: return L"\u6587\u4EF6\u53D1\u9001\u5B8C\u6210\uFF1A";
     case TextId::FileSendStoppedStatus: return L"\u6587\u4EF6\u53D1\u9001\u5DF2\u505C\u6B62\u3002";
     case TextId::FileSendProgressPrefix: return L"\u6587\u4EF6\u53D1\u9001 ";
+    case TextId::FileSendReadFailedPrefix: return L"\u8BFB\u53D6\u6587\u4EF6\u5931\u8D25\uFF1A";
     case TextId::FileSendBusyStatus: return L"\u6587\u4EF6\u53D1\u9001\u8FDB\u884C\u4E2D\uFF0C\u8BF7\u5148\u505C\u6B62\u6587\u4EF6\u53D1\u9001\u3002";
     case TextId::AutoReconnectEnabled: return L"\u5DF2\u5F00\u542F\u81EA\u52A8\u91CD\u8FDE\u3002";
     case TextId::AutoReconnectDisabled: return L"\u5DF2\u5173\u95ED\u81EA\u52A8\u91CD\u8FDE\u3002";

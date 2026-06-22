@@ -45,7 +45,6 @@ constexpr std::size_t kMaxLogEntryLimit = 200000;
 constexpr std::size_t kLogTrimRebuildBatch = 256;
 constexpr std::size_t kLogInsertBatchChars = 65536;
 constexpr std::size_t kMaxRenderedLogLineChars = 4096;
-constexpr int kFileSendChunkBytes = 1024;
 constexpr std::size_t kDefaultLogVisibleChars = 350000;
 constexpr int kDefaultRawEventRetentionMb = 100;
 constexpr COLORREF kFormBackgroundColor = RGB(228, 228, 228);
@@ -1045,7 +1044,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             return 0;
         case IDC_FILE_DELAY_COMBO:
             if (HIWORD(wParam) == CBN_SELCHANGE) {
-                if (fileSendActive_) {
+                if (fileSend_.active()) {
                     KillTimer(window_, IDT_FILE_SEND);
                     SetTimer(window_, IDT_FILE_SEND, static_cast<UINT>(std::max<int>(1, static_cast<int>(selectedComboData(fileDelayCombo_, 0)))), nullptr);
                 }
@@ -2714,7 +2713,7 @@ void NativeMainWindow::browseFileSend() {
     }
 
     setControlText(filePathEdit_, fileName);
-    fileSendPath_ = std::filesystem::path(fileName);
+    fileSend_.setPath(std::filesystem::path(fileName));
     saveUiPreferences();
 }
 
@@ -2727,7 +2726,7 @@ void NativeMainWindow::startFileSend() {
         setStatus(serialIoBusyStatus());
         return;
     }
-    if (fileSendActive_) {
+    if (fileSend_.active()) {
         return;
     }
 
@@ -2737,30 +2736,17 @@ void NativeMainWindow::startFileSend() {
         return;
     }
 
-    fileSendPath_ = std::filesystem::path(pathText);
-    std::error_code error;
-    fileSendTotalBytes_ = std::filesystem::file_size(fileSendPath_, error);
-    if (error) {
-        setStatus(uiString(T::FileSendOpenFailedPrefix) + pathText);
-        return;
-    }
-
-    fileSendStream_.close();
-    fileSendStream_.clear();
-    fileSendStream_.open(fileSendPath_, std::ios::binary);
-    if (!fileSendStream_) {
+    const NativeFileSendOpenResult openResult = fileSend_.open(std::filesystem::path(pathText));
+    if (!openResult.ok()) {
         setStatus(uiString(T::FileSendOpenFailedPrefix) + pathText);
         return;
     }
     if (!serialIoState_.tryAcquire(NativeSerialIoOwner::FileSend)) {
-        fileSendStream_.close();
-        fileSendStream_.clear();
+        fileSend_.close();
         setStatus(serialIoBusyStatus());
         return;
     }
 
-    fileSendSentBytes_ = 0;
-    fileSendActive_ = true;
     KillTimer(window_, IDT_TIMED_SEND);
     updateFileSendProgress();
     enableControl(fileSendButton_, false);
@@ -2774,11 +2760,8 @@ void NativeMainWindow::startFileSend() {
 
 void NativeMainWindow::stopFileSend(const std::wstring& statusText) {
     KillTimer(window_, IDT_FILE_SEND);
-    if (fileSendStream_.is_open()) {
-        fileSendStream_.close();
-    }
-    const bool wasActive = fileSendActive_;
-    fileSendActive_ = false;
+    const bool wasActive = fileSend_.active();
+    fileSend_.close();
     if (wasActive) {
         serialIoState_.release(NativeSerialIoOwner::FileSend);
     }
@@ -2798,7 +2781,7 @@ void NativeMainWindow::stopFileSend(const std::wstring& statusText) {
 }
 
 void NativeMainWindow::pumpFileSend() {
-    if (!fileSendActive_) {
+    if (!fileSend_.active()) {
         return;
     }
     if (!serialPort_.isOpen()) {
@@ -2810,42 +2793,42 @@ void NativeMainWindow::pumpFileSend() {
         return;
     }
 
-    std::vector<std::uint8_t> chunk(kFileSendChunkBytes);
-    fileSendStream_.read(reinterpret_cast<char*>(chunk.data()), static_cast<std::streamsize>(chunk.size()));
-    const std::streamsize readCount = fileSendStream_.gcount();
-    if (readCount <= 0) {
-        const std::wstring done = uiString(T::FileSendDonePrefix) + std::to_wstring(fileSendSentBytes_) + uiString(T::BytesSuffix);
+    NativeFileSendChunk chunk = fileSend_.readNextChunk(kNativeFileSendChunkBytes);
+    if (chunk.status == NativeFileSendReadStatus::End) {
+        const std::wstring done = uiString(T::FileSendDonePrefix) + std::to_wstring(fileSend_.sentBytes()) + uiString(T::BytesSuffix);
         stopFileSend(done);
         return;
     }
-    chunk.resize(static_cast<std::size_t>(readCount));
+    if (!chunk.ready()) {
+        stopFileSend(uiString(T::FileSendReadFailedPrefix) + controlText(filePathEdit_));
+        return;
+    }
 
-    const SerialIoResult result = serialPort_.writeBytes(chunk);
+    const SerialIoResult result = serialPort_.writeBytes(chunk.bytes);
     if (!result.ok) {
         stopFileSend(utf8ToWide(result.errorMessage));
         handleSerialFailure(result.errorMessage);
         return;
     }
 
-    saveRawEvent("Tx", chunk);
-    appendPayloadLog(NativeLogKind::Tx, chunk);
-    fileSendSentBytes_ += static_cast<std::uintmax_t>(result.byteCount);
+    saveRawEvent("Tx", chunk.bytes);
+    appendPayloadLog(NativeLogKind::Tx, chunk.bytes);
+    fileSend_.markBytesWritten(result.byteCount);
     txByteCount_ += static_cast<std::uint64_t>(result.byteCount);
     updateFileSendProgress();
     updateStatusSegments();
 
-    const bool done = fileSendStream_.eof() || fileSendSentBytes_ >= fileSendTotalBytes_;
-    if (done) {
-        const std::wstring summary = uiString(T::FileSendDonePrefix) + std::to_wstring(fileSendSentBytes_) + uiString(T::BytesSuffix);
+    if (fileSend_.done()) {
+        const std::wstring summary = uiString(T::FileSendDonePrefix) + std::to_wstring(fileSend_.sentBytes()) + uiString(T::BytesSuffix);
         stopFileSend(summary);
         return;
     }
 
-    if ((fileSendSentBytes_ % static_cast<std::uintmax_t>(kFileSendChunkBytes * 16)) == 0) {
+    if ((fileSend_.sentBytes() % static_cast<std::uintmax_t>(kNativeFileSendChunkBytes * 16)) == 0) {
         setStatus(uiString(T::FileSendProgressPrefix)
-            + std::to_wstring(fileSendSentBytes_)
+            + std::to_wstring(fileSend_.sentBytes())
             + L"/"
-            + std::to_wstring(fileSendTotalBytes_)
+            + std::to_wstring(fileSend_.totalBytes())
             + uiString(T::BytesSuffix));
     }
 }
@@ -2855,10 +2838,7 @@ void NativeMainWindow::updateFileSendProgress() {
         return;
     }
     SendMessageW(fileProgress_, PBM_SETRANGE32, 0, 1000);
-    const int position = fileSendTotalBytes_ == 0
-        ? 0
-        : static_cast<int>(std::min<std::uintmax_t>(1000, (fileSendSentBytes_ * 1000) / fileSendTotalBytes_));
-    SendMessageW(fileProgress_, PBM_SETPOS, static_cast<WPARAM>(position), 0);
+    SendMessageW(fileProgress_, PBM_SETPOS, static_cast<WPARAM>(fileSend_.progressPermille()), 0);
 }
 
 void NativeMainWindow::updateModbusScanProgress(

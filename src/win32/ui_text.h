@@ -197,6 +197,7 @@ enum class TextId {
     FileSendDonePrefix,
     FileSendStoppedStatus,
     FileSendProgressPrefix,
+    FileSendReadFailedPrefix,
     FileSendBusyStatus,
     AutoReconnectEnabled,
     AutoReconnectDisabled,

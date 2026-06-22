@@ -11,6 +11,7 @@
 #include <windows.h>
 
 #include "native_storage/native_session_store.h"
+#include "win32/native_file_send_state.h"
 #include "win32/native_log_model.h"
 #include "win32/native_modbus_scan_worker.h"
 #include "win32/native_serial_io_state.h"
@@ -20,7 +21,6 @@
 #include <atomic>
 #include <cstdint>
 #include <deque>
-#include <fstream>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -323,11 +323,7 @@ private:
     std::uint64_t txByteCount_ = 0;
     std::uint64_t rxByteCount_ = 0;
     bool timedSendActive_ = false;
-    std::filesystem::path fileSendPath_;
-    std::ifstream fileSendStream_;
-    std::uintmax_t fileSendTotalBytes_ = 0;
-    std::uintmax_t fileSendSentBytes_ = 0;
-    bool fileSendActive_ = false;
+    NativeFileSendState fileSend_;
     HANDLE modbusScanThread_ = nullptr;
     std::atomic_bool modbusScanCancelRequested_ = false;
     std::atomic_bool modbusScanRunning_ = false;
