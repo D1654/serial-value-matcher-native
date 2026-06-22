@@ -60,10 +60,10 @@ Windows native workflow：
 - 中文 UTF-16 文本探针通过；
 - zip 和解压体积不超过门禁。
 
-v0.1.0 结果：
+v1.0.0 门禁结果以 Release 附件中的 package summary 为准。最近本地 MinGW 验证包：
 
-- zip：407,333 字节；
-- 解压：861,990 字节；
+- zip：约 673 KiB；
+- 解压：约 1.70 MiB；
 - Gate status：passed。
 
 ## 本地 Windows 构建
@@ -83,7 +83,7 @@ cmake --build build-windows-native --config Release --parallel 1
 
 ## Release 维护
 
-推荐版本号从 `v0.1.0` 开始递增。创建 Release 前应确认：
+推荐版本号从 `v1.0.0` 开始递增。创建 Release 前应确认：
 
 - `main` 已推送；
 - Windows native workflow 已成功；

@@ -4,8 +4,8 @@
 
 - 项目名称：串口值匹配器 / SerialValueMatcher Native
 - 作者：w
-- 当前版本：v0.1.0
-- 发布页：https://github.com/D1654/serial-value-matcher-native/releases/tag/v0.1.0
+- 当前版本：v1.0.0
+- 发布页：https://github.com/D1654/serial-value-matcher-native/releases/tag/v1.0.0
 - 主程序：`svm-native-win32.exe`
 
 ## 下载安装
@@ -22,11 +22,10 @@ SerialValueMatcherNative-win32-native-x64.zip
 svm-native-win32.exe
 ```
 
-v0.1.0 包信息：
+v1.0.0 包信息：
 
 - GitHub Actions Windows runner 构建；
-- zip 体积约 407 KB；
-- 解压后约 862 KB；
+- zip 和解压体积以 Release 附件中的 package summary 为准；
 - 不包含 `Qt6*.dll`、`qsqlite.dll`、`sqldrivers` 或 .NET 运行库；
 - SHA256 见 Release 附件中的 `.sha256.txt`。
 
@@ -71,7 +70,7 @@ v0.1.0 包信息：
 
 ## 当前边界
 
-v0.1.0 已可作为轻量串口工具测试使用，但仍建议在真实设备上重点验证：
+v1.0.0 已可作为轻量串口工具测试使用，但仍建议在真实设备上重点验证：
 
 - USB 转串口芯片的端口描述和热插拔表现；
 - DTR/RTS、硬件流控在具体设备上的效果；
@@ -96,7 +95,7 @@ scripts/build-windows-native-mingw.sh
 scripts/package-windows-native-mingw.sh
 ```
 
-本地 Wine 自测和 UI 截图闭环见 `docs/windows-native-local-debug.md`。
+本地打包默认会执行 Wine 自测和 UI 性能硬门禁；Wine/UI 截图闭环见 `docs/windows-native-local-debug.md`。
 
 ## 文档
 

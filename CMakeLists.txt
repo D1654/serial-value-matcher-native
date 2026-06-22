@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(SerialValueMatcherNative
-    VERSION 0.1.0
+    VERSION 1.0.0
     DESCRIPTION "Chinese-native Windows desktop serial debugging and value analysis tool"
     LANGUAGES CXX
 )
@@ -275,6 +275,32 @@ set_target_properties(native_storage_tests PROPERTIES
 )
 target_link_libraries(native_storage_tests PRIVATE svm_native_storage)
 add_test(NAME native_storage_tests COMMAND native_storage_tests)
+
+if(SVM_BUILD_WIN32_APP)
+    add_executable(native_win32_analysis_workflow_tests
+        tests/native_win32_analysis_workflow_tests.cpp
+        src/win32/native_analysis_workflow.cpp
+        src/win32/utf8_win32.cpp
+    )
+    set_target_properties(native_win32_analysis_workflow_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    target_link_libraries(native_win32_analysis_workflow_tests
+        PRIVATE
+            svm_slim_core
+            svm_native_storage
+    )
+    target_compile_definitions(native_win32_analysis_workflow_tests
+        PRIVATE
+            WIN32_LEAN_AND_MEAN
+            NOMINMAX
+            UNICODE
+            _UNICODE
+    )
+    add_test(NAME native_win32_analysis_workflow_tests COMMAND native_win32_analysis_workflow_tests)
+endif()
 
 if(SVM_BUILD_QT_TESTS)
     function(add_svm_qt_test target source)

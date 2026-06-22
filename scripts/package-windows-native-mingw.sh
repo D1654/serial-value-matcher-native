@@ -11,7 +11,8 @@ max_zip_bytes="${SVM_NATIVE_MAX_ZIP_BYTES:-5242880}"
 max_extracted_bytes="${SVM_NATIVE_MAX_EXTRACTED_BYTES:-8388608}"
 skip_build=0
 skip_wine="${SVM_SKIP_WINE_TEST:-0}"
-strict_wine="${SVM_STRICT_WINE_TEST:-0}"
+strict_wine="${SVM_STRICT_WINE_TEST:-1}"
+wine_gate_status="not-run"
 wine_prefix="${SVM_WINEPREFIX:-/tmp/svm-native-wine64}"
 xdg_runtime_dir="${SVM_XDG_RUNTIME_DIR:-/tmp/svm-native-xdg-runtime}"
 
@@ -53,21 +54,33 @@ if [[ ! -f "$exe_path" ]]; then
 fi
 
 if [[ "$skip_wine" != "1" ]]; then
+    wine_gate_status="pending"
     if command -v wine >/dev/null 2>&1 && command -v xvfb-run >/dev/null 2>&1; then
         echo "运行 Wine/Xvfb native self-test 和 UI 性能门禁..."
         mkdir -p "$wine_prefix" "$xdg_runtime_dir"
         chmod 700 "$xdg_runtime_dir"
         if ! env WINEPREFIX="$wine_prefix" WINEARCH=win64 XDG_RUNTIME_DIR="$xdg_runtime_dir" \
             xvfb-run -a bash -c 'wine "$1" --self-test && wine "$1" --ui-perf-test' bash "$exe_path"; then
+            wine_gate_status="failed"
             if [[ "$strict_wine" == "1" ]]; then
                 echo "Wine/Xvfb native self-test 或 UI 性能门禁失败。" >&2
                 exit 4
             fi
+            wine_gate_status="failed-soft"
             echo "警告：Wine/Xvfb native self-test 或 UI 性能门禁失败，继续执行静态打包检查。设置 SVM_STRICT_WINE_TEST=1 可将其作为硬门禁。" >&2
+        else
+            wine_gate_status="passed"
         fi
     else
+        wine_gate_status="unavailable"
+        if [[ "$strict_wine" == "1" ]]; then
+            echo "Wine/Xvfb self-test 和 UI 性能门禁不可用：wine 或 xvfb-run 不存在。" >&2
+            exit 4
+        fi
         echo "跳过 Wine/Xvfb self-test 和 UI 性能门禁：wine 或 xvfb-run 不可用。"
     fi
+else
+    wine_gate_status="skipped-by-request"
 fi
 
 stage_dir="$package_root/$package_name"
@@ -107,6 +120,12 @@ python3 "$repo_root/scripts/inspect-windows-package.py" \
     --summary-path "$summary_path" \
     --max-zip-bytes "$max_zip_bytes" \
     --max-extracted-bytes "$max_extracted_bytes"
+
+{
+    echo
+    echo "Wine gate status: $wine_gate_status"
+    echo "Wine gate strict: $strict_wine"
+} >> "$summary_path"
 
 echo "Windows native MinGW 本地包完成：$zip_path"
 echo "SHA256：$(cut -d ' ' -f 1 "$hash_path")"

@@ -4,15 +4,15 @@
 
 ## 当前结果
 
-v0.1.0 GitHub Actions 正式包：
+v1.0.0 Win32 native 包：
 
 | 项目 | 结果 |
 |------|------|
 | 包名 | `SerialValueMatcherNative-win32-native-x64.zip` |
 | 主程序 | `svm-native-win32.exe` |
-| zip 体积 | 407,333 字节 |
-| 解压体积 | 861,990 字节 |
-| 文件数 | 6 |
+| zip 体积 | 以 package summary 为准，最近本地 MinGW 包约 673 KiB |
+| 解压体积 | 以 package summary 为准，最近本地 MinGW 包约 1.70 MiB |
+| 文件数 | 以 package summary 为准 |
 | Qt 运行库 | 无 |
 | SQLite 插件 | 无 |
 | .NET/C# 运行库 | 无 |
@@ -34,7 +34,7 @@ v0.1.0 GitHub Actions 正式包：
 - 解压 `<= 8 MB`；
 - 不包含 Qt、SQLite 插件或 .NET 运行库。
 
-当前 v0.1.0 已明显低于第一阶段门禁。
+当前 v1.0.0 已明显低于第一阶段门禁。
 
 ## 不追求的方向
 

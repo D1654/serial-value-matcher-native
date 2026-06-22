@@ -40,6 +40,8 @@ env XDG_RUNTIME_DIR=/tmp/xdg-runtime-root \
 scripts/package-windows-native-mingw.sh
 ```
 
+打包脚本默认执行 Wine self-test 和 UI 性能硬门禁，并在 `*.package-summary.txt` 中写入 `Wine gate status`。确需只做静态包检查时可传 `--skip-wine`。
+
 输出：
 
 ```text
