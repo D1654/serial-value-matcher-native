@@ -110,7 +110,8 @@ private:
     void showAbout();
     void showDeferredFeature(const std::wstring& title, const std::wstring& message);
     void refreshCandidateCombo(const std::string& runId);
-    std::optional<native_storage::MatchCandidateRecord> selectedCandidate() const;
+    bool loadCandidateCache(const std::string& runId);
+    std::optional<native_storage::MatchCandidateRecord> selectedCandidate();
     bool saveRuleFromCandidate(const native_storage::MatchCandidateRecord& candidate);
     bool runRuleVerification(const native_storage::ScanSessionRecord& session);
     void appendLog(const std::wstring& line);
@@ -305,10 +306,12 @@ private:
     native_storage::NativeSessionStore store_;
     std::vector<SerialPortDescriptor> availablePorts_;
     std::vector<native_storage::SendHistoryEntry> sendHistoryEntries_;
+    std::vector<native_storage::MatchCandidateRecord> candidateRecords_;
     std::string sessionId_ = "win32-native-session";
     std::optional<SerialOpenOptions> lastOpenOptions_;
     std::string reconnectPortName_;
     std::string latestMatchRunId_;
+    std::string cachedCandidateRunId_;
     std::string latestVerificationRunId_;
     bool waitingReconnect_ = false;
     bool scrollPaused_ = false;

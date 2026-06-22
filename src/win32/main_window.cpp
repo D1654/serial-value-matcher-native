@@ -4311,23 +4311,36 @@ void NativeMainWindow::showDeferredFeature(const std::wstring& title, const std:
 void NativeMainWindow::refreshCandidateCombo(const std::string& runId) {
     SendMessageW(candidateCombo_, CB_RESETCONTENT, 0, 0);
     addComboItem(candidateCombo_, tx(T::CandidatePlaceholder), 0);
-    if (!store_.isOpen() || runId.empty()) {
+    if (!loadCandidateCache(runId)) {
         SendMessageW(candidateCombo_, CB_SETCURSEL, 0, 0);
         return;
     }
 
-    const auto candidates = store_.matchCandidates(runId);
-    for (const native_storage::MatchCandidateRecord& candidate : candidates) {
+    for (const native_storage::MatchCandidateRecord& candidate : candidateRecords_) {
         const std::wstring display = nativeCandidateDisplayText(candidate);
         const LRESULT index = SendMessageW(candidateCombo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(display.c_str()));
         if (index >= 0) {
             SendMessageW(candidateCombo_, CB_SETITEMDATA, static_cast<WPARAM>(index), static_cast<LPARAM>(candidate.id));
         }
     }
-    SendMessageW(candidateCombo_, CB_SETCURSEL, candidates.empty() ? 0 : 1, 0);
+    SendMessageW(candidateCombo_, CB_SETCURSEL, candidateRecords_.empty() ? 0 : 1, 0);
 }
 
-std::optional<native_storage::MatchCandidateRecord> NativeMainWindow::selectedCandidate() const {
+bool NativeMainWindow::loadCandidateCache(const std::string& runId) {
+    if (!store_.isOpen() || runId.empty()) {
+        cachedCandidateRunId_.clear();
+        candidateRecords_.clear();
+        return false;
+    }
+    if (cachedCandidateRunId_ == runId) {
+        return true;
+    }
+    candidateRecords_ = store_.matchCandidates(runId);
+    cachedCandidateRunId_ = runId;
+    return true;
+}
+
+std::optional<native_storage::MatchCandidateRecord> NativeMainWindow::selectedCandidate() {
     if (!store_.isOpen()) {
         return std::nullopt;
     }
@@ -4338,23 +4351,23 @@ std::optional<native_storage::MatchCandidateRecord> NativeMainWindow::selectedCa
             return std::nullopt;
         }
         runId = run->runId;
+        latestMatchRunId_ = runId;
     }
 
+    if (!loadCandidateCache(runId) || candidateRecords_.empty()) {
+        return std::nullopt;
+    }
     const LRESULT index = SendMessageW(candidateCombo_, CB_GETCURSEL, 0, 0);
     const LRESULT itemData = index >= 0 ? SendMessageW(candidateCombo_, CB_GETITEMDATA, static_cast<WPARAM>(index), 0) : 0;
     const std::int64_t selectedId = itemData == CB_ERR ? 0 : static_cast<std::int64_t>(itemData);
-    const auto candidates = store_.matchCandidates(runId);
     if (selectedId > 0) {
-        for (const native_storage::MatchCandidateRecord& candidate : candidates) {
+        for (const native_storage::MatchCandidateRecord& candidate : candidateRecords_) {
             if (candidate.id == selectedId) {
                 return candidate;
             }
         }
     }
-    if (!candidates.empty()) {
-        return candidates.front();
-    }
-    return std::nullopt;
+    return candidateRecords_.front();
 }
 
 bool NativeMainWindow::saveRuleFromCandidate(const native_storage::MatchCandidateRecord& candidate) {
