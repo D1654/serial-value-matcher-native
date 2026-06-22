@@ -21,6 +21,7 @@
 #include "win32/native_ui_preferences.h"
 #include "win32/native_send_control_state.h"
 #include "win32/native_send_history_state.h"
+#include "win32/native_status_counters_state.h"
 #include "win32/win32_serial_port.h"
 
 #include <array>
@@ -320,8 +321,7 @@ private:
     std::string sessionId_ = "win32-native-session";
     NativeReconnectState reconnectState_;
     NativeLogScrollState logScrollState_;
-    std::uint64_t txByteCount_ = 0;
-    std::uint64_t rxByteCount_ = 0;
+    NativeStatusCountersState statusCountersState_;
     NativeSendControlState sendControlState_;
     NativeFileSendState fileSend_;
     HANDLE modbusScanThread_ = nullptr;

@@ -11,6 +11,7 @@
 #include "win32/native_send_codec.h"
 #include "win32/native_send_control_state.h"
 #include "win32/native_send_history_state.h"
+#include "win32/native_status_counters_state.h"
 #include "win32/native_serial_profile_codec.h"
 #include "win32/native_ui_preferences.h"
 #include "win32/resource.h"
@@ -2560,7 +2561,7 @@ bool NativeMainWindow::sendPayloadFromText(const std::wstring& text, bool saveHi
         refreshSendHistory();
     }
     appendPayloadLog(NativeLogKind::Tx, payload);
-    txByteCount_ += static_cast<std::uint64_t>(result.byteCount);
+    statusCountersState_.addTxBytes(static_cast<std::uint64_t>(result.byteCount));
     updateStatusSegments();
     setStatus(uiString(T::SentPrefix) + std::to_wstring(result.byteCount) + uiString(T::BytesSuffix));
     return true;
@@ -2711,7 +2712,7 @@ void NativeMainWindow::pumpFileSend() {
     saveRawEvent("Tx", chunk.bytes);
     appendPayloadLog(NativeLogKind::Tx, chunk.bytes);
     fileSend_.markBytesWritten(result.byteCount);
-    txByteCount_ += static_cast<std::uint64_t>(result.byteCount);
+    statusCountersState_.addTxBytes(static_cast<std::uint64_t>(result.byteCount));
     updateFileSendProgress();
     updateStatusSegments();
 
@@ -2805,7 +2806,7 @@ void NativeMainWindow::pollSerial() {
     }
     saveRawEvents(std::move(events));
     appendPayloadLog(NativeLogKind::Rx, mergedPayload);
-    rxByteCount_ += static_cast<std::uint64_t>(mergedPayload.size());
+    statusCountersState_.addRxBytes(static_cast<std::uint64_t>(mergedPayload.size()));
     updateStatusSegments();
 }
 
@@ -3254,11 +3255,11 @@ void NativeMainWindow::setStatus(const std::wstring& text) {
 
 void NativeMainWindow::updateStatusSegments() {
     if (txStatusText_ != nullptr) {
-        const std::wstring txText = L"TX " + std::to_wstring(txByteCount_) + L" B";
+        const std::wstring txText = statusCountersState_.txStatusText();
         SetWindowTextW(txStatusText_, txText.c_str());
     }
     if (rxStatusText_ != nullptr) {
-        const std::wstring rxText = L"RX " + std::to_wstring(rxByteCount_) + L" B";
+        const std::wstring rxText = statusCountersState_.rxStatusText();
         SetWindowTextW(rxStatusText_, rxText.c_str());
     }
     if (clockStatusText_ != nullptr) {
@@ -3617,9 +3618,9 @@ void NativeMainWindow::handleModbusScanDataBatch(NativeModbusScanDataBatch* batc
 
     for (const native_storage::RawIoEvent& event : batch->rawEvents) {
         if (event.direction == "Tx") {
-            txByteCount_ += static_cast<std::uint64_t>(event.payload.size());
+            statusCountersState_.addTxBytes(static_cast<std::uint64_t>(event.payload.size()));
         } else if (event.direction == "Rx") {
-            rxByteCount_ += static_cast<std::uint64_t>(event.payload.size());
+            statusCountersState_.addRxBytes(static_cast<std::uint64_t>(event.payload.size()));
         }
     }
     if (!batch->rawEvents.empty()) {
