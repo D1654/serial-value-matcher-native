@@ -29,6 +29,11 @@ using NativeObservationAddressIndex = std::unordered_map<
     const native_storage::ScanObservationRecord*,
     NativeObservationAddressKeyHash>;
 
+struct NativeRuleVerificationBuildResult {
+    native_storage::RuleVerificationRunRecord run;
+    std::vector<native_storage::RuleVerificationResultRecord> results;
+};
+
 core::analysis::RegisterSample nativeSampleFromObservation(const native_storage::ScanObservationRecord& observation);
 NativeObservationAddressIndex nativeBuildObservationAddressIndex(const std::vector<native_storage::ScanObservationRecord>& observations);
 const native_storage::ScanObservationRecord* nativeFindIndexedObservation(
@@ -44,6 +49,12 @@ std::wstring nativeCandidateDisplayText(const native_storage::MatchCandidateReco
 std::wstring nativeRuleDisplayName(const native_storage::MatchCandidateRecord& candidate, const std::wstring& targetName);
 core::report::RuleVerificationRun nativeReportRunFromRecord(const native_storage::RuleVerificationRunRecord& record);
 core::report::RuleVerificationResult nativeReportResultFromRecord(const native_storage::RuleVerificationResultRecord& record);
+NativeRuleVerificationBuildResult nativeBuildRuleVerificationResult(
+    const native_storage::ScanSessionRecord& session,
+    const std::vector<native_storage::ProtocolFieldRuleRecord>& rules,
+    const std::vector<native_storage::ScanObservationRecord>& observations,
+    const std::string& verificationRunId,
+    const std::string& createdAtUtc);
 
 } // namespace svm::win32
 

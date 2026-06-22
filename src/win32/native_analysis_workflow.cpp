@@ -4,8 +4,10 @@
 
 #include "win32/utf8_win32.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <sstream>
+#include <utility>
 
 namespace svm::win32 {
 namespace {
@@ -157,6 +159,93 @@ core::report::RuleVerificationResult nativeReportResultFromRecord(const native_s
     result.interpretationText = record.interpretationText;
     result.evidenceText = record.evidenceText;
     return result;
+}
+
+NativeRuleVerificationBuildResult nativeBuildRuleVerificationResult(
+    const native_storage::ScanSessionRecord& session,
+    const std::vector<native_storage::ProtocolFieldRuleRecord>& rules,
+    const std::vector<native_storage::ScanObservationRecord>& observations,
+    const std::string& verificationRunId,
+    const std::string& createdAtUtc) {
+    NativeRuleVerificationBuildResult build;
+    build.run.verificationRunId = verificationRunId;
+    build.run.sourceScanSessionId = session.sessionId;
+    build.run.ruleCount = static_cast<int>(rules.size());
+    build.run.createdAtUtc = createdAtUtc;
+    build.results.reserve(rules.size());
+
+    const NativeObservationAddressIndex observationIndex = nativeBuildObservationAddressIndex(observations);
+    for (const native_storage::ProtocolFieldRuleRecord& rule : rules) {
+        native_storage::RuleVerificationResultRecord result;
+        result.verificationRunId = build.run.verificationRunId;
+        result.ruleId = rule.ruleId;
+        result.fieldName = rule.fieldName;
+        result.unit = rule.unit;
+        result.candidateType = rule.candidateType;
+        result.sourceScanSessionId = session.sessionId;
+        result.slaveId = rule.slaveId;
+        result.functionCode = rule.functionCode;
+        result.startAddress = rule.startAddress;
+        result.registerCount = rule.registerCount;
+
+        std::vector<std::uint16_t> registers;
+        registers.reserve(static_cast<std::size_t>(std::max(0, rule.registerCount)));
+        bool missing = false;
+        int missingAddress = rule.startAddress;
+        for (int offset = 0; offset < rule.registerCount; ++offset) {
+            const int address = rule.startAddress + offset;
+            const native_storage::ScanObservationRecord* observation = nativeFindIndexedObservation(observationIndex, rule, address);
+            if (observation == nullptr) {
+                missing = true;
+                missingAddress = address;
+                break;
+            }
+            result.observationIds.push_back(observation->id);
+            result.rawRegisters.push_back(observation->value);
+            result.observedAtUtc = observation->observedAtUtc;
+            registers.push_back(static_cast<std::uint16_t>(observation->value));
+        }
+
+        if (missing || registers.empty()) {
+            result.verified = false;
+            result.statusText = wideToUtf8(std::wstring(L"\u7F3A\u5C11\u5730\u5740 ")
+                + std::to_wstring(missingAddress)
+                + L" \u7684\u89C2\u6D4B\uFF0C\u65E0\u6CD5\u9A8C\u8BC1\u3002");
+            result.evidenceText = result.statusText;
+            ++build.run.missingCount;
+            build.results.push_back(std::move(result));
+            continue;
+        }
+
+        const auto decoded = core::analysis::decodeNumericValue(rule.candidateType, rule.wordOrder, rule.byteOrder, registers);
+        if (!decoded.has_value()) {
+            result.verified = false;
+            result.statusText = wideToUtf8(L"\u89E3\u7801\u5931\u8D25\uFF1A\u89C4\u5219\u7C7B\u578B\u4E0E\u5BC4\u5B58\u5668\u6570\u91CF\u4E0D\u5339\u914D\u3002");
+            result.evidenceText = result.statusText;
+            ++build.run.unsupportedCount;
+            build.results.push_back(std::move(result));
+            continue;
+        }
+
+        result.verified = true;
+        result.statusText = wideToUtf8(L"\u5DF2\u9A8C\u8BC1");
+        result.decodedValue = *decoded;
+        result.engineeringValue = *decoded * rule.scaleMultiplier + rule.scaleOffset;
+        if (rule.candidateType == "BitFlags" && !registers.empty()) {
+            result.interpretationText = core::analysis::bitFlagInterpretationText(rule.interpretationMap, registers.front());
+        } else if (rule.candidateType == "EnumMap") {
+            result.interpretationText = core::analysis::enumMapInterpretationText(rule.interpretationMap, static_cast<int>(*decoded));
+        }
+        result.evidenceText = wideToUtf8(std::wstring(L"\u5B57\u6BB5\u9A8C\u8BC1\u6210\u529F\uFF1A")
+            + utf8ToWide(rule.fieldName)
+            + L"\uFF0C\u6765\u81EA\u626B\u63CF "
+            + utf8ToWide(session.sessionId)
+            + L"\u3002");
+        ++build.run.verifiedCount;
+        build.results.push_back(std::move(result));
+    }
+
+    return build;
 }
 
 } // namespace svm::win32
