@@ -49,10 +49,7 @@ constexpr std::size_t kLogInsertBatchChars = 65536;
 constexpr std::size_t kMaxRenderedLogLineChars = 4096;
 constexpr UINT kCodePageGbk = 936;
 constexpr UINT kCodePageAscii = 20127;
-constexpr UINT kModbusScanDoneMessage = WM_APP + 14;
-constexpr UINT kModbusScanProgressMessage = WM_APP + 15;
 constexpr int kFileSendChunkBytes = 1024;
-constexpr ULONGLONG kModbusProgressMinIntervalMs = 80;
 constexpr std::size_t kDefaultLogVisibleChars = 350000;
 constexpr int kDefaultRawEventRetentionMb = 100;
 constexpr COLORREF kFormBackgroundColor = RGB(228, 228, 228);
@@ -1036,30 +1033,6 @@ std::wstring ruleDisplayName(const native_storage::MatchCandidateRecord& candida
 
 } // namespace
 
-struct NativeMainWindow::ModbusWorkerResult {
-    native_storage::ScanExecutionRecord execution;
-    std::vector<native_storage::RawIoEvent> rawEvents;
-    std::vector<NativeLogEntry> logEntries;
-    std::string errorMessage;
-    bool serialFailed = false;
-    bool cancelled = false;
-};
-
-struct NativeMainWindow::ModbusWorkerProgress {
-    std::size_t completedBlocks = 0;
-    std::size_t totalBlocks = 0;
-    std::size_t successBlocks = 0;
-    std::size_t failedBlocks = 0;
-    std::size_t observations = 0;
-};
-
-struct NativeMainWindow::ModbusWorkerContext {
-    NativeMainWindow* owner = nullptr;
-    modbus_core::ScanPlan plan;
-    native_storage::ScanExecutionRecord execution;
-    std::string scanSessionId;
-};
-
 bool NativeMainWindow::create(HINSTANCE instance) {
     instance_ = instance;
 
@@ -1753,11 +1726,11 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             return 0;
         }
         break;
-    case kModbusScanDoneMessage:
-        handleModbusScanDone(reinterpret_cast<ModbusWorkerResult*>(lParam));
+    case kNativeModbusScanDoneMessage:
+        handleModbusScanDone(reinterpret_cast<NativeModbusScanResult*>(lParam));
         return 0;
-    case kModbusScanProgressMessage:
-        handleModbusScanProgress(reinterpret_cast<ModbusWorkerProgress*>(lParam));
+    case kNativeModbusScanProgressMessage:
+        handleModbusScanProgress(reinterpret_cast<NativeModbusScanProgress*>(lParam));
         return 0;
     case WM_CLOSE:
         stopFileSend({});
@@ -4225,214 +4198,21 @@ void NativeMainWindow::runModbusScan() {
     updateModbusScanProgress(0, planResult.plan.blocks.size(), 0, 0, 0);
     setStatus(tx(T::ModbusRunning));
 
-    auto* context = new ModbusWorkerContext;
-    context->owner = this;
+    auto* context = new NativeModbusScanContext;
+    context->notifyWindow = window_;
+    context->serialPort = &serialPort_;
+    context->cancelRequested = &modbusScanCancelRequested_;
     context->plan = planResult.plan;
     context->execution = std::move(execution);
     context->scanSessionId = scanSessionId;
-    modbusScanThread_ = CreateThread(nullptr, 0, &NativeMainWindow::modbusScanThreadProc, context, 0, nullptr);
+    context->timeoutErrorMessage = wideToUtf8(tx(T::ModbusTimeout));
+    context->threadExceptionMessage = wideToUtf8(L"Modbus \u626B\u63CF\u7EBF\u7A0B\u5F02\u5E38\u7EC8\u6B62\u3002");
+    modbusScanThread_ = CreateThread(nullptr, 0, &nativeModbusScanThreadProc, context, 0, nullptr);
     if (modbusScanThread_ == nullptr) {
         delete context;
         setModbusScanRunningUi(false);
         setStatus(tx(T::ModbusThreadCreateFailed));
     }
-}
-
-DWORD WINAPI NativeMainWindow::modbusScanThreadProc(void* parameter) {
-    std::unique_ptr<ModbusWorkerContext> context(static_cast<ModbusWorkerContext*>(parameter));
-    if (!context || context->owner == nullptr) {
-        return 1;
-    }
-    NativeMainWindow* self = context->owner;
-    auto* result = new ModbusWorkerResult;
-    result->execution = std::move(context->execution);
-    const std::string scanSessionId = context->scanSessionId;
-    const std::string endpoint = self->serialPort_.endpoint();
-
-    const auto appendRawEvent = [&](std::string direction, const std::vector<std::uint8_t>& payload) {
-        native_storage::RawIoEvent event;
-        event.sessionId = scanSessionId;
-        event.direction = std::move(direction);
-        event.timestampUtc = timestampText();
-        event.endpoint = endpoint;
-        event.payload = payload;
-        result->rawEvents.push_back(std::move(event));
-    };
-    const auto appendPayloadEntry = [&](NativeLogKind kind, const wchar_t* prefix, const std::vector<std::uint8_t>& payload) {
-        NativeLogEntry entry;
-        entry.kind = kind;
-        entry.timestamp = localClockText();
-        entry.payloadPrefix = prefix;
-        entry.payload = payload;
-        entry.hasPayload = true;
-        result->logEntries.push_back(std::move(entry));
-    };
-    ULONGLONG lastProgressPostTick = 0;
-    const auto postProgress = [&](bool force = false) {
-        const ULONGLONG now = GetTickCount64();
-        const bool complete = result->execution.attempts.size() >= context->plan.blocks.size();
-        if (!force
-            && !complete
-            && lastProgressPostTick != 0
-            && now - lastProgressPostTick < kModbusProgressMinIntervalMs) {
-            return;
-        }
-        lastProgressPostTick = now;
-        auto* progress = new ModbusWorkerProgress;
-        progress->completedBlocks = result->execution.attempts.size();
-        progress->totalBlocks = context->plan.blocks.size();
-        progress->successBlocks = static_cast<std::size_t>(std::max(0, result->execution.session.successBlockCount));
-        progress->failedBlocks = static_cast<std::size_t>(std::max(0, result->execution.session.failedBlockCount));
-        progress->observations = result->execution.observations.size();
-        if (!PostMessageW(self->window_, kModbusScanProgressMessage, 0, reinterpret_cast<LPARAM>(progress))) {
-            delete progress;
-        }
-    };
-
-    try {
-        for (const modbus_core::ScanBlock& block : context->plan.blocks) {
-            if (self->modbusScanCancelRequested_) {
-                result->cancelled = true;
-                postProgress(true);
-                break;
-            }
-
-            native_storage::ScanAttemptRecord attempt;
-            attempt.sessionId = scanSessionId;
-            attempt.blockIndex = block.index;
-            attempt.attemptIndex = 0;
-            attempt.startAddress = block.startAddress;
-            attempt.quantity = block.quantity;
-            attempt.requestFrame = block.requestFrame;
-            attempt.sentAtUtc = timestampText();
-            attempt.endpoint = endpoint;
-
-            const SerialIoResult writeResult = self->serialPort_.writeBytes(block.requestFrame);
-            if (!writeResult.ok) {
-                attempt.status = "write-error";
-                attempt.errorMessage = writeResult.errorMessage;
-                result->execution.attempts.push_back(std::move(attempt));
-                ++result->execution.session.failedBlockCount;
-                result->errorMessage = writeResult.errorMessage;
-                result->serialFailed = true;
-                postProgress(true);
-                break;
-            }
-
-            appendRawEvent("Tx", block.requestFrame);
-            appendPayloadEntry(NativeLogKind::ModbusTx, L"[Modbus TX]", block.requestFrame);
-
-            std::vector<std::uint8_t> response;
-            const std::size_t expectedNormalBytes = static_cast<std::size_t>(5 + block.quantity * 2);
-            const ULONGLONG deadline = GetTickCount64() + 1200;
-            while (GetTickCount64() < deadline) {
-                if (self->modbusScanCancelRequested_) {
-                    result->cancelled = true;
-                    break;
-                }
-                if (self->serialPort_.waitForReadyRead(50)) {
-                    std::vector<std::uint8_t> chunk = self->serialPort_.readAvailable(260);
-                    response.insert(response.end(), chunk.begin(), chunk.end());
-                    if (response.size() >= expectedNormalBytes
-                        || (response.size() >= 5 && (response[1] & 0x80U) != 0)) {
-                        break;
-                    }
-                } else if (!self->serialPort_.lastErrorText().empty()) {
-                    attempt.errorMessage = self->serialPort_.lastErrorText();
-                    result->errorMessage = attempt.errorMessage;
-                    result->serialFailed = true;
-                    break;
-                }
-            }
-
-            attempt.receivedAtUtc = timestampText();
-            attempt.responseFrame = response;
-            if (!response.empty()) {
-                appendRawEvent("Rx", response);
-                appendPayloadEntry(NativeLogKind::ModbusRx, L"[Modbus RX]", response);
-            }
-
-            if (result->cancelled) {
-                attempt.status = "cancelled";
-                result->execution.attempts.push_back(std::move(attempt));
-                postProgress(true);
-                break;
-            }
-            if (result->serialFailed) {
-                attempt.status = "read-error";
-                result->execution.attempts.push_back(std::move(attempt));
-                ++result->execution.session.failedBlockCount;
-                postProgress(true);
-                break;
-            }
-            if (response.empty()) {
-                attempt.status = "timeout";
-                if (attempt.errorMessage.empty()) {
-                    attempt.errorMessage = wideToUtf8(tx(T::ModbusTimeout));
-                }
-                ++result->execution.session.failedBlockCount;
-                result->execution.attempts.push_back(std::move(attempt));
-                postProgress();
-                continue;
-            }
-
-            const auto parsed = modbus_core::parseReadResponse(
-                response,
-                context->plan.slaveId,
-                context->plan.functionCode,
-                block.startAddress,
-                block.quantity);
-            if (!parsed.ok) {
-                attempt.status = "parse-error";
-                attempt.errorMessage = parsed.errorMessage;
-                attempt.isModbusException = parsed.isException;
-                attempt.exceptionCode = parsed.exceptionCode;
-                attempt.exceptionDescription = parsed.exceptionDescription;
-                ++result->execution.session.failedBlockCount;
-                result->execution.attempts.push_back(std::move(attempt));
-                postProgress();
-                continue;
-            }
-
-            attempt.status = "success";
-            ++result->execution.session.successBlockCount;
-            for (const modbus_core::RegisterObservation& observation : parsed.observations) {
-                native_storage::ScanObservationRecord record;
-                record.sessionId = scanSessionId;
-                record.blockIndex = block.index;
-                record.attemptIndex = 0;
-                record.slaveId = parsed.slaveId;
-                record.functionCode = parsed.functionCode;
-                record.address = observation.address;
-                record.value = observation.value;
-                record.observedAtUtc = attempt.receivedAtUtc;
-                result->execution.observations.push_back(std::move(record));
-            }
-            result->execution.attempts.push_back(std::move(attempt));
-            postProgress();
-            if (context->plan.requestIntervalMs > 0) {
-                Sleep(static_cast<DWORD>(context->plan.requestIntervalMs));
-            }
-        }
-
-        result->execution.session.finishedAtUtc = timestampText();
-        if (result->cancelled) {
-            result->execution.session.status = "cancelled";
-        } else {
-            result->execution.session.status = result->execution.session.failedBlockCount == 0
-                ? "completed"
-                : (result->execution.session.successBlockCount > 0 ? "partial" : "failed");
-        }
-    } catch (...) {
-        result->execution.session.finishedAtUtc = timestampText();
-        result->execution.session.status = "failed";
-        result->errorMessage = wideToUtf8(L"Modbus \u626B\u63CF\u7EBF\u7A0B\u5F02\u5E38\u7EC8\u6B62\u3002");
-    }
-
-    if (!PostMessageW(self->window_, kModbusScanDoneMessage, 0, reinterpret_cast<LPARAM>(result))) {
-        delete result;
-    }
-    return 0;
 }
 
 void NativeMainWindow::requestCancelModbusScan() {
@@ -4443,8 +4223,8 @@ void NativeMainWindow::requestCancelModbusScan() {
     setStatus(tx(T::ModbusCancelRequestedStatus));
 }
 
-void NativeMainWindow::handleModbusScanProgress(ModbusWorkerProgress* progressPointer) {
-    std::unique_ptr<ModbusWorkerProgress> progress(progressPointer);
+void NativeMainWindow::handleModbusScanProgress(NativeModbusScanProgress* progressPointer) {
+    std::unique_ptr<NativeModbusScanProgress> progress(progressPointer);
     if (!progress) {
         return;
     }
@@ -4471,8 +4251,8 @@ void NativeMainWindow::handleModbusScanProgress(ModbusWorkerProgress* progressPo
     }
 }
 
-void NativeMainWindow::handleModbusScanDone(ModbusWorkerResult* resultPointer) {
-    std::unique_ptr<ModbusWorkerResult> result(resultPointer);
+void NativeMainWindow::handleModbusScanDone(NativeModbusScanResult* resultPointer) {
+    std::unique_ptr<NativeModbusScanResult> result(resultPointer);
     const bool shouldDisconnectAfterScan = disconnectAfterModbusScan_;
     disconnectAfterModbusScan_ = false;
     if (modbusScanThread_ != nullptr) {

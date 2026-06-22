@@ -12,6 +12,7 @@
 
 #include "native_storage/native_session_store.h"
 #include "win32/native_log_model.h"
+#include "win32/native_modbus_scan_worker.h"
 #include "win32/win32_serial_port.h"
 
 #include <array>
@@ -36,9 +37,6 @@ public:
     static bool runUiPerformanceTest();
 
 private:
-    struct ModbusWorkerResult;
-    struct ModbusWorkerContext;
-    struct ModbusWorkerProgress;
     struct WorkbenchVisibility {
         bool pageVisible = false;
         bool singleFormatRow = false;
@@ -58,7 +56,6 @@ private:
     };
 
     static LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
-    static DWORD WINAPI modbusScanThreadProc(void* parameter);
 
     LRESULT handleMessage(UINT message, WPARAM wParam, LPARAM lParam);
     void createMenus();
@@ -93,8 +90,8 @@ private:
     void tryAutoReconnect();
     void runModbusScan();
     void requestCancelModbusScan();
-    void handleModbusScanProgress(ModbusWorkerProgress* progress);
-    void handleModbusScanDone(ModbusWorkerResult* result);
+    void handleModbusScanProgress(NativeModbusScanProgress* progress);
+    void handleModbusScanDone(NativeModbusScanResult* result);
     void setModbusScanRunningUi(bool running);
     void updateModbusScanProgress(
         std::size_t completedBlocks,
