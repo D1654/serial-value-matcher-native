@@ -1533,6 +1533,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             CloseHandle(modbusScanThread_);
             modbusScanThread_ = nullptr;
         }
+        releaseModbusScanOwnership();
         saveUiPreferences();
         DestroyWindow(window_);
         return 0;
@@ -1552,6 +1553,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             CloseHandle(modbusScanThread_);
             modbusScanThread_ = nullptr;
         }
+        releaseModbusScanOwnership();
         disconnectSerial();
         if (ownsUiFont_ && uiFont_ != nullptr) {
             DeleteObject(uiFont_);
@@ -2853,7 +2855,7 @@ void NativeMainWindow::connectSerial() {
 }
 
 void NativeMainWindow::disconnectSerial() {
-    if (modbusScanRunning_) {
+    if (serialIoState_.shouldDeferDisconnect()) {
         disconnectAfterModbusScan_ = true;
         requestCancelModbusScan();
         setStatus(tx(T::ModbusDisconnectPendingStatus));
@@ -2877,6 +2879,24 @@ void NativeMainWindow::closeSerialPort(const std::wstring& statusText) {
     setStatus(statusText.empty() ? tx(T::DisconnectedStatus) : statusText.c_str());
 }
 
+std::wstring NativeMainWindow::serialIoBusyStatus() const {
+    switch (serialIoState_.owner()) {
+    case NativeSerialIoOwner::FileSend:
+        return tx(T::FileSendBusyStatus);
+    case NativeSerialIoOwner::ModbusScan:
+        return tx(T::ModbusRunning);
+    case NativeSerialIoOwner::ManualSend:
+    case NativeSerialIoOwner::None:
+        break;
+    }
+    return tx(T::SerialIoBusyStatus);
+}
+
+void NativeMainWindow::releaseModbusScanOwnership() {
+    modbusScanRunning_ = false;
+    serialIoState_.release(NativeSerialIoOwner::ModbusScan);
+}
+
 void NativeMainWindow::sendPayload() {
     sendPayloadFromText(controlText(sendEdit_), true);
 }
@@ -2886,12 +2906,8 @@ bool NativeMainWindow::sendPayloadFromText(const std::wstring& text, bool saveHi
         setStatus(tx(T::SerialNotConnectedSend));
         return false;
     }
-    if (modbusScanRunning_) {
-        setStatus(tx(T::ModbusRunning));
-        return false;
-    }
-    if (fileSendActive_) {
-        setStatus(tx(T::FileSendBusyStatus));
+    if (!serialIoState_.allowsManualSend()) {
+        setStatus(serialIoBusyStatus());
         return false;
     }
 
@@ -2906,7 +2922,12 @@ bool NativeMainWindow::sendPayloadFromText(const std::wstring& text, bool saveHi
         return false;
     }
 
+    if (!serialIoState_.tryAcquire(NativeSerialIoOwner::ManualSend)) {
+        setStatus(serialIoBusyStatus());
+        return false;
+    }
     const SerialIoResult result = serialPort_.writeBytes(payload);
+    serialIoState_.release(NativeSerialIoOwner::ManualSend);
     if (!result.ok) {
         setStatus(utf8ToWide(result.errorMessage));
         handleSerialFailure(result.errorMessage);
@@ -2945,7 +2966,7 @@ void NativeMainWindow::sendQuickPayload(std::size_t index) {
 
 void NativeMainWindow::updateTimedSendTimer() {
     KillTimer(window_, IDT_TIMED_SEND);
-    if (!timedSendActive_ || !serialPort_.isOpen()) {
+    if (!timedSendActive_ || !serialPort_.isOpen() || !serialIoState_.allowsManualSend()) {
         return;
     }
     const int periodMs = std::clamp(textToInt(timedPeriodEdit_, 1000), 50, 3600000);
@@ -2981,8 +3002,8 @@ void NativeMainWindow::startFileSend() {
         setStatus(tx(T::SerialNotConnectedSend));
         return;
     }
-    if (modbusScanRunning_) {
-        setStatus(tx(T::ModbusRunning));
+    if (!serialIoState_.allowsFileSend()) {
+        setStatus(serialIoBusyStatus());
         return;
     }
     if (fileSendActive_) {
@@ -3010,6 +3031,12 @@ void NativeMainWindow::startFileSend() {
         setStatus(uiString(T::FileSendOpenFailedPrefix) + pathText);
         return;
     }
+    if (!serialIoState_.tryAcquire(NativeSerialIoOwner::FileSend)) {
+        fileSendStream_.close();
+        fileSendStream_.clear();
+        setStatus(serialIoBusyStatus());
+        return;
+    }
 
     fileSendSentBytes_ = 0;
     fileSendActive_ = true;
@@ -3031,6 +3058,9 @@ void NativeMainWindow::stopFileSend(const std::wstring& statusText) {
     }
     const bool wasActive = fileSendActive_;
     fileSendActive_ = false;
+    if (wasActive) {
+        serialIoState_.release(NativeSerialIoOwner::FileSend);
+    }
     enableControl(fileSendButton_, true);
     enableControl(fileBrowseButton_, true);
     enableControl(filePathEdit_, true);
@@ -3052,6 +3082,10 @@ void NativeMainWindow::pumpFileSend() {
     }
     if (!serialPort_.isOpen()) {
         stopFileSend(tx(T::DisconnectedStatus));
+        return;
+    }
+    if (!serialIoState_.isOwnedBy(NativeSerialIoOwner::FileSend)) {
+        stopFileSend(serialIoBusyStatus());
         return;
     }
 
@@ -3138,7 +3172,7 @@ void NativeMainWindow::pollSerial() {
     if (!serialPort_.isOpen()) {
         return;
     }
-    if (modbusScanRunning_) {
+    if (!serialIoState_.allowsSerialPoll()) {
         return;
     }
     if (!serialPort_.waitForReadyRead(0)) {
@@ -3182,6 +3216,7 @@ void NativeMainWindow::handleSerialFailure(const std::string& message) {
         return;
     }
     const std::string endpoint = serialPort_.endpoint();
+    stopFileSend({});
     serialPort_.close();
     SetWindowTextW(connectButton_, tx(T::ConnectButton));
     updateRtsControlState();
@@ -3790,10 +3825,10 @@ SerialOpenOptions NativeMainWindow::currentOpenOptions() const {
 
 void NativeMainWindow::applySerialLineControl(WORD controlId) {
     const bool enabled = SendMessageW(controlId == IDC_DTR_CHECK ? dtrCheck_ : rtsCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED;
-    if (modbusScanRunning_) {
+    if (!serialIoState_.allowsLineControl()) {
         HWND control = controlId == IDC_DTR_CHECK ? dtrCheck_ : rtsCheck_;
         SendMessageW(control, BM_SETCHECK, enabled ? BST_UNCHECKED : BST_CHECKED, 0);
-        setStatus(tx(T::ModbusRunning));
+        setStatus(serialIoBusyStatus());
         return;
     }
     if (!serialPort_.isOpen()) {
@@ -3829,7 +3864,7 @@ void NativeMainWindow::applySerialLineControl(WORD controlId) {
 }
 
 void NativeMainWindow::updateRtsControlState() {
-    if (modbusScanRunning_) {
+    if (!serialIoState_.allowsLineControl()) {
         EnableWindow(rtsCheck_, FALSE);
         return;
     }
@@ -3866,7 +3901,7 @@ void NativeMainWindow::updateLogTimestampMenu() {
 }
 
 void NativeMainWindow::runModbusScan() {
-    if (modbusScanRunning_) {
+    if (serialIoState_.isOwnedBy(NativeSerialIoOwner::ModbusScan)) {
         requestCancelModbusScan();
         return;
     }
@@ -3878,8 +3913,8 @@ void NativeMainWindow::runModbusScan() {
         setStatus(tx(T::StorageModbusClosed));
         return;
     }
-    if (fileSendActive_) {
-        setStatus(tx(T::FileSendBusyStatus));
+    if (!serialIoState_.allowsModbusScan()) {
+        setStatus(serialIoBusyStatus());
         return;
     }
 
@@ -3920,6 +3955,10 @@ void NativeMainWindow::runModbusScan() {
     }
     modbusScanCancelRequested_ = false;
     disconnectAfterModbusScan_ = false;
+    if (!serialIoState_.tryAcquire(NativeSerialIoOwner::ModbusScan)) {
+        setStatus(serialIoBusyStatus());
+        return;
+    }
     setModbusScanRunningUi(true);
     updateModbusScanProgress(0, planResult.plan.blocks.size(), 0, 0, 0);
     setStatus(tx(T::ModbusRunning));
@@ -4072,6 +4111,11 @@ bool NativeMainWindow::handleCompletedModbusScanDisconnect(const NativeModbusSca
 
 void NativeMainWindow::setModbusScanRunningUi(bool running) {
     modbusScanRunning_ = running;
+    if (running && !serialIoState_.isOwnedBy(NativeSerialIoOwner::ModbusScan)) {
+        serialIoState_.tryAcquire(NativeSerialIoOwner::ModbusScan);
+    } else if (!running) {
+        serialIoState_.release(NativeSerialIoOwner::ModbusScan);
+    }
     if (running) {
         KillTimer(window_, IDT_SERIAL_POLL);
         KillTimer(window_, IDT_TIMED_SEND);

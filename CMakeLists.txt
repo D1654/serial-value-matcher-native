@@ -87,6 +87,7 @@ if(SVM_BUILD_WIN32_APP)
         src/win32/native_log_model.cpp
         src/win32/native_log_view.cpp
         src/win32/native_modbus_scan_worker.cpp
+        src/win32/native_serial_io_state.cpp
         src/win32/ui_text.cpp
         src/win32/utf8_win32.cpp
         src/win32/app.rc
@@ -253,6 +254,18 @@ set_target_properties(native_analysis_report_tests PROPERTIES
 )
 target_link_libraries(native_analysis_report_tests PRIVATE svm_slim_core)
 add_test(NAME native_analysis_report_tests COMMAND native_analysis_report_tests)
+
+add_executable(native_serial_io_state_tests
+    tests/native_serial_io_state_tests.cpp
+    src/win32/native_serial_io_state.cpp
+)
+set_target_properties(native_serial_io_state_tests PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+target_include_directories(native_serial_io_state_tests PRIVATE src)
+add_test(NAME native_serial_io_state_tests COMMAND native_serial_io_state_tests)
 
 add_executable(native_win32_serial_tests
     tests/native_win32_serial_tests.cpp

@@ -13,6 +13,7 @@
 #include "native_storage/native_session_store.h"
 #include "win32/native_log_model.h"
 #include "win32/native_modbus_scan_worker.h"
+#include "win32/native_serial_io_state.h"
 #include "win32/win32_serial_port.h"
 
 #include <array>
@@ -76,6 +77,8 @@ private:
     void connectSerial();
     void disconnectSerial();
     void closeSerialPort(const std::wstring& statusText);
+    std::wstring serialIoBusyStatus() const;
+    void releaseModbusScanOwnership();
     void sendPayload();
     bool sendPayloadFromText(const std::wstring& text, bool saveHistory);
     void sendQuickPayload(std::size_t index);
@@ -303,6 +306,7 @@ private:
     std::uint64_t logQueuedLineCount_ = 0;
     bool uiPreferenceSaveFailureShown_ = false;
     Win32SerialPort serialPort_;
+    NativeSerialIoState serialIoState_;
     native_storage::NativeSessionStore store_;
     std::vector<SerialPortDescriptor> availablePorts_;
     std::vector<native_storage::SendHistoryEntry> sendHistoryEntries_;

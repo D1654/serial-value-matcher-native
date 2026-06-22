@@ -212,6 +212,7 @@ enum class TextId {
     SystemDisconnectedPrefix,
     DisconnectedStatus,
     SerialNotConnectedSend,
+    SerialIoBusyStatus,
     EmptyPayload,
     SentPrefix,
     BytesSuffix,

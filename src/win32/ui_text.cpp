@@ -211,6 +211,7 @@ const wchar_t* uiText(TextId id) {
     case TextId::SystemDisconnectedPrefix: return L"[\u7CFB\u7EDF] \u5DF2\u65AD\u5F00 ";
     case TextId::DisconnectedStatus: return L"\u5DF2\u65AD\u5F00\u3002";
     case TextId::SerialNotConnectedSend: return L"\u4E32\u53E3\u672A\u8FDE\u63A5\uFF0C\u65E0\u6CD5\u53D1\u9001\u3002";
+    case TextId::SerialIoBusyStatus: return L"\u4E32\u53E3\u6B63\u5728\u5904\u7406\u5F53\u524D I/O\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002";
     case TextId::EmptyPayload: return L"\u53D1\u9001\u5185\u5BB9\u4E3A\u7A7A\u3002";
     case TextId::SentPrefix: return L"\u5DF2\u53D1\u9001 ";
     case TextId::BytesSuffix: return L" \u5B57\u8282\u3002";
