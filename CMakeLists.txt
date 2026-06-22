@@ -267,6 +267,18 @@ set_target_properties(native_serial_io_state_tests PROPERTIES
 target_include_directories(native_serial_io_state_tests PRIVATE src)
 add_test(NAME native_serial_io_state_tests COMMAND native_serial_io_state_tests)
 
+add_executable(native_log_filter_state_tests
+    tests/native_log_filter_state_tests.cpp
+    src/win32/native_log_model.cpp
+)
+set_target_properties(native_log_filter_state_tests PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+target_include_directories(native_log_filter_state_tests PRIVATE src)
+add_test(NAME native_log_filter_state_tests COMMAND native_log_filter_state_tests)
+
 add_executable(native_win32_serial_tests
     tests/native_win32_serial_tests.cpp
 )

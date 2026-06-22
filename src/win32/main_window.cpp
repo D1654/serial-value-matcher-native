@@ -1338,8 +1338,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             return 0;
         case IDC_LOG_SEARCH_EDIT:
             if (HIWORD(wParam) == EN_CHANGE) {
-                lastLogSearchText_.clear();
-                lastLogSearchOffset_ = 0;
+                logFilterState_.resetSearch();
             }
             return 0;
         case IDC_LOG_FIND_BUTTON:
@@ -3297,8 +3296,7 @@ void NativeMainWindow::clearLog() {
     logTrimmedSinceRebuild_ = 0;
     SetWindowTextW(receiveLog_, L"");
     hiddenLogLineCount_ = 0;
-    lastLogSearchOffset_ = 0;
-    lastLogSearchText_.clear();
+    logFilterState_.clear();
     logAutoFollow_ = true;
     logHistoryReadNoticeShown_ = false;
     setStatus(tx(T::ClearLogStatus));
@@ -3340,7 +3338,7 @@ std::size_t NativeMainWindow::rebuildLogView() {
     for (const auto& line : visibleLines) {
         insertVisibleLogText(line.first, line.second);
     }
-    lastLogSearchOffset_ = 0;
+    logFilterState_.resetSearch();
     visibleLogLineCount_ = visibleLines.size();
     if (logAutoFollow_) {
         nativeLogScrollToBottom(receiveLog_);
@@ -3517,10 +3515,10 @@ std::wstring NativeMainWindow::renderLogEntry(const NativeLogEntry& entry) const
 }
 
 bool NativeMainWindow::logEntryMatchesFilter(const NativeLogEntry& entry) const {
-    if (logFilterText_.empty()) {
+    if (logFilterState_.filterText().empty()) {
         return true;
     }
-    return containsCaseInsensitive(renderLogEntry(entry), logFilterText_);
+    return containsCaseInsensitive(renderLogEntry(entry), logFilterState_.filterText());
 }
 
 std::wstring NativeMainWindow::visibleLogText() const {
@@ -3528,7 +3526,11 @@ std::wstring NativeMainWindow::visibleLogText() const {
 }
 
 void NativeMainWindow::updateLogFilter() {
-    logFilterText_ = controlText(logFilterEdit_);
+    const NativeLogFilterUpdate filterUpdate = logFilterState_.setFilterText(controlText(logFilterEdit_));
+    if (!filterUpdate.changed) {
+        setStatus(uiString(T::LogFilterChangedPrefix) + std::to_wstring(visibleLogLineCount_) + uiString(T::ChinesePeriod));
+        return;
+    }
     const std::size_t visibleCount = rebuildLogView();
     setStatus(uiString(T::LogFilterChangedPrefix) + std::to_wstring(visibleCount) + uiString(T::ChinesePeriod));
 }
@@ -3542,27 +3544,16 @@ void NativeMainWindow::findNextLogMatch() {
     }
 
     const std::wstring visibleText = visibleLogText();
-    const std::wstring loweredText = lowerCopy(visibleText);
-    const std::wstring loweredNeedle = lowerCopy(needle);
-    if (needle != lastLogSearchText_) {
-        lastLogSearchText_ = needle;
-        lastLogSearchOffset_ = 0;
-    }
-
-    std::size_t position = loweredText.find(loweredNeedle, lastLogSearchOffset_);
-    if (position == std::wstring::npos && lastLogSearchOffset_ > 0) {
-        position = loweredText.find(loweredNeedle);
-    }
-    if (position == std::wstring::npos) {
+    const NativeLogSearchResult search = logFilterState_.findNext(visibleText, needle);
+    if (!search.found) {
         setStatus(uiString(T::LogFindNotFoundPrefix) + needle + uiString(T::ChinesePeriod));
         return;
     }
 
-    nativeLogSetSelection(receiveLog_, position, position + needle.size());
+    nativeLogSetSelection(receiveLog_, search.position, search.position + search.length);
     nativeLogScrollCaret(receiveLog_);
     logAutoFollow_ = false;
     logHistoryReadNoticeShown_ = true;
-    lastLogSearchOffset_ = position + needle.size();
     setStatus(uiString(T::LogFindMatchedPrefix) + needle + uiString(T::ChinesePeriod));
 }
 

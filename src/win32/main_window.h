@@ -292,9 +292,7 @@ private:
     std::size_t logVisibleCharLimit_ = 350000;
     std::size_t logEntryLimit_ = 2000;
     std::deque<NativeLogEntry> logEntries_;
-    std::wstring logFilterText_;
-    std::wstring lastLogSearchText_;
-    std::size_t lastLogSearchOffset_ = 0;
+    NativeLogFilterState logFilterState_;
     std::size_t visibleLogChars_ = 0;
     std::size_t visibleLogLineCount_ = 0;
     std::deque<NativePendingLogLine> pendingLogLines_;

@@ -1,8 +1,70 @@
 #include "win32/native_log_model.h"
 
 #include <cwctype>
+#include <utility>
 
 namespace svm::win32 {
+
+const std::wstring& NativeLogFilterState::filterText() const noexcept {
+    return filterText_;
+}
+
+std::size_t NativeLogFilterState::searchOffset() const noexcept {
+    return searchOffset_;
+}
+
+const std::wstring& NativeLogFilterState::searchText() const noexcept {
+    return searchText_;
+}
+
+NativeLogFilterUpdate NativeLogFilterState::setFilterText(std::wstring text) {
+    if (text == filterText_) {
+        return {false, filterText_};
+    }
+    filterText_ = std::move(text);
+    resetSearch();
+    return {true, filterText_};
+}
+
+void NativeLogFilterState::clear() {
+    filterText_.clear();
+    resetSearch();
+}
+
+void NativeLogFilterState::resetSearch() {
+    searchText_.clear();
+    searchOffset_ = 0;
+}
+
+NativeLogSearchResult NativeLogFilterState::findNext(std::wstring_view visibleText, std::wstring_view needle) {
+    NativeLogSearchResult result;
+    if (needle.empty()) {
+        resetSearch();
+        return result;
+    }
+
+    if (needle != searchText_) {
+        searchText_ = std::wstring(needle);
+        searchOffset_ = 0;
+    }
+
+    const std::wstring loweredText = lowerCopy(visibleText);
+    const std::wstring loweredNeedle = lowerCopy(needle);
+    std::size_t position = loweredText.find(loweredNeedle, searchOffset_);
+    if (position == std::wstring::npos && searchOffset_ > 0) {
+        position = loweredText.find(loweredNeedle);
+        result.wrapped = position != std::wstring::npos;
+    }
+    if (position == std::wstring::npos) {
+        return result;
+    }
+
+    result.found = true;
+    result.position = position;
+    result.length = needle.size();
+    searchOffset_ = position + needle.size();
+    return result;
+}
 
 std::wstring sanitizeLogText(std::wstring_view text) {
     std::wstring sanitized;
