@@ -13,7 +13,6 @@
 
 #include "core/analysis_core.h"
 #include "core/modbus_core.h"
-#include "core/report_core.h"
 
 #include <algorithm>
 #include <array>
@@ -39,7 +38,6 @@ using T = TextId;
 
 namespace analysis_core = ::svm::core::analysis;
 namespace modbus_core = ::svm::core::modbus;
-namespace report_core = ::svm::core::report;
 
 constexpr wchar_t kWindowClassName[] = L"SvmNativeMainWindow";
 constexpr std::size_t kMinLogVisibleChars = 200000;
@@ -4254,13 +4252,6 @@ void NativeMainWindow::exportReport() {
     }
 
     const auto resultRecords = store_.ruleVerificationResults(run->verificationRunId);
-    const report_core::RuleVerificationRun reportRun = nativeReportRunFromRecord(*run);
-
-    std::vector<report_core::RuleVerificationResult> reportResults;
-    reportResults.reserve(resultRecords.size());
-    for (const native_storage::RuleVerificationResultRecord& record : resultRecords) {
-        reportResults.push_back(nativeReportResultFromRecord(record));
-    }
 
     wchar_t fileName[MAX_PATH] = {};
     const std::wstring defaultName = uiString(T::ExportDefaultPrefix)
@@ -4281,7 +4272,7 @@ void NativeMainWindow::exportReport() {
         return;
     }
 
-    const std::string markdown = report_core::renderRuleVerificationMarkdownReport(reportRun, reportResults);
+    const std::string markdown = nativeRenderRuleVerificationMarkdownReport(*run, resultRecords);
     std::ofstream output(std::filesystem::path(fileName), std::ios::binary | std::ios::trunc);
     if (!output) {
         setStatus(uiString(T::ExportFailedPrefix) + std::wstring(fileName));

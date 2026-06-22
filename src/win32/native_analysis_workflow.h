@@ -49,6 +49,9 @@ std::wstring nativeCandidateDisplayText(const native_storage::MatchCandidateReco
 std::wstring nativeRuleDisplayName(const native_storage::MatchCandidateRecord& candidate, const std::wstring& targetName);
 core::report::RuleVerificationRun nativeReportRunFromRecord(const native_storage::RuleVerificationRunRecord& record);
 core::report::RuleVerificationResult nativeReportResultFromRecord(const native_storage::RuleVerificationResultRecord& record);
+std::string nativeRenderRuleVerificationMarkdownReport(
+    const native_storage::RuleVerificationRunRecord& run,
+    const std::vector<native_storage::RuleVerificationResultRecord>& results);
 NativeRuleVerificationBuildResult nativeBuildRuleVerificationResult(
     const native_storage::ScanSessionRecord& session,
     const std::vector<native_storage::ProtocolFieldRuleRecord>& rules,

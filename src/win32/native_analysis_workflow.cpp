@@ -161,6 +161,18 @@ core::report::RuleVerificationResult nativeReportResultFromRecord(const native_s
     return result;
 }
 
+std::string nativeRenderRuleVerificationMarkdownReport(
+    const native_storage::RuleVerificationRunRecord& run,
+    const std::vector<native_storage::RuleVerificationResultRecord>& results) {
+    const core::report::RuleVerificationRun reportRun = nativeReportRunFromRecord(run);
+    std::vector<core::report::RuleVerificationResult> reportResults;
+    reportResults.reserve(results.size());
+    for (const native_storage::RuleVerificationResultRecord& record : results) {
+        reportResults.push_back(nativeReportResultFromRecord(record));
+    }
+    return core::report::renderRuleVerificationMarkdownReport(reportRun, reportResults);
+}
+
 NativeRuleVerificationBuildResult nativeBuildRuleVerificationResult(
     const native_storage::ScanSessionRecord& session,
     const std::vector<native_storage::ProtocolFieldRuleRecord>& rules,
