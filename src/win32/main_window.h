@@ -93,6 +93,10 @@ private:
     void handleModbusScanProgress(NativeModbusScanProgress* progress);
     void handleModbusScanDataBatch(NativeModbusScanDataBatch* batch);
     void handleModbusScanDone(NativeModbusScanResult* result);
+    void joinFinishedModbusScanThread();
+    void updateCompletedModbusScanProgress(const NativeModbusScanResult& result);
+    std::wstring persistCompletedModbusScan(const NativeModbusScanResult& result);
+    bool handleCompletedModbusScanDisconnect(const NativeModbusScanResult& result, bool shouldDisconnectAfterScan);
     void setModbusScanRunningUi(bool running);
     void updateModbusScanProgress(
         std::size_t completedBlocks,

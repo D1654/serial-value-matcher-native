@@ -4137,47 +4137,19 @@ void NativeMainWindow::handleModbusScanDone(NativeModbusScanResult* resultPointe
     std::unique_ptr<NativeModbusScanResult> result(resultPointer);
     const bool shouldDisconnectAfterScan = disconnectAfterModbusScan_;
     disconnectAfterModbusScan_ = false;
-    if (modbusScanThread_ != nullptr) {
-        WaitForSingleObject(modbusScanThread_, INFINITE);
-        CloseHandle(modbusScanThread_);
-        modbusScanThread_ = nullptr;
-    }
+    joinFinishedModbusScanThread();
     if (!result) {
         setModbusScanRunningUi(false);
         return;
     }
 
-    updateModbusScanProgress(
-        result->execution.attempts.size(),
-        static_cast<std::size_t>(std::max(0, result->execution.session.requestCount)),
-        static_cast<std::size_t>(std::max(0, result->execution.session.successBlockCount)),
-        static_cast<std::size_t>(std::max(0, result->execution.session.failedBlockCount)),
-        result->execution.observations.size());
-
-    std::wstring summary;
-    if (!store_.saveScanExecution(result->execution)) {
-        summary = utf8ToWide(store_.lastErrorText());
-    } else if (result->cancelled) {
-        summary = tx(T::ModbusCancelledStatus);
-    } else {
-        summary = uiString(T::ModbusSummaryPrefix)
-            + std::to_wstring(result->execution.session.successBlockCount)
-            + uiString(T::ModbusFailedBlocks)
-            + std::to_wstring(result->execution.session.failedBlockCount)
-            + uiString(T::ModbusObservations)
-            + std::to_wstring(result->execution.observations.size())
-            + uiString(T::ChinesePeriod);
-    }
-
+    updateCompletedModbusScanProgress(*result);
+    const std::wstring summary = persistCompletedModbusScan(*result);
     if (!summary.empty()) {
         appendLog(std::wstring(L"[\u7CFB\u7EDF] ") + summary);
     }
     setModbusScanRunningUi(false);
-    if (shouldDisconnectAfterScan) {
-        if (result->serialFailed && !result->errorMessage.empty()) {
-            appendLog(NativeLogKind::Error, uiString(T::SystemSerialFailedPrefix) + utf8ToWide(result->errorMessage));
-        }
-        closeSerialPort(tx(T::ModbusDisconnectedAfterCancelStatus));
+    if (handleCompletedModbusScanDisconnect(*result, shouldDisconnectAfterScan)) {
         return;
     }
     if (result->serialFailed && !result->errorMessage.empty()) {
@@ -4185,6 +4157,51 @@ void NativeMainWindow::handleModbusScanDone(NativeModbusScanResult* resultPointe
         return;
     }
     setStatus(summary);
+}
+
+void NativeMainWindow::joinFinishedModbusScanThread() {
+    if (modbusScanThread_ == nullptr) {
+        return;
+    }
+    WaitForSingleObject(modbusScanThread_, INFINITE);
+    CloseHandle(modbusScanThread_);
+    modbusScanThread_ = nullptr;
+}
+
+void NativeMainWindow::updateCompletedModbusScanProgress(const NativeModbusScanResult& result) {
+    updateModbusScanProgress(
+        result.execution.attempts.size(),
+        static_cast<std::size_t>(std::max(0, result.execution.session.requestCount)),
+        static_cast<std::size_t>(std::max(0, result.execution.session.successBlockCount)),
+        static_cast<std::size_t>(std::max(0, result.execution.session.failedBlockCount)),
+        result.execution.observations.size());
+}
+
+std::wstring NativeMainWindow::persistCompletedModbusScan(const NativeModbusScanResult& result) {
+    if (!store_.saveScanExecution(result.execution)) {
+        return utf8ToWide(store_.lastErrorText());
+    }
+    if (result.cancelled) {
+        return tx(T::ModbusCancelledStatus);
+    }
+    return uiString(T::ModbusSummaryPrefix)
+        + std::to_wstring(result.execution.session.successBlockCount)
+        + uiString(T::ModbusFailedBlocks)
+        + std::to_wstring(result.execution.session.failedBlockCount)
+        + uiString(T::ModbusObservations)
+        + std::to_wstring(result.execution.observations.size())
+        + uiString(T::ChinesePeriod);
+}
+
+bool NativeMainWindow::handleCompletedModbusScanDisconnect(const NativeModbusScanResult& result, bool shouldDisconnectAfterScan) {
+    if (!shouldDisconnectAfterScan) {
+        return false;
+    }
+    if (result.serialFailed && !result.errorMessage.empty()) {
+        appendLog(NativeLogKind::Error, uiString(T::SystemSerialFailedPrefix) + utf8ToWide(result.errorMessage));
+    }
+    closeSerialPort(tx(T::ModbusDisconnectedAfterCancelStatus));
+    return true;
 }
 
 void NativeMainWindow::setModbusScanRunningUi(bool running) {
