@@ -6,6 +6,7 @@
 #include "win32/native_analysis_workflow.h"
 #include "win32/native_log_view.h"
 #include "win32/native_send_codec.h"
+#include "win32/native_serial_profile_codec.h"
 #include "win32/resource.h"
 #include "win32/ui_text.h"
 #include "win32/utf8_win32.h"
@@ -391,82 +392,6 @@ void selectComboData(HWND combo, LPARAM data) {
     if (count > 0) {
         SendMessageW(combo, CB_SETCURSEL, 0, 0);
     }
-}
-
-std::string parityKey(SerialParity parity) {
-    switch (parity) {
-    case SerialParity::None:
-        return "None";
-    case SerialParity::Odd:
-        return "Odd";
-    case SerialParity::Even:
-        return "Even";
-    case SerialParity::Mark:
-        return "Mark";
-    case SerialParity::Space:
-        return "Space";
-    }
-    return "None";
-}
-
-SerialParity parityFromKey(std::string_view key) {
-    if (key == "Odd") {
-        return SerialParity::Odd;
-    }
-    if (key == "Even") {
-        return SerialParity::Even;
-    }
-    if (key == "Mark") {
-        return SerialParity::Mark;
-    }
-    if (key == "Space") {
-        return SerialParity::Space;
-    }
-    return SerialParity::None;
-}
-
-std::string stopBitsKey(SerialStopBits stopBits) {
-    switch (stopBits) {
-    case SerialStopBits::One:
-        return "One";
-    case SerialStopBits::OnePointFive:
-        return "OnePointFive";
-    case SerialStopBits::Two:
-        return "Two";
-    }
-    return "One";
-}
-
-SerialStopBits stopBitsFromKey(std::string_view key) {
-    if (key == "OnePointFive") {
-        return SerialStopBits::OnePointFive;
-    }
-    if (key == "Two") {
-        return SerialStopBits::Two;
-    }
-    return SerialStopBits::One;
-}
-
-std::string flowControlKey(SerialFlowControl flowControl) {
-    switch (flowControl) {
-    case SerialFlowControl::None:
-        return "None";
-    case SerialFlowControl::HardwareRtsCts:
-        return "Hardware";
-    case SerialFlowControl::SoftwareXonXoff:
-        return "Software";
-    }
-    return "None";
-}
-
-SerialFlowControl flowControlFromKey(std::string_view key) {
-    if (key == "Hardware") {
-        return SerialFlowControl::HardwareRtsCts;
-    }
-    if (key == "Software") {
-        return SerialFlowControl::SoftwareXonXoff;
-    }
-    return SerialFlowControl::None;
 }
 
 int textToInt(HWND control, int fallback) {
@@ -2415,9 +2340,9 @@ void NativeMainWindow::applyLatestSerialProfile() {
 
     setControlText(baudCombo_, std::to_wstring(profile->baudRate));
     selectComboData(dataBitsCombo_, profile->dataBits);
-    selectComboData(parityCombo_, static_cast<LPARAM>(parityFromKey(profile->parity)));
-    selectComboData(stopBitsCombo_, static_cast<LPARAM>(stopBitsFromKey(profile->stopBits)));
-    selectComboData(flowControlCombo_, static_cast<LPARAM>(flowControlFromKey(profile->flowControl)));
+    selectComboData(parityCombo_, static_cast<LPARAM>(nativeSerialParityFromKey(profile->parity)));
+    selectComboData(stopBitsCombo_, static_cast<LPARAM>(nativeSerialStopBitsFromKey(profile->stopBits)));
+    selectComboData(flowControlCombo_, static_cast<LPARAM>(nativeSerialFlowControlFromKey(profile->flowControl)));
     SendMessageW(dtrCheck_, BM_SETCHECK, profile->dataTerminalReady ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageW(rtsCheck_, BM_SETCHECK, profile->requestToSend ? BST_CHECKED : BST_UNCHECKED, 0);
     updateRtsControlState();
@@ -2435,9 +2360,9 @@ void NativeMainWindow::saveCurrentSerialProfile() {
     profile.portName = options.portName;
     profile.baudRate = options.baudRate;
     profile.dataBits = options.dataBits;
-    profile.parity = parityKey(options.parity);
-    profile.stopBits = stopBitsKey(options.stopBits);
-    profile.flowControl = flowControlKey(options.flowControl);
+    profile.parity = nativeSerialParityKey(options.parity);
+    profile.stopBits = nativeSerialStopBitsKey(options.stopBits);
+    profile.flowControl = nativeSerialFlowControlKey(options.flowControl);
     profile.dataTerminalReady = options.dataTerminalReady;
     profile.requestToSend = options.requestToSend;
     profile.updatedAtUtc = timestampText();
