@@ -2,6 +2,7 @@
 
 #if defined(_WIN32)
 
+#include "win32/native_candidate_cache_state.h"
 #include "win32/native_layout_metrics.h"
 #include "win32/native_analysis_workflow.h"
 #include "win32/native_log_view.h"
@@ -790,11 +791,11 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         applyLatestSerialProfile();
         refreshSendHistory();
         if (const auto run = store_.latestMatchRun(); run.has_value()) {
-            latestMatchRunId_ = run->runId;
+            candidateCacheState_.setLatestMatchRunId(run->runId);
             refreshCandidateCombo(run->runId);
         }
         if (const auto verificationRun = store_.latestRuleVerificationRun(); verificationRun.has_value()) {
-            latestVerificationRunId_ = verificationRun->verificationRunId;
+            candidateCacheState_.setLatestVerificationRunId(verificationRun->verificationRunId);
         }
         SetTimer(window_, IDT_SERIAL_POLL, 50, nullptr);
         SetTimer(window_, IDT_STATUS_CLOCK, 1000, nullptr);
@@ -3803,7 +3804,7 @@ void NativeMainWindow::showAnalysisWorkspace() {
         setStatus(utf8ToWide(store_.lastErrorText()));
         return;
     }
-    latestMatchRunId_ = runId;
+    candidateCacheState_.setLatestMatchRunId(runId);
     refreshCandidateCombo(runId);
 
     const std::wstring summary = uiString(T::AnalysisSavedPrefix)
@@ -3847,8 +3848,8 @@ void NativeMainWindow::exportReport() {
     }
 
     std::optional<native_storage::RuleVerificationRunRecord> run;
-    if (!latestVerificationRunId_.empty()) {
-        run = store_.ruleVerificationRun(latestVerificationRunId_);
+    if (candidateCacheState_.hasLatestVerificationRunId()) {
+        run = store_.ruleVerificationRun(candidateCacheState_.latestVerificationRunId());
     }
     if (!run.has_value()) {
         run = store_.latestRuleVerificationRun();
@@ -3914,27 +3915,25 @@ void NativeMainWindow::refreshCandidateCombo(const std::string& runId) {
         return;
     }
 
-    for (const native_storage::MatchCandidateRecord& candidate : candidateRecords_) {
+    for (const native_storage::MatchCandidateRecord& candidate : candidateCacheState_.candidates()) {
         const std::wstring display = nativeCandidateDisplayText(candidate);
         const LRESULT index = SendMessageW(candidateCombo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(display.c_str()));
         if (index >= 0) {
             SendMessageW(candidateCombo_, CB_SETITEMDATA, static_cast<WPARAM>(index), static_cast<LPARAM>(candidate.id));
         }
     }
-    SendMessageW(candidateCombo_, CB_SETCURSEL, candidateRecords_.empty() ? 0 : 1, 0);
+    SendMessageW(candidateCombo_, CB_SETCURSEL, candidateCacheState_.candidatesEmpty() ? 0 : 1, 0);
 }
 
 bool NativeMainWindow::loadCandidateCache(const std::string& runId) {
     if (!store_.isOpen() || runId.empty()) {
-        cachedCandidateRunId_.clear();
-        candidateRecords_.clear();
+        candidateCacheState_.clearCandidateCache();
         return false;
     }
-    if (cachedCandidateRunId_ == runId) {
+    if (candidateCacheState_.isCandidateCacheFor(runId)) {
         return true;
     }
-    candidateRecords_ = store_.matchCandidates(runId);
-    cachedCandidateRunId_ = runId;
+    candidateCacheState_.setCandidateCache(runId, store_.matchCandidates(runId));
     return true;
 }
 
@@ -3942,30 +3941,26 @@ std::optional<native_storage::MatchCandidateRecord> NativeMainWindow::selectedCa
     if (!store_.isOpen()) {
         return std::nullopt;
     }
-    std::string runId = latestMatchRunId_;
+    std::string runId = candidateCacheState_.latestMatchRunId();
     if (runId.empty()) {
         const auto run = store_.latestMatchRun();
         if (!run.has_value()) {
             return std::nullopt;
         }
         runId = run->runId;
-        latestMatchRunId_ = runId;
+        candidateCacheState_.setLatestMatchRunId(runId);
     }
 
-    if (!loadCandidateCache(runId) || candidateRecords_.empty()) {
+    if (!loadCandidateCache(runId) || candidateCacheState_.candidatesEmpty()) {
         return std::nullopt;
     }
     const LRESULT index = SendMessageW(candidateCombo_, CB_GETCURSEL, 0, 0);
     const LRESULT itemData = index >= 0 ? SendMessageW(candidateCombo_, CB_GETITEMDATA, static_cast<WPARAM>(index), 0) : 0;
     const std::int64_t selectedId = itemData == CB_ERR ? 0 : static_cast<std::int64_t>(itemData);
-    if (selectedId > 0) {
-        for (const native_storage::MatchCandidateRecord& candidate : candidateRecords_) {
-            if (candidate.id == selectedId) {
-                return candidate;
-            }
-        }
+    if (const auto candidate = candidateCacheState_.candidateById(selectedId); candidate.has_value()) {
+        return candidate;
     }
-    return candidateRecords_.front();
+    return candidateCacheState_.defaultCandidate();
 }
 
 bool NativeMainWindow::saveRuleFromCandidate(const native_storage::MatchCandidateRecord& candidate) {
@@ -4034,7 +4029,7 @@ bool NativeMainWindow::runRuleVerification(const native_storage::ScanSessionReco
         setStatus(utf8ToWide(store_.lastErrorText()));
         return false;
     }
-    latestVerificationRunId_ = verification.run.verificationRunId;
+    candidateCacheState_.setLatestVerificationRunId(verification.run.verificationRunId);
 
     const std::wstring summary = uiString(T::RuleVerifySavedPrefix)
         + utf8ToWide(verification.run.verificationRunId)

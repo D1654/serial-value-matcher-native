@@ -83,6 +83,7 @@ if(SVM_BUILD_WIN32_APP)
         src/win32/main.cpp
         src/win32/main_window.cpp
         src/win32/native_analysis_workflow.cpp
+        src/win32/native_candidate_cache_state.cpp
         src/win32/native_file_send_state.cpp
         src/win32/native_layout_metrics.cpp
         src/win32/native_log_model.cpp
@@ -262,6 +263,18 @@ set_target_properties(native_analysis_report_tests PROPERTIES
 )
 target_link_libraries(native_analysis_report_tests PRIVATE svm_slim_core)
 add_test(NAME native_analysis_report_tests COMMAND native_analysis_report_tests)
+
+add_executable(native_candidate_cache_state_tests
+    tests/native_candidate_cache_state_tests.cpp
+    src/win32/native_candidate_cache_state.cpp
+)
+set_target_properties(native_candidate_cache_state_tests PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+target_include_directories(native_candidate_cache_state_tests PRIVATE src)
+add_test(NAME native_candidate_cache_state_tests COMMAND native_candidate_cache_state_tests)
 
 add_executable(native_serial_io_state_tests
     tests/native_serial_io_state_tests.cpp

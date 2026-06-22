@@ -11,6 +11,7 @@
 #include <windows.h>
 
 #include "native_storage/native_session_store.h"
+#include "win32/native_candidate_cache_state.h"
 #include "win32/native_file_send_state.h"
 #include "win32/native_log_model.h"
 #include "win32/native_log_scroll_state.h"
@@ -315,12 +316,9 @@ private:
     native_storage::NativeSessionStore store_;
     std::vector<SerialPortDescriptor> availablePorts_;
     NativeSendHistoryState sendHistoryState_;
-    std::vector<native_storage::MatchCandidateRecord> candidateRecords_;
+    NativeCandidateCacheState candidateCacheState_;
     std::string sessionId_ = "win32-native-session";
     NativeReconnectState reconnectState_;
-    std::string latestMatchRunId_;
-    std::string cachedCandidateRunId_;
-    std::string latestVerificationRunId_;
     NativeLogScrollState logScrollState_;
     std::uint64_t txByteCount_ = 0;
     std::uint64_t rxByteCount_ = 0;
