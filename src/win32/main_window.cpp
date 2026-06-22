@@ -3,6 +3,7 @@
 #if defined(_WIN32)
 
 #include "win32/native_layout_metrics.h"
+#include "win32/native_analysis_workflow.h"
 #include "win32/native_log_view.h"
 #include "win32/resource.h"
 #include "win32/ui_text.h"
@@ -29,7 +30,6 @@
 #include <memory>
 #include <sstream>
 #include <string_view>
-#include <unordered_map>
 #include <utility>
 
 namespace svm::win32 {
@@ -816,129 +816,6 @@ std::string timestampIdText() {
     return std::string(buffer) + suffix;
 }
 
-std::string formatNumber(double value) {
-    std::ostringstream output;
-    output.precision(12);
-    output << value;
-    return output.str();
-}
-
-analysis_core::RegisterSample sampleFromObservation(const native_storage::ScanObservationRecord& observation) {
-    analysis_core::RegisterSample sample;
-    sample.observationId = observation.id;
-    sample.sessionId = observation.sessionId;
-    sample.slaveId = observation.slaveId;
-    sample.functionCode = observation.functionCode;
-    sample.address = observation.address;
-    sample.value = static_cast<std::uint16_t>(observation.value);
-    sample.blockIndex = observation.blockIndex;
-    sample.attemptIndex = observation.attemptIndex;
-    return sample;
-}
-
-struct ObservationAddressKey {
-    int slaveId = 0;
-    int functionCode = 0;
-    int address = 0;
-
-    bool operator==(const ObservationAddressKey& other) const noexcept {
-        return slaveId == other.slaveId
-            && functionCode == other.functionCode
-            && address == other.address;
-    }
-};
-
-struct ObservationAddressKeyHash {
-    std::size_t operator()(const ObservationAddressKey& key) const noexcept {
-        std::size_t value = static_cast<std::size_t>(key.slaveId);
-        value = value * 1315423911u + static_cast<std::size_t>(key.functionCode);
-        value = value * 1315423911u + static_cast<std::size_t>(key.address);
-        return value;
-    }
-};
-
-using ObservationAddressIndex = std::unordered_map<
-    ObservationAddressKey,
-    const native_storage::ScanObservationRecord*,
-    ObservationAddressKeyHash>;
-
-ObservationAddressIndex buildObservationAddressIndex(const std::vector<native_storage::ScanObservationRecord>& observations) {
-    ObservationAddressIndex index;
-    index.reserve(observations.size());
-    for (const native_storage::ScanObservationRecord& observation : observations) {
-        const ObservationAddressKey key {
-            observation.slaveId,
-            observation.functionCode,
-            observation.address,
-        };
-        auto [iterator, inserted] = index.emplace(key, &observation);
-        if (!inserted && observation.id > iterator->second->id) {
-            iterator->second = &observation;
-        }
-    }
-    return index;
-}
-
-const native_storage::ScanObservationRecord* findIndexedObservation(
-    const ObservationAddressIndex& index,
-    const native_storage::ProtocolFieldRuleRecord& rule,
-    int address) {
-    const ObservationAddressKey key {
-        rule.slaveId,
-        rule.functionCode,
-        address,
-    };
-    const auto iterator = index.find(key);
-    return iterator == index.cend() ? nullptr : iterator->second;
-}
-
-native_storage::MatchCandidateRecord candidateRecordFromCore(
-    const analysis_core::ValueMatchCandidate& candidate,
-    const std::string& runId,
-    int rankIndex,
-    const std::string& observedAtUtc) {
-    native_storage::MatchCandidateRecord record;
-    record.runId = runId;
-    record.rankIndex = rankIndex;
-    record.candidateType = analysis_core::numericCandidateTypeName(candidate.type);
-    record.wordOrder = analysis_core::wordOrderName(candidate.wordOrder);
-    record.byteOrder = analysis_core::byteOrderName(candidate.byteOrder);
-    record.sourceSessionId = candidate.sessionId;
-    record.slaveId = candidate.slaveId;
-    record.functionCode = candidate.functionCode;
-    record.startAddress = candidate.startAddress;
-    record.registerCount = candidate.registerCount;
-    record.observationIds = candidate.observationIds;
-    record.addresses = candidate.addresses;
-    record.blockIndexes = candidate.blockIndexes;
-    record.attemptIndexes = candidate.attemptIndexes;
-    record.rawRegisters.reserve(candidate.rawRegisters.size());
-    for (std::uint16_t value : candidate.rawRegisters) {
-        record.rawRegisters.push_back(static_cast<int>(value));
-    }
-    record.decodedValue = candidate.decodedValue;
-    record.scaleMultiplier = candidate.scale.multiplier;
-    record.scaleOffset = candidate.scale.offset;
-    record.engineeringValue = candidate.engineeringValue;
-    record.delta = candidate.delta;
-    record.absoluteError = candidate.absoluteError;
-    record.effectiveTolerance = candidate.effectiveTolerance;
-    record.score = candidate.score;
-    record.observedAtUtc = observedAtUtc;
-    record.evidenceText = candidate.evidenceText;
-    return record;
-}
-
-std::wstring candidateDisplayText(const native_storage::MatchCandidateRecord& candidate) {
-    std::wostringstream output;
-    output << L"#" << (candidate.rankIndex + 1)
-           << L" " << utf8ToWide(candidate.candidateType)
-           << L" @" << candidate.startAddress
-           << L"=" << utf8ToWide(formatNumber(candidate.engineeringValue))
-           << L" score " << utf8ToWide(formatNumber(candidate.score));
-    return output.str();
-}
-
 std::wstring portDisplayText(const SerialPortDescriptor& port) {
     const std::wstring portName = utf8ToWide(port.portName);
     const std::wstring description = sanitizeLogText(utf8ToWide(port.description));
@@ -946,13 +823,6 @@ std::wstring portDisplayText(const SerialPortDescriptor& port) {
         return portName;
     }
     return portName + L" - " + description;
-}
-
-std::wstring ruleDisplayName(const native_storage::MatchCandidateRecord& candidate, const std::wstring& targetName) {
-    if (!targetName.empty()) {
-        return targetName;
-    }
-    return utf8ToWide(candidate.candidateType) + L"@" + std::to_wstring(candidate.startAddress);
 }
 
 } // namespace
@@ -4279,7 +4149,7 @@ void NativeMainWindow::showAnalysisWorkspace() {
     std::vector<analysis_core::RegisterSample> samples;
     samples.reserve(observations.size());
     for (const native_storage::ScanObservationRecord& observation : observations) {
-        samples.push_back(sampleFromObservation(observation));
+        samples.push_back(nativeSampleFromObservation(observation));
     }
 
     analysis_core::TargetValue target;
@@ -4317,7 +4187,7 @@ void NativeMainWindow::showAnalysisWorkspace() {
     std::vector<native_storage::MatchCandidateRecord> candidateRecords;
     candidateRecords.reserve(result.candidates.size());
     for (std::size_t index = 0; index < result.candidates.size(); ++index) {
-        candidateRecords.push_back(candidateRecordFromCore(
+        candidateRecords.push_back(nativeCandidateRecordFromCore(
             result.candidates[index],
             runId,
             static_cast<int>(index),
@@ -4384,33 +4254,12 @@ void NativeMainWindow::exportReport() {
     }
 
     const auto resultRecords = store_.ruleVerificationResults(run->verificationRunId);
-    report_core::RuleVerificationRun reportRun;
-    reportRun.verificationRunId = run->verificationRunId;
-    reportRun.sourceScanSessionId = run->sourceScanSessionId;
-    reportRun.ruleCount = run->ruleCount;
-    reportRun.verifiedCount = run->verifiedCount;
-    reportRun.missingCount = run->missingCount;
-    reportRun.unsupportedCount = run->unsupportedCount;
-    reportRun.createdAtText = run->createdAtUtc;
+    const report_core::RuleVerificationRun reportRun = nativeReportRunFromRecord(*run);
 
     std::vector<report_core::RuleVerificationResult> reportResults;
     reportResults.reserve(resultRecords.size());
     for (const native_storage::RuleVerificationResultRecord& record : resultRecords) {
-        report_core::RuleVerificationResult result;
-        result.fieldName = record.fieldName;
-        result.unit = record.unit;
-        result.verified = record.verified;
-        result.statusText = record.statusText;
-        result.slaveId = record.slaveId;
-        result.functionCode = record.functionCode;
-        result.startAddress = record.startAddress;
-        result.registerCount = record.registerCount;
-        result.observationIds = record.observationIds;
-        result.rawRegisters = record.rawRegisters;
-        result.engineeringValue = record.engineeringValue;
-        result.interpretationText = record.interpretationText;
-        result.evidenceText = record.evidenceText;
-        reportResults.push_back(std::move(result));
+        reportResults.push_back(nativeReportResultFromRecord(record));
     }
 
     wchar_t fileName[MAX_PATH] = {};
@@ -4469,7 +4318,7 @@ void NativeMainWindow::refreshCandidateCombo(const std::string& runId) {
 
     const auto candidates = store_.matchCandidates(runId);
     for (const native_storage::MatchCandidateRecord& candidate : candidates) {
-        const std::wstring display = candidateDisplayText(candidate);
+        const std::wstring display = nativeCandidateDisplayText(candidate);
         const LRESULT index = SendMessageW(candidateCombo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(display.c_str()));
         if (index >= 0) {
             SendMessageW(candidateCombo_, CB_SETITEMDATA, static_cast<WPARAM>(index), static_cast<LPARAM>(candidate.id));
@@ -4520,7 +4369,7 @@ bool NativeMainWindow::saveRuleFromCandidate(const native_storage::MatchCandidat
 
     native_storage::ProtocolFieldRuleRecord rule;
     rule.ruleId = "rule-" + std::to_string(candidate.id);
-    rule.fieldName = wideToUtf8(ruleDisplayName(candidate, analysisInputText(targetLabelEdit_)));
+    rule.fieldName = wideToUtf8(nativeRuleDisplayName(candidate, analysisInputText(targetLabelEdit_)));
     rule.sourceStabilityRunId = candidate.runId;
     rule.sourceStableCandidateId = candidate.id;
     rule.candidateType = candidate.candidateType;
@@ -4562,7 +4411,7 @@ bool NativeMainWindow::runRuleVerification(const native_storage::ScanSessionReco
         setStatus(tx(T::RuleVerifyNoObservations));
         return false;
     }
-    const ObservationAddressIndex observationIndex = buildObservationAddressIndex(observations);
+    const NativeObservationAddressIndex observationIndex = nativeBuildObservationAddressIndex(observations);
 
     native_storage::RuleVerificationRunRecord run;
     run.verificationRunId = "verify-" + timestampIdText();
@@ -4591,7 +4440,7 @@ bool NativeMainWindow::runRuleVerification(const native_storage::ScanSessionReco
         int missingAddress = rule.startAddress;
         for (int offset = 0; offset < rule.registerCount; ++offset) {
             const int address = rule.startAddress + offset;
-            const native_storage::ScanObservationRecord* observation = findIndexedObservation(observationIndex, rule, address);
+            const native_storage::ScanObservationRecord* observation = nativeFindIndexedObservation(observationIndex, rule, address);
             if (observation == nullptr) {
                 missing = true;
                 missingAddress = address;
