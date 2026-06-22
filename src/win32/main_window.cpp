@@ -8,6 +8,7 @@
 #include "win32/native_analysis_workflow.h"
 #include "win32/native_log_view.h"
 #include "win32/native_log_scroll_state.h"
+#include "win32/native_modbus_scan_ui_state.h"
 #include "win32/native_reconnect_state.h"
 #include "win32/native_send_codec.h"
 #include "win32/native_send_control_state.h"
@@ -3723,7 +3724,8 @@ void NativeMainWindow::setModbusScanRunningUi(bool running) {
         SetTimer(window_, IDT_SERIAL_POLL, 50, nullptr);
         updateTimedSendTimer();
     }
-    SetWindowTextW(modbusButton_, running ? tx(T::ModbusStopButton) : tx(T::ModbusScanButton));
+    const NativeModbusScanUiSnapshot ui = modbusScanUiState_.snapshot(running);
+    SetWindowTextW(modbusButton_, ui.buttonMode == NativeModbusScanButtonMode::Stop ? tx(T::ModbusStopButton) : tx(T::ModbusScanButton));
 
     for (HWND control : {
              portCombo_,
@@ -3752,10 +3754,10 @@ void NativeMainWindow::setModbusScanRunningUi(bool running) {
              fileBrowseButton_,
              filePathEdit_,
          }) {
-        enableControl(control, !running);
+        enableControl(control, ui.exclusiveControlsEnabled);
     }
     for (HWND button : quickSendButtons_) {
-        enableControl(button, !running);
+        enableControl(button, ui.exclusiveControlsEnabled);
     }
     updateRtsControlState();
 }
