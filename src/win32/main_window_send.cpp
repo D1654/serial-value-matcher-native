@@ -27,6 +27,45 @@ const wchar_t* tx(T id) {
 
 } // namespace
 
+void NativeMainWindow::refreshSendHistory() {
+    SendMessageW(historyCombo_, CB_RESETCONTENT, 0, 0);
+    sendHistoryState_.clear();
+    SendMessageW(historyCombo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(tx(T::SendHistory)));
+    if (store_.isOpen()) {
+        sendHistoryState_.setEntries(store_.recentSendHistory(30));
+        for (std::size_t index = 0; index < sendHistoryState_.entries().size(); ++index) {
+            const native_storage::SendHistoryEntry& item = sendHistoryState_.entries()[index];
+            const LRESULT comboIndex = SendMessageW(historyCombo_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(utf8ToWide(item.content).c_str()));
+            if (comboIndex >= 0) {
+                SendMessageW(historyCombo_, CB_SETITEMDATA, static_cast<WPARAM>(comboIndex), static_cast<LPARAM>(sendHistoryState_.itemDataForIndex(index)));
+            }
+        }
+    }
+    SendMessageW(historyCombo_, CB_SETCURSEL, 0, 0);
+}
+
+void NativeMainWindow::applySelectedHistory() {
+    const LRESULT index = SendMessageW(historyCombo_, CB_GETCURSEL, 0, 0);
+    if (index <= 0) {
+        return;
+    }
+    const LRESULT itemData = SendMessageW(historyCombo_, CB_GETITEMDATA, static_cast<WPARAM>(index), 0);
+    if (itemData <= 0) {
+        setControlText(sendEdit_, controlText(historyCombo_));
+        return;
+    }
+    const std::optional<native_storage::SendHistoryEntry> history = sendHistoryState_.entryFromItemData(static_cast<NativeSendHistoryItemData>(itemData));
+    if (!history.has_value()) {
+        return;
+    }
+
+    setControlText(sendEdit_, utf8ToWide(history->content));
+    selectComboData(sendModeCombo_, history->payloadMode);
+    selectComboData(lineEndingCombo_, history->lineEnding);
+    selectComboData(textEncodingCombo_, history->textEncodingCodePage);
+    setStatus(tx(T::SendHistoryRestored));
+}
+
 void NativeMainWindow::sendPayload() {
     sendPayloadFromText(controlText(sendEdit_), true);
 }
