@@ -71,9 +71,11 @@ target_include_directories(svm_win32_serial PUBLIC src)
 
 add_library(svm_native_storage
     src/native_storage/native_store_file_ops.cpp
+    src/native_storage/native_store_files.cpp
     src/native_storage/native_store_record_io.cpp
     src/native_storage/native_store_record_codec.cpp
     src/native_storage/native_session_store.cpp
+    src/native_storage/native_session_store_cache.cpp
 )
 
 target_include_directories(svm_native_storage PUBLIC src)
