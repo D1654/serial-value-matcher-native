@@ -1480,24 +1480,6 @@ void NativeMainWindow::updateStatusSegments() {
     }
 }
 
-void NativeMainWindow::setSendModeStatus() {
-    const int mode = static_cast<int>(selectedComboData(sendModeCombo_, 0));
-    switch (mode) {
-    case 1:
-        setStatus(tx(T::SendModeHexStatus));
-        break;
-    case 2:
-        setStatus(tx(T::SendModeDecimalStatus));
-        break;
-    case 3:
-        setStatus(tx(T::SendModeBinaryStatus));
-        break;
-    default:
-        setStatus(tx(T::SendModeTextStatus));
-        break;
-    }
-}
-
 std::wstring NativeMainWindow::controlText(HWND control) const {
     const int length = GetWindowTextLengthW(control);
     std::wstring text(static_cast<std::size_t>(length) + 1, L'\0');
@@ -1514,33 +1496,6 @@ void NativeMainWindow::setControlText(HWND control, const std::wstring& text) {
     SetWindowTextW(control, text.c_str());
 }
 
-std::vector<std::uint8_t> NativeMainWindow::payloadFromInput(std::wstring* errorText) const {
-    return payloadFromText(controlText(sendEdit_), errorText);
-}
-
-std::vector<std::uint8_t> NativeMainWindow::payloadFromText(const std::wstring& text, std::wstring* errorText) const {
-    if (errorText != nullptr) {
-        errorText->clear();
-    }
-    NativeSendCodecErrors errors;
-    errors.hexInvalidChar = tx(T::HexInvalidChar);
-    errors.hexOddNibble = tx(T::HexOddNibble);
-    errors.invalidDecimal = tx(T::SendModeInvalidDecimal);
-    errors.invalidBinary = tx(T::SendModeInvalidBinary);
-    errors.textEncodingFailed = tx(T::TextEncodingFailed);
-
-    NativeSendPayloadOptions options;
-    options.mode = static_cast<int>(selectedComboData(sendModeCombo_, 0));
-    options.textCodePage = selectedTextCodePage();
-    options.lineEnding = static_cast<int>(selectedComboData(lineEndingCombo_, 0));
-
-    const NativeSendPayloadResult result = nativeBuildSendPayload(text, options, errors);
-    if (errorText != nullptr) {
-        *errorText = result.errorText;
-    }
-    return result.payload;
-}
-
 std::wstring NativeMainWindow::formatPayloadForLog(const std::vector<std::uint8_t>& payload) const {
     const int mode = static_cast<int>(selectedComboData(logFormatCombo_, 0));
     switch (mode) {
@@ -1555,10 +1510,6 @@ std::wstring NativeMainWindow::formatPayloadForLog(const std::vector<std::uint8_
     default:
         return nativeBytesToHex(payload);
     }
-}
-
-unsigned int NativeMainWindow::selectedTextCodePage() const {
-    return static_cast<unsigned int>(selectedComboData(textEncodingCombo_, CP_UTF8));
 }
 
 unsigned int NativeMainWindow::selectedLogCodePage() const {

@@ -4,6 +4,7 @@
 
 #include "win32/native_control_utils.h"
 #include "win32/native_file_send_state.h"
+#include "win32/native_send_codec.h"
 #include "win32/native_send_history_state.h"
 #include "win32/native_time_utils.h"
 #include "win32/native_ui_preferences.h"
@@ -26,6 +27,55 @@ const wchar_t* tx(T id) {
 }
 
 } // namespace
+
+void NativeMainWindow::setSendModeStatus() {
+    const int mode = static_cast<int>(selectedComboData(sendModeCombo_, 0));
+    switch (mode) {
+    case 1:
+        setStatus(tx(T::SendModeHexStatus));
+        break;
+    case 2:
+        setStatus(tx(T::SendModeDecimalStatus));
+        break;
+    case 3:
+        setStatus(tx(T::SendModeBinaryStatus));
+        break;
+    default:
+        setStatus(tx(T::SendModeTextStatus));
+        break;
+    }
+}
+
+std::vector<std::uint8_t> NativeMainWindow::payloadFromInput(std::wstring* errorText) const {
+    return payloadFromText(controlText(sendEdit_), errorText);
+}
+
+std::vector<std::uint8_t> NativeMainWindow::payloadFromText(const std::wstring& text, std::wstring* errorText) const {
+    if (errorText != nullptr) {
+        errorText->clear();
+    }
+    NativeSendCodecErrors errors;
+    errors.hexInvalidChar = tx(T::HexInvalidChar);
+    errors.hexOddNibble = tx(T::HexOddNibble);
+    errors.invalidDecimal = tx(T::SendModeInvalidDecimal);
+    errors.invalidBinary = tx(T::SendModeInvalidBinary);
+    errors.textEncodingFailed = tx(T::TextEncodingFailed);
+
+    NativeSendPayloadOptions options;
+    options.mode = static_cast<int>(selectedComboData(sendModeCombo_, 0));
+    options.textCodePage = selectedTextCodePage();
+    options.lineEnding = static_cast<int>(selectedComboData(lineEndingCombo_, 0));
+
+    const NativeSendPayloadResult result = nativeBuildSendPayload(text, options, errors);
+    if (errorText != nullptr) {
+        *errorText = result.errorText;
+    }
+    return result.payload;
+}
+
+unsigned int NativeMainWindow::selectedTextCodePage() const {
+    return static_cast<unsigned int>(selectedComboData(textEncodingCombo_, CP_UTF8));
+}
 
 void NativeMainWindow::refreshSendHistory() {
     SendMessageW(historyCombo_, CB_RESETCONTENT, 0, 0);
