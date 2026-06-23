@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <commctrl.h>
+#include <cstdlib>
+#include <cwctype>
 
 namespace svm::win32 {
 
@@ -90,6 +92,86 @@ int singleLineEditHeight(HFONT font, int row) {
     }
     const int naturalHeight = textHeight + GetSystemMetrics(SM_CYBORDER) * 2 + 4;
     return std::clamp(naturalHeight, std::max(14, row - 5), row);
+}
+
+void addComboItem(HWND combo, const wchar_t* text, LPARAM data) {
+    const LRESULT index = SendMessageW(combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text));
+    if (index >= 0) {
+        SendMessageW(combo, CB_SETITEMDATA, static_cast<WPARAM>(index), data);
+    }
+}
+
+LPARAM selectedComboData(HWND combo, LPARAM fallback) {
+    const LRESULT index = SendMessageW(combo, CB_GETCURSEL, 0, 0);
+    if (index < 0) {
+        return fallback;
+    }
+    const LRESULT data = SendMessageW(combo, CB_GETITEMDATA, static_cast<WPARAM>(index), 0);
+    return data == CB_ERR ? fallback : data;
+}
+
+void selectComboData(HWND combo, LPARAM data) {
+    const LRESULT count = SendMessageW(combo, CB_GETCOUNT, 0, 0);
+    for (LRESULT index = 0; index < count; ++index) {
+        if (SendMessageW(combo, CB_GETITEMDATA, static_cast<WPARAM>(index), 0) == data) {
+            SendMessageW(combo, CB_SETCURSEL, static_cast<WPARAM>(index), 0);
+            return;
+        }
+    }
+    if (count > 0) {
+        SendMessageW(combo, CB_SETCURSEL, 0, 0);
+    }
+}
+
+int textToInt(HWND control, int fallback) {
+    const int length = GetWindowTextLengthW(control);
+    if (length <= 0) {
+        return fallback;
+    }
+    std::wstring text(static_cast<std::size_t>(length) + 1, L'\0');
+    GetWindowTextW(control, text.data(), length + 1);
+    text.resize(static_cast<std::size_t>(length));
+    wchar_t* end = nullptr;
+    const long value = std::wcstol(text.c_str(), &end, 10);
+    return end != text.c_str() ? static_cast<int>(value) : fallback;
+}
+
+double textToDoubleText(const std::wstring& text, double fallback, bool* ok) {
+    if (ok != nullptr) {
+        *ok = false;
+    }
+    if (text.empty()) {
+        return fallback;
+    }
+    wchar_t* end = nullptr;
+    const double value = std::wcstod(text.c_str(), &end);
+    if (end == text.c_str()) {
+        return fallback;
+    }
+    while (end != nullptr && *end != L'\0' && std::iswspace(*end)) {
+        ++end;
+    }
+    if (end != nullptr && *end == L'\0') {
+        if (ok != nullptr) {
+            *ok = true;
+        }
+        return value;
+    }
+    return fallback;
+}
+
+double textToDouble(HWND control, double fallback, bool* ok) {
+    const int length = GetWindowTextLengthW(control);
+    if (length <= 0) {
+        if (ok != nullptr) {
+            *ok = false;
+        }
+        return fallback;
+    }
+    std::wstring text(static_cast<std::size_t>(length) + 1, L'\0');
+    GetWindowTextW(control, text.data(), length + 1);
+    text.resize(static_cast<std::size_t>(length));
+    return textToDoubleText(text, fallback, ok);
 }
 
 } // namespace svm::win32
