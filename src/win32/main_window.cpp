@@ -1165,7 +1165,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         requestCancelModbusScan();
         closeModbusScanThread();
         releaseModbusScanOwnership();
-        disconnectSerial();
+        shutdownSerialPort();
         if (ownsUiFont_ && uiFont_ != nullptr) {
             DeleteObject(uiFont_);
             uiFont_ = nullptr;
@@ -2491,6 +2491,12 @@ void NativeMainWindow::closeSerialPort(const std::wstring& statusText) {
     updateRtsControlState();
     updateTimedSendTimer();
     setStatus(statusText.empty() ? tx(T::DisconnectedStatus) : statusText.c_str());
+}
+
+void NativeMainWindow::shutdownSerialPort() {
+    if (serialPort_.isOpen()) {
+        serialPort_.close();
+    }
 }
 
 std::wstring NativeMainWindow::serialIoBusyStatus() const {

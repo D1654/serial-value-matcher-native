@@ -87,6 +87,7 @@ private:
     void connectSerial();
     void disconnectSerial();
     void closeSerialPort(const std::wstring& statusText);
+    void shutdownSerialPort();
     std::wstring serialIoBusyStatus() const;
     void releaseModbusScanOwnership();
     void sendPayload();
