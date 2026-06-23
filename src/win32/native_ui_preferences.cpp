@@ -46,4 +46,26 @@ native_storage::UiPreferences nativeNormalizeUiPreferences(native_storage::UiPre
     return preferences;
 }
 
+bool nativeUiPreferencesSameSettings(const native_storage::UiPreferences& left, const native_storage::UiPreferences& right) {
+    return left.name == right.name
+        && left.logThemeIndex == right.logThemeIndex
+        && left.logFormat == right.logFormat
+        && left.logEncodingCodePage == right.logEncodingCodePage
+        && left.showLogTimestamps == right.showLogTimestamps
+        && left.sendPayloadMode == right.sendPayloadMode
+        && left.sendTextEncodingCodePage == right.sendTextEncodingCodePage
+        && left.sendLineEnding == right.sendLineEnding
+        && left.autoReconnect == right.autoReconnect
+        && left.timedSendEnabled == right.timedSendEnabled
+        && left.timedSendPeriodMs == right.timedSendPeriodMs
+        && left.fileSendDelayMs == right.fileSendDelayMs
+        && left.logVisibleCharLimit == right.logVisibleCharLimit
+        && left.rawEventRetentionLimitMb == right.rawEventRetentionLimitMb
+        && left.quickSendSlots == right.quickSendSlots
+        && left.windowLeft == right.windowLeft
+        && left.windowTop == right.windowTop
+        && left.windowWidth == right.windowWidth
+        && left.windowHeight == right.windowHeight;
+}
+
 } // namespace svm::win32

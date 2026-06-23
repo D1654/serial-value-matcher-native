@@ -25,5 +25,6 @@ int nativeNormalizeRawEventRetentionMb(int value) noexcept;
 std::size_t nativeNormalizeLogVisibleCharLimit(std::size_t charLimit) noexcept;
 std::vector<std::string> nativeNormalizeQuickSendSlots(std::vector<std::string> slots, std::size_t slotCount = kNativeQuickSendSlotCount);
 native_storage::UiPreferences nativeNormalizeUiPreferences(native_storage::UiPreferences preferences, std::size_t quickSendSlotCount = kNativeQuickSendSlotCount);
+bool nativeUiPreferencesSameSettings(const native_storage::UiPreferences& left, const native_storage::UiPreferences& right);
 
 } // namespace svm::win32

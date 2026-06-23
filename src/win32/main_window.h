@@ -317,6 +317,7 @@ private:
     std::uint64_t logRebuildPassCount_ = 0;
     std::uint64_t logQueuedLineCount_ = 0;
     bool uiPreferenceSaveFailureShown_ = false;
+    std::optional<native_storage::UiPreferences> lastSavedUiPreferences_;
     Win32SerialPort serialPort_;
     NativeSerialIoState serialIoState_;
     native_storage::NativeSessionStore store_;

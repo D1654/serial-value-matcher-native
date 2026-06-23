@@ -60,6 +60,25 @@ void wholePreferencesAreNormalizedTogether() {
     assert(normalized.quickSendSlots[1].empty());
 }
 
+void sameSettingsIgnoreStorageMetadata() {
+    svm::native_storage::UiPreferences left;
+    left.quickSendSlots = {"A", "B"};
+    left.updatedAtUtc = "2026-01-01T00:00:00Z";
+    left.id = 1;
+
+    auto right = left;
+    right.updatedAtUtc = "2026-01-02T00:00:00Z";
+    right.id = 99;
+    assert(svm::win32::nativeUiPreferencesSameSettings(left, right));
+
+    right.windowWidth += 1;
+    assert(!svm::win32::nativeUiPreferencesSameSettings(left, right));
+
+    right = left;
+    right.quickSendSlots[1] = "C";
+    assert(!svm::win32::nativeUiPreferencesSameSettings(left, right));
+}
+
 } // namespace
 
 int main() {
@@ -67,6 +86,7 @@ int main() {
     rawEventRetentionOnlyAllowsKnownChoices();
     quickSendSlotsArePaddedAndTrimmed();
     wholePreferencesAreNormalizedTogether();
+    sameSettingsIgnoreStorageMetadata();
 
     std::cout << "native_ui_preferences_tests passed\n";
     return 0;

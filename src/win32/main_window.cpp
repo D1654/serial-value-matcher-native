@@ -2362,6 +2362,7 @@ void NativeMainWindow::applyUiPreferences() {
         return;
     }
     const native_storage::UiPreferences preferences = nativeNormalizeUiPreferences(*storedPreferences, quickSendEdits_.size());
+    lastSavedUiPreferences_ = preferences;
 
     selectComboData(logFormatCombo_, preferences.logFormat);
     selectComboData(logEncodingCombo_, preferences.logEncodingCodePage);
@@ -2431,6 +2432,9 @@ void NativeMainWindow::saveUiPreferences() {
     preferences.windowTop = windowRect.top;
     preferences.windowWidth = windowRect.right - windowRect.left;
     preferences.windowHeight = windowRect.bottom - windowRect.top;
+    if (lastSavedUiPreferences_.has_value() && nativeUiPreferencesSameSettings(*lastSavedUiPreferences_, preferences)) {
+        return;
+    }
     preferences.updatedAtUtc = timestampText();
     if (!store_.saveUiPreferences(preferences)) {
         if (!uiPreferenceSaveFailureShown_) {
@@ -2439,6 +2443,7 @@ void NativeMainWindow::saveUiPreferences() {
         }
         return;
     }
+    lastSavedUiPreferences_ = preferences;
     uiPreferenceSaveFailureShown_ = false;
 }
 
