@@ -1,5 +1,9 @@
 #include "native_storage/native_session_store.h"
 
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+
 #include <cassert>
 #include <chrono>
 #include <cstdlib>
@@ -16,6 +20,21 @@ template <typename Function>
 void runStorageTest(const char* name, Function function) {
     std::cerr << "native_storage_tests: " << name << std::endl;
     function();
+}
+
+void storageCheckpoint(const char* name) {
+    std::cerr << "native_storage_tests:   " << name << std::endl;
+}
+
+bool pathExists(const std::filesystem::path& path) {
+    std::error_code error;
+    const bool exists = std::filesystem::exists(path, error);
+    if (error) {
+        std::cerr << "native_storage_tests: exists failed for " << path.string()
+                  << ": " << error.message() << std::endl;
+        assert(false);
+    }
+    return exists;
 }
 
 std::filesystem::path temporaryStorePath() {
@@ -81,6 +100,7 @@ void rawEventsAreBatchedAndReopened() {
 
 void replacementArtifactsAreRecoveredOnOpen() {
     const auto path = temporaryStorePath();
+    storageCheckpoint("create store with send history");
     {
         auto store = openStore(path);
         svm::native_storage::SendHistoryEntry entry;
@@ -93,20 +113,36 @@ void replacementArtifactsAreRecoveredOnOpen() {
     const auto historyPath = path / "send_history.svmr";
     const auto backupPath = path / "send_history.svmr.bak";
     const auto tempPath = path / "send_history.svmr.tmp";
-    std::filesystem::rename(historyPath, backupPath);
+    storageCheckpoint("move live history to backup");
+    std::error_code error;
+    std::filesystem::rename(historyPath, backupPath, error);
+    if (error) {
+        std::cerr << "native_storage_tests: rename failed: " << error.message() << std::endl;
+    }
+    assert(!error);
+    storageCheckpoint("write stale temp artifact");
     {
         std::ofstream temp(tempPath, std::ios::binary | std::ios::trunc);
         temp << "stale temp";
     }
-    assert(!std::filesystem::exists(historyPath));
-    assert(std::filesystem::exists(backupPath));
-    assert(std::filesystem::exists(tempPath));
+    std::cerr << "native_storage_tests:   before recovery live=" << pathExists(historyPath)
+              << " backup=" << pathExists(backupPath)
+              << " temp=" << pathExists(tempPath) << std::endl;
+    assert(!pathExists(historyPath));
+    assert(pathExists(backupPath));
+    assert(pathExists(tempPath));
 
+    storageCheckpoint("open store to recover replacement artifacts");
     auto reopened = openStore(path);
-    assert(std::filesystem::exists(historyPath));
-    assert(!std::filesystem::exists(backupPath));
-    assert(!std::filesystem::exists(tempPath));
+    std::cerr << "native_storage_tests:   after recovery live=" << pathExists(historyPath)
+              << " backup=" << pathExists(backupPath)
+              << " temp=" << pathExists(tempPath) << std::endl;
+    assert(pathExists(historyPath));
+    assert(!pathExists(backupPath));
+    assert(!pathExists(tempPath));
+    storageCheckpoint("read recovered send history");
     const auto history = reopened.recentSendHistory(10);
+    std::cerr << "native_storage_tests:   recovered history size=" << history.size() << std::endl;
     assert(history.size() == 1);
     assert(history[0].content == "AA55");
 
