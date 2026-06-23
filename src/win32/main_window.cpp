@@ -111,7 +111,11 @@ void showControlFast(HWND control, bool visible) {
 }
 
 void enableControl(HWND control, bool enabled) {
-    if (control != nullptr) {
+    if (control == nullptr) {
+        return;
+    }
+    const bool currentlyEnabled = IsWindowEnabled(control) != FALSE;
+    if (currentlyEnabled != enabled) {
         EnableWindow(control, enabled ? TRUE : FALSE);
     }
 }
