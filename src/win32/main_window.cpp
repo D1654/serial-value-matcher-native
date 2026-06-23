@@ -8,6 +8,7 @@
 #include "win32/native_analysis_workflow.h"
 #include "win32/native_log_view.h"
 #include "win32/native_log_scroll_state.h"
+#include "win32/native_modbus_scan_request.h"
 #include "win32/native_modbus_scan_ui_state.h"
 #include "win32/native_reconnect_state.h"
 #include "win32/native_send_codec.h"
@@ -3524,36 +3525,22 @@ void NativeMainWindow::runModbusScan() {
         return;
     }
 
-    modbus_core::ScanPlanOptions options;
-    options.slaveId = textToInt(scanSlaveEdit_, 1);
-    options.functionCode = static_cast<::svm::core::Byte>(selectedComboData(scanFunctionCombo_, 3));
-    options.range.startAddress = textToInt(scanStartEdit_, 0);
-    options.range.endAddress = textToInt(scanEndEdit_, 15);
-    options.blockSize = 16;
-    options.requestIntervalMs = 30;
-    options.retryCount = 0;
-    options.safetyLevel = modbus_core::ScanSafetyLevel::Custom;
+    NativeModbusScanRequestInput requestInput;
+    requestInput.slaveId = textToInt(scanSlaveEdit_, 1);
+    requestInput.functionCode = static_cast<::svm::core::Byte>(selectedComboData(scanFunctionCombo_, 3));
+    requestInput.startAddress = textToInt(scanStartEdit_, 0);
+    requestInput.endAddress = textToInt(scanEndEdit_, 15);
+    requestInput.scanSessionId = "scan-" + timestampIdText();
+    requestInput.startedAtUtc = timestampText();
 
-    const auto planResult = modbus_core::buildScanPlan(options);
-    if (!planResult.ok) {
-        setStatus(utf8ToWide(planResult.errorMessage));
-        MessageBoxW(window_, utf8ToWide(planResult.errorMessage).c_str(), tx(T::ModbusInvalidTitle), MB_ICONWARNING | MB_OK);
+    auto requestResult = nativeBuildModbusScanRequest(requestInput);
+    if (!requestResult.ok) {
+        setStatus(utf8ToWide(requestResult.errorMessage));
+        MessageBoxW(window_, utf8ToWide(requestResult.errorMessage).c_str(), tx(T::ModbusInvalidTitle), MB_ICONWARNING | MB_OK);
         return;
     }
 
-    const std::string scanSessionId = "scan-" + timestampIdText();
-    native_storage::ScanExecutionRecord execution;
-    execution.session.sessionId = scanSessionId;
-    execution.session.slaveId = planResult.plan.slaveId;
-    execution.session.functionCode = planResult.plan.functionCode;
-    execution.session.startAddress = planResult.plan.range.startAddress;
-    execution.session.endAddress = planResult.plan.range.endAddress;
-    execution.session.blockSize = planResult.plan.blockSize;
-    execution.session.requestCount = planResult.plan.requestCount();
-    execution.session.status = "running";
-    execution.session.startedAtUtc = timestampText();
-
-    appendLog(uiString(T::SystemModbusStartPrefix) + utf8ToWide(scanSessionId));
+    appendLog(uiString(T::SystemModbusStartPrefix) + utf8ToWide(requestInput.scanSessionId));
     if (modbusScanThread_ != nullptr) {
         WaitForSingleObject(modbusScanThread_, INFINITE);
         CloseHandle(modbusScanThread_);
@@ -3566,16 +3553,16 @@ void NativeMainWindow::runModbusScan() {
         return;
     }
     setModbusScanRunningUi(true);
-    updateModbusScanProgress(0, planResult.plan.blocks.size(), 0, 0, 0);
+    updateModbusScanProgress(0, requestResult.request.plan.blocks.size(), 0, 0, 0);
     setStatus(tx(T::ModbusRunning));
 
     auto* context = new NativeModbusScanContext;
     context->notifyWindow = window_;
     context->serialPort = &serialPort_;
     context->cancelRequested = &modbusScanCancelRequested_;
-    context->plan = planResult.plan;
-    context->execution = std::move(execution);
-    context->scanSessionId = scanSessionId;
+    context->plan = std::move(requestResult.request.plan);
+    context->execution = std::move(requestResult.request.execution);
+    context->scanSessionId = requestInput.scanSessionId;
     context->timeoutErrorMessage = wideToUtf8(tx(T::ModbusTimeout));
     context->threadExceptionMessage = wideToUtf8(L"Modbus \u626B\u63CF\u7EBF\u7A0B\u5F02\u5E38\u7EC8\u6B62\u3002");
     modbusScanThread_ = CreateThread(nullptr, 0, &nativeModbusScanThreadProc, context, 0, nullptr);

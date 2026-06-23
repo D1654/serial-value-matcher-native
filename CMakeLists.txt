@@ -90,6 +90,7 @@ if(SVM_BUILD_WIN32_APP)
         src/win32/native_log_model.cpp
         src/win32/native_log_scroll_state.cpp
         src/win32/native_log_view.cpp
+        src/win32/native_modbus_scan_request.cpp
         src/win32/native_modbus_scan_ui_state.cpp
         src/win32/native_modbus_scan_worker.cpp
         src/win32/native_reconnect_state.cpp
@@ -303,6 +304,19 @@ set_target_properties(native_modbus_scan_ui_state_tests PROPERTIES
 )
 target_include_directories(native_modbus_scan_ui_state_tests PRIVATE src)
 add_test(NAME native_modbus_scan_ui_state_tests COMMAND native_modbus_scan_ui_state_tests)
+
+add_executable(native_modbus_scan_request_tests
+    tests/native_modbus_scan_request_tests.cpp
+    src/win32/native_modbus_scan_request.cpp
+)
+set_target_properties(native_modbus_scan_request_tests PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+target_link_libraries(native_modbus_scan_request_tests PRIVATE svm_slim_core)
+target_include_directories(native_modbus_scan_request_tests PRIVATE src)
+add_test(NAME native_modbus_scan_request_tests COMMAND native_modbus_scan_request_tests)
 
 add_executable(native_serial_io_state_tests
     tests/native_serial_io_state_tests.cpp
