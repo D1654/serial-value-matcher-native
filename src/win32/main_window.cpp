@@ -37,6 +37,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <cwctype>
 #include <fstream>
 #include <memory>
 #include <sstream>
