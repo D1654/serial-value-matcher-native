@@ -4,6 +4,7 @@
 
 #include "win32/native_candidate_cache_state.h"
 #include "win32/native_connection_ui_state.h"
+#include "win32/native_control_utils.h"
 #include "win32/native_layout_metrics.h"
 #include "win32/native_analysis_workflow.h"
 #include "win32/native_log_view.h"
@@ -80,47 +81,6 @@ HFONT createSystemUiFont() {
     }
 
     return nullptr;
-}
-
-void showControl(HWND control, bool visible) {
-    if (control == nullptr) {
-        return;
-    }
-    const bool currentlyVisible = IsWindowVisible(control) != FALSE;
-    if (currentlyVisible != visible) {
-        ShowWindow(control, visible ? SW_SHOWNA : SW_HIDE);
-    }
-}
-
-void showControlFast(HWND control, bool visible) {
-    if (control == nullptr) {
-        return;
-    }
-    const auto style = static_cast<LONG_PTR>(GetWindowLongPtrW(control, GWL_STYLE));
-    const bool currentlyVisible = (style & WS_VISIBLE) != 0;
-    if (currentlyVisible == visible) {
-        return;
-    }
-    const UINT flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
-        | (visible ? SWP_SHOWWINDOW : SWP_HIDEWINDOW);
-    SetWindowPos(control, nullptr, 0, 0, 0, 0, flags);
-}
-
-void enableControl(HWND control, bool enabled) {
-    if (control == nullptr) {
-        return;
-    }
-    const bool currentlyEnabled = IsWindowEnabled(control) != FALSE;
-    if (currentlyEnabled != enabled) {
-        EnableWindow(control, enabled ? TRUE : FALSE);
-    }
-}
-
-void moveTopControl(HWND control, int x, int y, int width, int height) {
-    if (control != nullptr) {
-        SetWindowPos(control, HWND_TOP, x, y, width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-        InvalidateRect(control, nullptr, TRUE);
-    }
 }
 
 HWND createSingleLineEdit(HWND parent, HINSTANCE instance, int controlId, const wchar_t* text, DWORD extraStyle = 0) {
@@ -277,27 +237,6 @@ HWND createProgressControl(HWND parent, HINSTANCE instance, int controlId) {
         nullptr);
 }
 
-int singleLineEditHeight(HFONT font, int row) {
-    int textHeight = 12;
-    HDC dc = GetDC(nullptr);
-    if (dc != nullptr) {
-        HGDIOBJ oldFont = nullptr;
-        if (font != nullptr) {
-            oldFont = SelectObject(dc, font);
-        }
-        TEXTMETRICW metrics = {};
-        if (GetTextMetricsW(dc, &metrics) != FALSE) {
-            textHeight = metrics.tmHeight;
-        }
-        if (oldFont != nullptr) {
-            SelectObject(dc, oldFont);
-        }
-        ReleaseDC(nullptr, dc);
-    }
-    const int naturalHeight = textHeight + GetSystemMetrics(SM_CYBORDER) * 2 + 4;
-    return std::clamp(naturalHeight, std::max(14, row - 5), row);
-}
-
 std::wstring formatLogCacheLimit(std::size_t charLimit) {
     if (charLimit >= 1000000 && charLimit % 1000000 == 0) {
         return std::to_wstring(charLimit / 1000000) + L"M";
@@ -317,29 +256,6 @@ void writeSelfTestTrace(const char* message) {
     std::ofstream output(path, std::ios::app);
     if (output) {
         output << message << '\n';
-    }
-}
-
-void addControlFont(HWND control, HFONT font) {
-    if (control != nullptr && font != nullptr) {
-        SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-    }
-}
-
-bool hasWindowClass(HWND control, const wchar_t* expectedClassName) {
-    wchar_t className[32] = {};
-    if (control == nullptr || GetClassNameW(control, className, static_cast<int>(sizeof(className) / sizeof(className[0]))) == 0) {
-        return false;
-    }
-    return lstrcmpiW(className, expectedClassName) == 0;
-}
-
-void applyClassicControlChrome(HWND control) {
-    if (control == nullptr) {
-        return;
-    }
-    if (hasWindowClass(control, L"ComboBox")) {
-        SendMessageW(control, CB_SETMINVISIBLE, 10, 0);
     }
 }
 
@@ -794,7 +710,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
     }
     case WM_CTLCOLORSTATIC: {
         HWND control = reinterpret_cast<HWND>(lParam);
-        if (hasWindowClass(control, L"Edit") || hasWindowClass(control, L"RICHEDIT50W")) {
+        if (nativeControlHasClass(control, L"Edit") || nativeControlHasClass(control, L"RICHEDIT50W")) {
             break;
         }
         HDC dc = reinterpret_cast<HDC>(wParam);
@@ -1958,230 +1874,6 @@ void NativeMainWindow::layoutControls(int width, int height) {
         statusRight -= counterWidth + gap;
     }
     MoveWindow(statusText_, margin, statusY, std::max(1, statusRight - margin), statusHeight, TRUE);
-}
-
-void NativeMainWindow::setDefaultFonts() {
-    for (HWND child = GetWindow(window_, GW_CHILD); child != nullptr; child = GetWindow(child, GW_HWNDNEXT)) {
-        addControlFont(child, uiFont_);
-        applyClassicControlChrome(child);
-    }
-}
-
-void NativeMainWindow::hideWorkbenchTabControls() {
-    for (HWND control : {
-             sendModeCombo_,
-             textEncodingCombo_,
-             lineEndingCombo_,
-             historyCombo_,
-             sendEdit_,
-             sendButton_,
-             timedSendCheck_,
-             timedPeriodLabel_,
-             timedPeriodEdit_,
-             filePathLabel_,
-             filePathEdit_,
-             fileBrowseButton_,
-             fileSendButton_,
-             fileStopButton_,
-             fileDelayLabel_,
-             fileDelayCombo_,
-             fileProgressLabel_,
-             fileProgress_,
-             workflowHint_,
-             scanSectionLabel_,
-             scanSlaveLabel_,
-             scanSlaveEdit_,
-             scanFunctionLabel_,
-             scanFunctionCombo_,
-             scanStartLabel_,
-             scanStartEdit_,
-             scanEndLabel_,
-             scanEndEdit_,
-             modbusProgressLabel_,
-             modbusProgress_,
-             modbusProgressText_,
-             modbusButton_,
-             analysisSectionLabel_,
-             targetStatic_,
-             targetLabelEdit_,
-             targetValueStatic_,
-             targetValueEdit_,
-             targetUnitStatic_,
-             targetUnitEdit_,
-             toleranceStatic_,
-             toleranceEdit_,
-             candidateStatic_,
-             candidateCombo_,
-             analysisButton_,
-             ruleVerifyButton_,
-             exportReportButton_,
-             logCacheLabel_,
-             logCacheCombo_,
-             rawEventRetentionLabel_,
-             rawEventRetentionCombo_,
-         }) {
-        showControlFast(control, false);
-    }
-    for (HWND control : quickSendEdits_) {
-        showControlFast(control, false);
-    }
-    for (HWND control : quickSendButtons_) {
-        showControlFast(control, false);
-    }
-}
-
-void NativeMainWindow::setWorkbenchTabControlsVisible(int tabIndex, bool visible) {
-    const auto showCached = [&](HWND control, bool cachedVisible) {
-        showControlFast(control, visible && cachedVisible);
-    };
-
-    if (tabIndex == 0) {
-        showCached(sendModeCombo_, workbenchVisibility_.singleFormatRow);
-        showCached(textEncodingCombo_, workbenchVisibility_.singleFormatRow);
-        showCached(lineEndingCombo_, workbenchVisibility_.singleFormatRow);
-        showCached(historyCombo_, workbenchVisibility_.singleHistory);
-        showCached(sendEdit_, workbenchVisibility_.singleSend);
-        showCached(sendButton_, workbenchVisibility_.singleSend);
-        showCached(timedSendCheck_, workbenchVisibility_.singleTimed);
-        showCached(timedPeriodLabel_, workbenchVisibility_.singleTimed);
-        showCached(timedPeriodEdit_, workbenchVisibility_.singleTimed);
-    } else if (tabIndex == 1) {
-        for (std::size_t index = 0; index < quickSendEdits_.size(); ++index) {
-            showCached(quickSendEdits_[index], workbenchVisibility_.quickSlots[index]);
-            showCached(quickSendButtons_[index], workbenchVisibility_.quickSlots[index]);
-        }
-    } else if (tabIndex == 2) {
-        showCached(filePathLabel_, workbenchVisibility_.fileFirstRow);
-        showCached(filePathEdit_, workbenchVisibility_.fileFirstRow);
-        showCached(fileBrowseButton_, workbenchVisibility_.fileFirstRow);
-        showCached(fileSendButton_, workbenchVisibility_.fileFirstRow);
-        showCached(fileStopButton_, workbenchVisibility_.fileFirstRow);
-        showCached(fileDelayLabel_, workbenchVisibility_.fileSecondRow);
-        showCached(fileDelayCombo_, workbenchVisibility_.fileSecondRow);
-        showCached(fileProgressLabel_, workbenchVisibility_.fileSecondRow);
-        showCached(fileProgress_, workbenchVisibility_.fileSecondRow);
-    } else if (tabIndex == 3) {
-        showCached(scanSectionLabel_, workbenchVisibility_.scanSection);
-        showCached(scanSlaveLabel_, workbenchVisibility_.scanParameterRow);
-        showCached(scanSlaveEdit_, workbenchVisibility_.scanParameterRow);
-        showCached(scanFunctionLabel_, workbenchVisibility_.scanParameterRow);
-        showCached(scanFunctionCombo_, workbenchVisibility_.scanParameterRow);
-        showCached(scanStartLabel_, workbenchVisibility_.scanParameterRow);
-        showCached(scanStartEdit_, workbenchVisibility_.scanParameterRow);
-        showCached(scanEndLabel_, workbenchVisibility_.scanParameterRow);
-        showCached(scanEndEdit_, workbenchVisibility_.scanParameterRow);
-        showCached(modbusButton_, workbenchVisibility_.scanParameterRow);
-        showCached(modbusProgressLabel_, workbenchVisibility_.scanProgressRow);
-        showCached(modbusProgress_, workbenchVisibility_.scanProgressRow);
-        showCached(modbusProgressText_, workbenchVisibility_.scanProgressRow);
-        showCached(analysisSectionLabel_, workbenchVisibility_.scanAnalysisSection);
-        showCached(targetStatic_, workbenchVisibility_.scanTargetRow);
-        showCached(targetLabelEdit_, workbenchVisibility_.scanTargetRow);
-        showCached(targetValueStatic_, workbenchVisibility_.scanTargetRow);
-        showCached(targetValueEdit_, workbenchVisibility_.scanTargetRow);
-        showCached(targetUnitStatic_, workbenchVisibility_.scanTargetRow);
-        showCached(targetUnitEdit_, workbenchVisibility_.scanTargetRow);
-        showCached(toleranceStatic_, workbenchVisibility_.scanTargetRow);
-        showCached(toleranceEdit_, workbenchVisibility_.scanTargetRow);
-        showCached(candidateStatic_, workbenchVisibility_.scanCandidateRow);
-        showCached(candidateCombo_, workbenchVisibility_.scanCandidateRow);
-        showCached(analysisButton_, workbenchVisibility_.scanCandidateRow);
-        showCached(ruleVerifyButton_, workbenchVisibility_.scanCandidateRow);
-        showCached(exportReportButton_, workbenchVisibility_.scanCandidateRow);
-    } else if (tabIndex == 4) {
-        showCached(logCacheLabel_, workbenchVisibility_.settingsRow);
-        showCached(logCacheCombo_, workbenchVisibility_.settingsRow);
-        showCached(rawEventRetentionLabel_, workbenchVisibility_.settingsRow);
-        showCached(rawEventRetentionCombo_, workbenchVisibility_.settingsRow);
-    }
-}
-
-void NativeMainWindow::updateSideHelp(int tabIndex) {
-    if (sideHelpTitle_ == nullptr || sideHelpText_ == nullptr) {
-        return;
-    }
-
-    if (!workbenchTabState_.shouldUpdateHelp(tabIndex)) {
-        return;
-    }
-
-    TextId helpId = T::SideHelpSingle;
-    switch (workbenchTabState_.helpTopicForTab(tabIndex)) {
-    case NativeWorkbenchHelpTopic::Quick:
-        helpId = T::SideHelpQuick;
-        break;
-    case NativeWorkbenchHelpTopic::File:
-        helpId = T::SideHelpFile;
-        break;
-    case NativeWorkbenchHelpTopic::Scan:
-        helpId = T::SideHelpScan;
-        break;
-    case NativeWorkbenchHelpTopic::Settings:
-        helpId = T::SideHelpSettings;
-        break;
-    case NativeWorkbenchHelpTopic::Single:
-    default:
-        helpId = T::SideHelpSingle;
-        break;
-    }
-
-    SetWindowTextW(sideHelpTitle_, tx(T::SideHelpTitle));
-    SetWindowTextW(sideHelpText_, tx(helpId));
-    workbenchTabState_.markHelpUpdated(tabIndex);
-}
-
-void NativeMainWindow::applyWorkbenchTabVisibility(int tabIndex) {
-    const bool canRedrawWorkbench = workbenchRedrawRect_.right > workbenchRedrawRect_.left
-        && workbenchRedrawRect_.bottom > workbenchRedrawRect_.top;
-    const bool suspendRedraw = canRedrawWorkbench && IsWindowVisible(window_) != FALSE;
-    const NativeWorkbenchTabApplyPlan plan = workbenchTabState_.beginApply(
-        tabIndex,
-        workbenchVisibilityReady_,
-        workbenchVisibility_.pageVisible,
-        canRedrawWorkbench,
-        suspendRedraw);
-    if (plan.skip) {
-        return;
-    }
-
-    updateSideHelp(tabIndex);
-    if (suspendRedraw) {
-        SendMessageW(window_, WM_SETREDRAW, FALSE, 0);
-    }
-    const auto resumeRedraw = [&]() {
-        if (suspendRedraw) {
-            SendMessageW(window_, WM_SETREDRAW, TRUE, 0);
-            RedrawWindow(window_, &workbenchRedrawRect_, nullptr, RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN);
-        }
-    };
-
-    if (plan.hideAllControls) {
-        hideWorkbenchTabControls();
-    } else if (plan.hidePreviousTab) {
-        setWorkbenchTabControlsVisible(plan.previousTabIndex, false);
-    }
-
-    if (!plan.showRequestedTab) {
-        workbenchTabState_.finishApply(tabIndex);
-        resumeRedraw();
-        return;
-    }
-
-    setWorkbenchTabControlsVisible(tabIndex, true);
-
-    if (plan.redrawAfterApply) {
-        RedrawWindow(window_, &workbenchRedrawRect_, nullptr, RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN);
-    }
-    workbenchTabState_.finishApply(tabIndex);
-    resumeRedraw();
-}
-
-void NativeMainWindow::updateWorkbenchTab() {
-    int tabIndex = static_cast<int>(TabCtrl_GetCurSel(workTabs_));
-    if (tabIndex < 0) {
-        tabIndex = 0;
-    }
-    applyWorkbenchTabVisibility(tabIndex);
 }
 
 void NativeMainWindow::refreshPorts() {
