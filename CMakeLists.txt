@@ -82,6 +82,7 @@ if(SVM_BUILD_WIN32_APP)
         WIN32
         src/win32/main.cpp
         src/win32/main_window.cpp
+        src/win32/main_window_layout.cpp
         src/win32/main_window_log.cpp
         src/win32/main_window_workbench.cpp
         src/win32/native_analysis_workflow.cpp
