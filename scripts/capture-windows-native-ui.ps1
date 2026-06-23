@@ -7,7 +7,8 @@ param(
     [int]$DefaultWidth = 1212,
     [int]$DefaultHeight = 753,
     [int]$CompactWidth = 760,
-    [int]$CompactHeight = 520
+    [int]$CompactHeight = 520,
+    [switch]$SkipUiPerfTest
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,16 +41,22 @@ if (Test-Path $outputPath) {
 New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
 
 $uiPerfLog = Join-Path $outputPath "ui-perf-test.log"
-$previousSelfTestLog = [Environment]::GetEnvironmentVariable("SVM_NATIVE_SELF_TEST_LOG", "Process")
-[Environment]::SetEnvironmentVariable("SVM_NATIVE_SELF_TEST_LOG", $uiPerfLog, "Process")
-try {
-    Write-Host "运行 UI 性能门禁..."
-    $uiPerfTest = Start-Process -FilePath $ExePath -ArgumentList "--ui-perf-test" -Wait -PassThru
-    if ($uiPerfTest.ExitCode -ne 0) {
-        throw "UI 性能门禁失败，退出码：$($uiPerfTest.ExitCode)"
+if (-not $SkipUiPerfTest) {
+    $previousSelfTestLog = [Environment]::GetEnvironmentVariable("SVM_NATIVE_SELF_TEST_LOG", "Process")
+    [Environment]::SetEnvironmentVariable("SVM_NATIVE_SELF_TEST_LOG", $uiPerfLog, "Process")
+    try {
+        Write-Host "运行 UI 性能门禁..."
+        $uiPerfTest = Start-Process -FilePath $ExePath -ArgumentList "--ui-perf-test" -Wait -PassThru
+        if ($uiPerfTest.ExitCode -ne 0) {
+            throw "UI 性能门禁失败，退出码：$($uiPerfTest.ExitCode)"
+        }
+    } finally {
+        [Environment]::SetEnvironmentVariable("SVM_NATIVE_SELF_TEST_LOG", $previousSelfTestLog, "Process")
     }
-} finally {
-    [Environment]::SetEnvironmentVariable("SVM_NATIVE_SELF_TEST_LOG", $previousSelfTestLog, "Process")
+} else {
+    Write-Host "跳过 UI 性能门禁：调用方已完成独立验证。"
+    "UI 性能门禁已由 workflow 独立步骤执行，本截图脚本跳过重复执行。" |
+        Set-Content -Path $uiPerfLog -Encoding UTF8
 }
 
 try {

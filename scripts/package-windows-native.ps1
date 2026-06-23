@@ -4,7 +4,9 @@ param(
     [string]$PackageDir = "artifacts\windows-native",
     [int64]$MaxZipBytes = 5MB,
     [int64]$MaxExtractedBytes = 8MB,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$SkipSelfTest,
+    [switch]$SkipUiPerfTest
 )
 
 $ErrorActionPreference = "Stop"
@@ -54,16 +56,24 @@ if (-not $exePath) {
 }
 Write-Host "可执行文件：$exePath"
 
-Write-Host "运行 native self-test..."
-$selfTest = Start-Process -FilePath $exePath -ArgumentList "--self-test" -Wait -PassThru
-if ($selfTest.ExitCode -ne 0) {
-    throw "native self-test 失败，退出码：$($selfTest.ExitCode)"
+if (-not $SkipSelfTest) {
+    Write-Host "运行 native self-test..."
+    $selfTest = Start-Process -FilePath $exePath -ArgumentList "--self-test" -Wait -PassThru
+    if ($selfTest.ExitCode -ne 0) {
+        throw "native self-test 失败，退出码：$($selfTest.ExitCode)"
+    }
+} else {
+    Write-Host "跳过 native self-test：调用方已完成独立验证。"
 }
 
-Write-Host "运行 UI 性能门禁..."
-$uiPerfTest = Start-Process -FilePath $exePath -ArgumentList "--ui-perf-test" -Wait -PassThru
-if ($uiPerfTest.ExitCode -ne 0) {
-    throw "UI 性能门禁失败，退出码：$($uiPerfTest.ExitCode)"
+if (-not $SkipUiPerfTest) {
+    Write-Host "运行 UI 性能门禁..."
+    $uiPerfTest = Start-Process -FilePath $exePath -ArgumentList "--ui-perf-test" -Wait -PassThru
+    if ($uiPerfTest.ExitCode -ne 0) {
+        throw "UI 性能门禁失败，退出码：$($uiPerfTest.ExitCode)"
+    }
+} else {
+    Write-Host "跳过 UI 性能门禁：调用方已完成独立验证。"
 }
 
 New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null

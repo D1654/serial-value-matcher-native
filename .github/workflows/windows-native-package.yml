@@ -57,6 +57,8 @@ jobs:
           -BuildDir $env:BUILD_DIR
           -Config Release
           -SkipBuild
+          -SkipSelfTest
+          -SkipUiPerfTest
 
       - name: Report native package size
         shell: pwsh

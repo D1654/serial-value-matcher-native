@@ -61,6 +61,7 @@ jobs:
           -BuildDir $env:BUILD_DIR
           -Config Release
           -OutputDir $env:UI_ARTIFACT_DIR
+          -SkipUiPerfTest
 
       - name: Summarize screenshots
         shell: pwsh
