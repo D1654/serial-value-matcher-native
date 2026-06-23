@@ -1155,13 +1155,17 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         return 0;
     case WM_DESTROY:
         saveUiPreferences();
-        KillTimer(window_, IDT_SERIAL_POLL);
-        KillTimer(window_, IDT_RECONNECT);
-        KillTimer(window_, IDT_LOG_FILTER);
-        KillTimer(window_, IDT_TIMED_SEND);
-        KillTimer(window_, IDT_FILE_SEND);
-        KillTimer(window_, IDT_STATUS_CLOCK);
-        KillTimer(window_, IDT_LOG_FLUSH);
+        for (UINT_PTR timerId : {
+                 IDT_SERIAL_POLL,
+                 IDT_RECONNECT,
+                 IDT_LOG_FILTER,
+                 IDT_TIMED_SEND,
+                 IDT_FILE_SEND,
+                 IDT_STATUS_CLOCK,
+                 IDT_LOG_FLUSH,
+             }) {
+            KillTimer(window_, timerId);
+        }
         stopFileSend({});
         requestCancelModbusScan();
         closeModbusScanThread();
