@@ -16,6 +16,7 @@
 #include "win32/native_send_history_state.h"
 #include "win32/native_status_counters_state.h"
 #include "win32/native_serial_profile_codec.h"
+#include "win32/native_time_utils.h"
 #include "win32/native_ui_preferences.h"
 #include "win32/native_workbench_tab_state.h"
 #include "win32/resource.h"
@@ -29,13 +30,11 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <chrono>
 #include <commctrl.h>
 #include <commdlg.h>
 #include <richedit.h>
 #include <cstdio>
 #include <cstdlib>
-#include <ctime>
 #include <cwctype>
 #include <fstream>
 #include <memory>
@@ -321,16 +320,6 @@ void writeSelfTestTrace(const char* message) {
     }
 }
 
-std::string timestampText() {
-    const auto now = std::chrono::system_clock::now();
-    const std::time_t time = std::chrono::system_clock::to_time_t(now);
-    std::tm utc = {};
-    gmtime_s(&utc, &time);
-    char buffer[32] = {};
-    std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ", &utc);
-    return buffer;
-}
-
 void addControlFont(HWND control, HFONT font) {
     if (control != nullptr && font != nullptr) {
         SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
@@ -432,19 +421,6 @@ double textToDouble(HWND control, double fallback, bool* ok = nullptr) {
     GetWindowTextW(control, text.data(), length + 1);
     text.resize(static_cast<std::size_t>(length));
     return textToDoubleText(text, fallback, ok);
-}
-
-std::string timestampIdText() {
-    const auto now = std::chrono::system_clock::now();
-    const std::time_t time = std::chrono::system_clock::to_time_t(now);
-    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000;
-    std::tm utc = {};
-    gmtime_s(&utc, &time);
-    char buffer[32] = {};
-    std::strftime(buffer, sizeof(buffer), "%Y%m%d%H%M%S", &utc);
-    char suffix[8] = {};
-    std::snprintf(suffix, sizeof(suffix), "%03lld", static_cast<long long>(millis));
-    return std::string(buffer) + suffix;
 }
 
 std::wstring portDisplayText(const SerialPortDescriptor& port) {
@@ -585,7 +561,7 @@ bool NativeMainWindow::runSelfTest() {
     native_storage::RawIoEvent event;
     event.sessionId = "self-test";
     event.direction = "Tx";
-    event.timestampUtc = timestampText();
+    event.timestampUtc = nativeUtcTimestampText();
     event.endpoint = "COM1";
     event.payload = {0x01, 0x03, 0x00, 0x00};
 
@@ -596,21 +572,21 @@ bool NativeMainWindow::runSelfTest() {
     profile.parity = "None";
     profile.stopBits = "One";
     profile.flowControl = "None";
-    profile.updatedAtUtc = timestampText();
+    profile.updatedAtUtc = nativeUtcTimestampText();
 
     native_storage::SendHistoryEntry history;
     history.content = "AT+\xE6\xB5\x8B\xE8\xAF\x95";
     history.payloadMode = 0;
     history.lineEnding = 0;
     history.textEncodingCodePage = CP_UTF8;
-    history.sentAtUtc = timestampText();
+    history.sentAtUtc = nativeUtcTimestampText();
 
     native_storage::UiPreferences preferences;
     preferences.logThemeIndex = 1;
     preferences.logFormat = 4;
     preferences.logEncodingCodePage = CP_UTF8;
     preferences.showLogTimestamps = false;
-    preferences.updatedAtUtc = timestampText();
+    preferences.updatedAtUtc = nativeUtcTimestampText();
 
     bool ok = true;
     const auto storageFail = [&](const char* step) {
@@ -2328,7 +2304,7 @@ void NativeMainWindow::saveCurrentSerialProfile() {
     profile.flowControl = nativeSerialFlowControlKey(options.flowControl);
     profile.dataTerminalReady = options.dataTerminalReady;
     profile.requestToSend = options.requestToSend;
-    profile.updatedAtUtc = timestampText();
+    profile.updatedAtUtc = nativeUtcTimestampText();
     if (!store_.saveSerialProfile(profile)) {
         setStatus(utf8ToWide(store_.lastErrorText()));
         return;
@@ -2418,7 +2394,7 @@ void NativeMainWindow::saveUiPreferences() {
     if (lastSavedUiPreferences_.has_value() && nativeUiPreferencesSameSettings(*lastSavedUiPreferences_, preferences)) {
         return;
     }
-    preferences.updatedAtUtc = timestampText();
+    preferences.updatedAtUtc = nativeUtcTimestampText();
     if (!store_.saveUiPreferences(preferences)) {
         if (!uiPreferenceSaveFailureShown_) {
             uiPreferenceSaveFailureShown_ = true;
@@ -2560,7 +2536,7 @@ bool NativeMainWindow::sendPayloadFromText(const std::wstring& text, bool saveHi
             static_cast<int>(selectedComboData(sendModeCombo_, 0)),
             static_cast<int>(selectedComboData(lineEndingCombo_, 0)),
             static_cast<int>(selectedTextCodePage()),
-            timestampText());
+            nativeUtcTimestampText());
         store_.saveSendHistory(history);
         refreshSendHistory();
     }
@@ -2799,7 +2775,7 @@ void NativeMainWindow::pollSerial() {
         native_storage::RawIoEvent event;
         event.sessionId = sessionId_;
         event.direction = "Rx";
-        event.timestampUtc = timestampText();
+        event.timestampUtc = nativeUtcTimestampText();
         event.endpoint = endpoint;
         event.payload = payload;
         events.push_back(std::move(event));
@@ -3123,8 +3099,8 @@ void NativeMainWindow::runModbusScan() {
     requestInput.functionCode = static_cast<::svm::core::Byte>(selectedComboData(scanFunctionCombo_, 3));
     requestInput.startAddress = textToInt(scanStartEdit_, 0);
     requestInput.endAddress = textToInt(scanEndEdit_, 15);
-    requestInput.scanSessionId = "scan-" + timestampIdText();
-    requestInput.startedAtUtc = timestampText();
+    requestInput.scanSessionId = "scan-" + nativeTimestampIdText();
+    requestInput.startedAtUtc = nativeUtcTimestampText();
 
     auto requestResult = nativeBuildModbusScanRequest(requestInput);
     if (!requestResult.ok) {
@@ -3370,7 +3346,7 @@ void NativeMainWindow::showAnalysisWorkspace() {
     bool toleranceOk = false;
     const double tolerance = std::max(0.0, textToDouble(toleranceEdit_, 0.0, &toleranceOk));
 
-    const std::string runId = "match-" + timestampIdText();
+    const std::string runId = "match-" + nativeTimestampIdText();
     const NativeCandidateAnalysisBuildResult analysis = nativeBuildCandidateAnalysisRun(
         *session,
         observations,
@@ -3379,9 +3355,9 @@ void NativeMainWindow::showAnalysisWorkspace() {
         wideToUtf8(analysisInputText(targetUnitEdit_)),
         toleranceOk ? tolerance : 0.0,
         runId,
-        timestampText(),
-        timestampText(),
-        timestampText());
+        nativeUtcTimestampText(),
+        nativeUtcTimestampText(),
+        nativeUtcTimestampText());
     if (!analysis.success) {
         setStatus(utf8ToWide(analysis.errorMessage));
         return;
@@ -3582,7 +3558,7 @@ bool NativeMainWindow::saveRuleFromCandidate(const native_storage::MatchCandidat
     rule.confidenceLevel = wideToUtf8(candidate.score >= 85.0 ? L"\u9AD8" : (candidate.score >= 65.0 ? L"\u4E2D" : L"\u4F4E"));
     rule.stabilityScore = candidate.score;
     rule.evidenceSummary = candidate.evidenceText;
-    rule.createdAtUtc = timestampText();
+    rule.createdAtUtc = nativeUtcTimestampText();
     if (!store_.saveProtocolFieldRule(rule)) {
         setStatus(utf8ToWide(store_.lastErrorText()));
         return false;
@@ -3613,8 +3589,8 @@ bool NativeMainWindow::runRuleVerification(const native_storage::ScanSessionReco
         session,
         rules,
         observations,
-        "verify-" + timestampIdText(),
-        timestampText());
+        "verify-" + nativeTimestampIdText(),
+        nativeUtcTimestampText());
 
     if (!store_.saveRuleVerificationRun(verification.run, verification.results)) {
         setStatus(utf8ToWide(store_.lastErrorText()));
@@ -3656,7 +3632,7 @@ void NativeMainWindow::saveRawEvent(std::string direction, const std::vector<std
     native_storage::RawIoEvent event;
     event.sessionId = sessionId_;
     event.direction = std::move(direction);
-    event.timestampUtc = timestampText();
+    event.timestampUtc = nativeUtcTimestampText();
     event.endpoint = serialPort_.endpoint();
     event.payload = payload;
     saveRawEvents({std::move(event)});

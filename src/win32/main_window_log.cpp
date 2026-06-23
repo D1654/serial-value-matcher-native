@@ -3,17 +3,15 @@
 #if defined(_WIN32)
 
 #include "win32/native_log_view.h"
+#include "win32/native_time_utils.h"
 #include "win32/native_ui_preferences.h"
 #include "win32/resource.h"
 #include "win32/ui_text.h"
 #include "win32/utf8_win32.h"
 
 #include <algorithm>
-#include <chrono>
 #include <commdlg.h>
-#include <cstdio>
 #include <cstring>
-#include <ctime>
 #include <cwchar>
 #include <deque>
 #include <filesystem>
@@ -34,33 +32,6 @@ const wchar_t* tx(T id) {
     return uiText(id);
 }
 
-std::wstring localClockText() {
-    SYSTEMTIME now = {};
-    GetLocalTime(&now);
-    wchar_t buffer[32] = {};
-    swprintf_s(
-        buffer,
-        L"%02u:%02u:%02u.%03u",
-        static_cast<unsigned int>(now.wHour),
-        static_cast<unsigned int>(now.wMinute),
-        static_cast<unsigned int>(now.wSecond),
-        static_cast<unsigned int>(now.wMilliseconds));
-    return buffer;
-}
-
-std::string timestampIdText() {
-    const auto now = std::chrono::system_clock::now();
-    const std::time_t time = std::chrono::system_clock::to_time_t(now);
-    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000;
-    std::tm utc = {};
-    gmtime_s(&utc, &time);
-    char buffer[32] = {};
-    std::strftime(buffer, sizeof(buffer), "%Y%m%d%H%M%S", &utc);
-    char suffix[8] = {};
-    std::snprintf(suffix, sizeof(suffix), "%03lld", static_cast<long long>(millis));
-    return std::string(buffer) + suffix;
-}
-
 } // namespace
 
 void NativeMainWindow::appendLog(const std::wstring& line) {
@@ -70,7 +41,7 @@ void NativeMainWindow::appendLog(const std::wstring& line) {
 void NativeMainWindow::appendLog(NativeLogKind kind, const std::wstring& line) {
     NativeLogEntry entry;
     entry.kind = kind;
-    entry.timestamp = localClockText();
+    entry.timestamp = nativeLocalClockText();
     entry.text = line;
     addLogEntry(std::move(entry));
 }
@@ -78,7 +49,7 @@ void NativeMainWindow::appendLog(NativeLogKind kind, const std::wstring& line) {
 void NativeMainWindow::appendPayloadLog(NativeLogKind kind, const std::vector<std::uint8_t>& payload) {
     NativeLogEntry entry;
     entry.kind = kind;
-    entry.timestamp = localClockText();
+    entry.timestamp = nativeLocalClockText();
     entry.payloadPrefix = std::wstring(nativeLogPayloadPrefix(kind));
     entry.payload = payload;
     entry.hasPayload = true;
@@ -412,7 +383,7 @@ void NativeMainWindow::exportVisibleLog() {
 
     wchar_t fileName[MAX_PATH] = {};
     const std::wstring defaultName = uiString(T::LogExportDefaultPrefix)
-        + utf8ToWide(timestampIdText())
+        + utf8ToWide(nativeTimestampIdText())
         + L".txt";
     wcsncpy_s(fileName, defaultName.c_str(), _TRUNCATE);
 

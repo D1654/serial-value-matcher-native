@@ -101,6 +101,7 @@ if(SVM_BUILD_WIN32_APP)
         src/win32/native_send_control_state.cpp
         src/win32/native_send_history_state.cpp
         src/win32/native_status_counters_state.cpp
+        src/win32/native_time_utils.cpp
         src/win32/native_ui_preferences.cpp
         src/win32/native_workbench_tab_state.cpp
         src/win32/ui_text.cpp
