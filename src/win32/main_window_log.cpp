@@ -2,7 +2,9 @@
 
 #if defined(_WIN32)
 
+#include "win32/native_control_utils.h"
 #include "win32/native_log_view.h"
+#include "win32/native_send_codec.h"
 #include "win32/native_time_utils.h"
 #include "win32/native_ui_preferences.h"
 #include "win32/resource.h"
@@ -54,6 +56,26 @@ void NativeMainWindow::appendPayloadLog(NativeLogKind kind, const std::vector<st
     entry.payload = payload;
     entry.hasPayload = true;
     addLogEntry(std::move(entry));
+}
+
+std::wstring NativeMainWindow::formatPayloadForLog(const std::vector<std::uint8_t>& payload) const {
+    const int mode = static_cast<int>(selectedComboData(logFormatCombo_, 0));
+    switch (mode) {
+    case 1:
+        return nativeBytesToDecimal(payload);
+    case 2:
+        return nativeBytesToBinary(payload);
+    case 3:
+        return nativeDecodeBytesToText(payload, selectedLogCodePage());
+    case 4:
+        return nativeBytesToHex(payload) + L" | " + nativeDecodeBytesToText(payload, selectedLogCodePage());
+    default:
+        return nativeBytesToHex(payload);
+    }
+}
+
+unsigned int NativeMainWindow::selectedLogCodePage() const {
+    return static_cast<unsigned int>(selectedComboData(logEncodingCombo_, CP_UTF8));
 }
 
 void NativeMainWindow::clearLog() {

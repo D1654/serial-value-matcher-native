@@ -1496,26 +1496,6 @@ void NativeMainWindow::setControlText(HWND control, const std::wstring& text) {
     SetWindowTextW(control, text.c_str());
 }
 
-std::wstring NativeMainWindow::formatPayloadForLog(const std::vector<std::uint8_t>& payload) const {
-    const int mode = static_cast<int>(selectedComboData(logFormatCombo_, 0));
-    switch (mode) {
-    case 1:
-        return nativeBytesToDecimal(payload);
-    case 2:
-        return nativeBytesToBinary(payload);
-    case 3:
-        return nativeDecodeBytesToText(payload, selectedLogCodePage());
-    case 4:
-        return nativeBytesToHex(payload) + L" | " + nativeDecodeBytesToText(payload, selectedLogCodePage());
-    default:
-        return nativeBytesToHex(payload);
-    }
-}
-
-unsigned int NativeMainWindow::selectedLogCodePage() const {
-    return static_cast<unsigned int>(selectedComboData(logEncodingCombo_, CP_UTF8));
-}
-
 void NativeMainWindow::runModbusScan() {
     if (serialIoState_.isOwnedBy(NativeSerialIoOwner::ModbusScan)) {
         requestCancelModbusScan();
