@@ -288,6 +288,10 @@ private:
     HWND txStatusText_ = nullptr;
     HWND rxStatusText_ = nullptr;
     HWND clockStatusText_ = nullptr;
+    std::wstring cachedStatusText_;
+    std::wstring cachedTxStatusText_;
+    std::wstring cachedRxStatusText_;
+    std::wstring cachedClockStatusText_;
     HFONT uiFont_ = nullptr;
     HMODULE richEditModule_ = nullptr;
     bool ownsUiFont_ = false;

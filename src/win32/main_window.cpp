@@ -3254,18 +3254,27 @@ void NativeMainWindow::exportVisibleLog() {
 }
 
 void NativeMainWindow::setStatus(const std::wstring& text) {
-    SetWindowTextW(statusText_, text.c_str());
+    if (statusText_ != nullptr && cachedStatusText_ != text) {
+        SetWindowTextW(statusText_, text.c_str());
+        cachedStatusText_ = text;
+    }
     updateStatusSegments();
 }
 
 void NativeMainWindow::updateStatusSegments() {
     if (txStatusText_ != nullptr) {
         const std::wstring txText = statusCountersState_.txStatusText();
-        SetWindowTextW(txStatusText_, txText.c_str());
+        if (cachedTxStatusText_ != txText) {
+            SetWindowTextW(txStatusText_, txText.c_str());
+            cachedTxStatusText_ = txText;
+        }
     }
     if (rxStatusText_ != nullptr) {
         const std::wstring rxText = statusCountersState_.rxStatusText();
-        SetWindowTextW(rxStatusText_, rxText.c_str());
+        if (cachedRxStatusText_ != rxText) {
+            SetWindowTextW(rxStatusText_, rxText.c_str());
+            cachedRxStatusText_ = rxText;
+        }
     }
     if (clockStatusText_ != nullptr) {
         SYSTEMTIME now = {};
@@ -3277,7 +3286,11 @@ void NativeMainWindow::updateStatusSegments() {
             static_cast<unsigned int>(now.wHour),
             static_cast<unsigned int>(now.wMinute),
             static_cast<unsigned int>(now.wSecond));
-        SetWindowTextW(clockStatusText_, buffer);
+        const std::wstring clockText(buffer);
+        if (cachedClockStatusText_ != clockText) {
+            SetWindowTextW(clockStatusText_, clockText.c_str());
+            cachedClockStatusText_ = clockText;
+        }
     }
 }
 
