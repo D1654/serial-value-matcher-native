@@ -16,6 +16,7 @@
 #include "win32/native_status_counters_state.h"
 #include "win32/native_serial_profile_codec.h"
 #include "win32/native_ui_preferences.h"
+#include "win32/native_workbench_tab_state.h"
 #include "win32/resource.h"
 #include "win32/ui_text.h"
 #include "win32/utf8_win32.h"
@@ -664,7 +665,7 @@ bool NativeMainWindow::runUiPerformanceTest() {
     constexpr int kIterations = 300;
     constexpr auto kMaxElapsed = std::chrono::milliseconds(12000);
     const std::uint64_t baselineLayoutPasses = window.layoutPassCount_;
-    const std::uint64_t baselineLayoutRevision = window.workbenchLayoutRevision_;
+    const std::uint64_t baselineLayoutRevision = window.workbenchTabState_.layoutRevision();
     const auto start = std::chrono::steady_clock::now();
     for (int index = 0; index < kIterations; ++index) {
         const int tabIndex = index % 5;
@@ -683,11 +684,11 @@ bool NativeMainWindow::runUiPerformanceTest() {
         writeSelfTestTrace("ui-perf-layout-regression");
         ok = false;
     }
-    if (window.workbenchLayoutRevision_ != baselineLayoutRevision) {
+    if (window.workbenchTabState_.layoutRevision() != baselineLayoutRevision) {
         writeSelfTestTrace("ui-perf-revision-regression");
         ok = false;
     }
-    if (window.workbenchTabApplyCount_ < static_cast<std::uint64_t>(kIterations)) {
+    if (window.workbenchTabState_.applyCount() < static_cast<std::uint64_t>(kIterations)) {
         writeSelfTestTrace("ui-perf-apply-count");
         ok = false;
     }
@@ -749,8 +750,8 @@ bool NativeMainWindow::runUiPerformanceTest() {
         kIterations,
         static_cast<long long>(elapsedMs.count()),
         static_cast<unsigned long long>(window.layoutPassCount_),
-        static_cast<unsigned long long>(window.workbenchTabApplyCount_),
-        static_cast<unsigned long long>(window.workbenchLayoutRevision_),
+        static_cast<unsigned long long>(window.workbenchTabState_.applyCount()),
+        static_cast<unsigned long long>(window.workbenchTabState_.layoutRevision()),
         kLogIterations,
         static_cast<long long>(logElapsedMs.count()),
         static_cast<unsigned long long>(window.logFlushPassCount_),
@@ -1970,7 +1971,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     workbenchVisibility_.settingsRow = settingsRowVisible;
     workbenchRedrawRect_ = {workInnerX, tabsY, workInnerX + workInnerWidth, tabsY + tabsHeight};
     workbenchVisibilityReady_ = true;
-    ++workbenchLayoutRevision_;
+    workbenchTabState_.noteLayoutChanged();
     int activeTab = static_cast<int>(TabCtrl_GetCurSel(workTabs_));
     if (activeTab < 0) {
         activeTab = 0;
@@ -2138,43 +2139,50 @@ void NativeMainWindow::updateSideHelp(int tabIndex) {
         return;
     }
 
+    if (!workbenchTabState_.shouldUpdateHelp(tabIndex)) {
+        return;
+    }
+
     TextId helpId = T::SideHelpSingle;
-    switch (tabIndex) {
-    case 1:
+    switch (workbenchTabState_.helpTopicForTab(tabIndex)) {
+    case NativeWorkbenchHelpTopic::Quick:
         helpId = T::SideHelpQuick;
         break;
-    case 2:
+    case NativeWorkbenchHelpTopic::File:
         helpId = T::SideHelpFile;
         break;
-    case 3:
+    case NativeWorkbenchHelpTopic::Scan:
         helpId = T::SideHelpScan;
         break;
-    case 4:
+    case NativeWorkbenchHelpTopic::Settings:
         helpId = T::SideHelpSettings;
         break;
+    case NativeWorkbenchHelpTopic::Single:
     default:
         helpId = T::SideHelpSingle;
         break;
     }
 
-    if (lastSideHelpTabIndex_ == tabIndex) {
-        return;
-    }
     SetWindowTextW(sideHelpTitle_, tx(T::SideHelpTitle));
     SetWindowTextW(sideHelpText_, tx(helpId));
-    lastSideHelpTabIndex_ = tabIndex;
+    workbenchTabState_.markHelpUpdated(tabIndex);
 }
 
 void NativeMainWindow::applyWorkbenchTabVisibility(int tabIndex) {
-    if (activeWorkbenchTabIndex_ == tabIndex && workbenchAppliedRevision_ == workbenchLayoutRevision_) {
-        return;
-    }
-
-    ++workbenchTabApplyCount_;
-    updateSideHelp(tabIndex);
     const bool canRedrawWorkbench = workbenchRedrawRect_.right > workbenchRedrawRect_.left
         && workbenchRedrawRect_.bottom > workbenchRedrawRect_.top;
     const bool suspendRedraw = canRedrawWorkbench && IsWindowVisible(window_) != FALSE;
+    const NativeWorkbenchTabApplyPlan plan = workbenchTabState_.beginApply(
+        tabIndex,
+        workbenchVisibilityReady_,
+        workbenchVisibility_.pageVisible,
+        canRedrawWorkbench,
+        suspendRedraw);
+    if (plan.skip) {
+        return;
+    }
+
+    updateSideHelp(tabIndex);
     if (suspendRedraw) {
         SendMessageW(window_, WM_SETREDRAW, FALSE, 0);
     }
@@ -2185,27 +2193,24 @@ void NativeMainWindow::applyWorkbenchTabVisibility(int tabIndex) {
         }
     };
 
-    const bool layoutChanged = workbenchAppliedRevision_ != workbenchLayoutRevision_;
-    if (layoutChanged) {
+    if (plan.hideAllControls) {
         hideWorkbenchTabControls();
-    } else if (activeWorkbenchTabIndex_ >= 0 && activeWorkbenchTabIndex_ != tabIndex) {
-        setWorkbenchTabControlsVisible(activeWorkbenchTabIndex_, false);
+    } else if (plan.hidePreviousTab) {
+        setWorkbenchTabControlsVisible(plan.previousTabIndex, false);
     }
 
-    if (!workbenchVisibilityReady_ || !workbenchVisibility_.pageVisible) {
-        activeWorkbenchTabIndex_ = tabIndex;
-        workbenchAppliedRevision_ = workbenchLayoutRevision_;
+    if (!plan.showRequestedTab) {
+        workbenchTabState_.finishApply(tabIndex);
         resumeRedraw();
         return;
     }
 
     setWorkbenchTabControlsVisible(tabIndex, true);
 
-    if (layoutChanged && !suspendRedraw && canRedrawWorkbench) {
+    if (plan.redrawAfterApply) {
         RedrawWindow(window_, &workbenchRedrawRect_, nullptr, RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN);
     }
-    activeWorkbenchTabIndex_ = tabIndex;
-    workbenchAppliedRevision_ = workbenchLayoutRevision_;
+    workbenchTabState_.finishApply(tabIndex);
     resumeRedraw();
 }
 

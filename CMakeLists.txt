@@ -100,6 +100,7 @@ if(SVM_BUILD_WIN32_APP)
         src/win32/native_send_history_state.cpp
         src/win32/native_status_counters_state.cpp
         src/win32/native_ui_preferences.cpp
+        src/win32/native_workbench_tab_state.cpp
         src/win32/ui_text.cpp
         src/win32/utf8_win32.cpp
         src/win32/app.rc
@@ -350,6 +351,18 @@ set_target_properties(native_ui_preferences_tests PROPERTIES
 )
 target_include_directories(native_ui_preferences_tests PRIVATE src)
 add_test(NAME native_ui_preferences_tests COMMAND native_ui_preferences_tests)
+
+add_executable(native_workbench_tab_state_tests
+    tests/native_workbench_tab_state_tests.cpp
+    src/win32/native_workbench_tab_state.cpp
+)
+set_target_properties(native_workbench_tab_state_tests PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+target_include_directories(native_workbench_tab_state_tests PRIVATE src)
+add_test(NAME native_workbench_tab_state_tests COMMAND native_workbench_tab_state_tests)
 
 add_executable(native_log_filter_state_tests
     tests/native_log_filter_state_tests.cpp

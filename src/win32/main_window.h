@@ -24,6 +24,7 @@
 #include "win32/native_send_control_state.h"
 #include "win32/native_send_history_state.h"
 #include "win32/native_status_counters_state.h"
+#include "win32/native_workbench_tab_state.h"
 #include "win32/win32_serial_port.h"
 
 #include <array>
@@ -294,12 +295,8 @@ private:
     WorkbenchVisibility workbenchVisibility_;
     bool workbenchVisibilityReady_ = false;
     RECT workbenchRedrawRect_ = {};
-    int lastSideHelpTabIndex_ = -1;
-    int activeWorkbenchTabIndex_ = -1;
+    NativeWorkbenchTabState workbenchTabState_;
     std::uint64_t layoutPassCount_ = 0;
-    std::uint64_t workbenchLayoutRevision_ = 0;
-    std::uint64_t workbenchAppliedRevision_ = 0;
-    std::uint64_t workbenchTabApplyCount_ = 0;
     int logThemeIndex_ = 0;
     std::size_t logVisibleCharLimit_ = kNativeDefaultLogVisibleChars;
     std::size_t logEntryLimit_ = 2000;
