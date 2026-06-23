@@ -12,6 +12,12 @@
 
 namespace {
 
+template <typename Function>
+void runStorageTest(const char* name, Function function) {
+    std::cerr << "native_storage_tests: " << name << std::endl;
+    function();
+}
+
 std::filesystem::path temporaryStorePath() {
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
     return std::filesystem::temp_directory_path() / ("svm-native-storage-test-" + std::to_string(suffix));
@@ -1236,29 +1242,29 @@ void protocolRulesAndVerificationRoundTrip() {
 } // namespace
 
 int main() {
-    rawEventsAreBatchedAndReopened();
-    replacementArtifactsAreRecoveredOnOpen();
-    idCountersPersistAcrossReopen();
-    missingOrCorruptIdCountersAreRebuilt();
-    presetRecordIdsAdvancePersistedCounters();
-    rawEventRetentionKeepsRecentEventsAndContinuesIds();
-    rawEventRetentionKeepsBinaryPayloadBoundaries();
-    sendHistoryAndProfilesKeepLatestRecords();
-    uiPreferencesRoundTrip();
-    scanAndMatchRecordsRoundTrip();
-    scanObservationReadsTargetSessionFromLargeHistory();
-    recentAndLatestReadsStayBoundedAcrossLargeHistory();
-    scanExecutionWithSameSessionIdReplacesPreviousRecords();
-    failedScanReplacementRollsBackAllFiles();
-    orphanScanChildrenAreHiddenWhenSessionIsMissing();
-    matchRunWithSameRunIdReplacesPreviousCandidates();
-    failedMatchReplacementRollsBackAllFiles();
-    orphanMatchCandidatesAreHiddenWhenRunIsMissing();
-    ruleVerificationWithSameRunIdReplacesPreviousResults();
-    failedRuleVerificationReplacementRollsBackAllFiles();
-    orphanRuleVerificationResultsAreHiddenWhenRunIsMissing();
-    replacementWritesKeepUnrelatedHistoryRecords();
-    protocolRulesAndVerificationRoundTrip();
+    runStorageTest("rawEventsAreBatchedAndReopened", rawEventsAreBatchedAndReopened);
+    runStorageTest("replacementArtifactsAreRecoveredOnOpen", replacementArtifactsAreRecoveredOnOpen);
+    runStorageTest("idCountersPersistAcrossReopen", idCountersPersistAcrossReopen);
+    runStorageTest("missingOrCorruptIdCountersAreRebuilt", missingOrCorruptIdCountersAreRebuilt);
+    runStorageTest("presetRecordIdsAdvancePersistedCounters", presetRecordIdsAdvancePersistedCounters);
+    runStorageTest("rawEventRetentionKeepsRecentEventsAndContinuesIds", rawEventRetentionKeepsRecentEventsAndContinuesIds);
+    runStorageTest("rawEventRetentionKeepsBinaryPayloadBoundaries", rawEventRetentionKeepsBinaryPayloadBoundaries);
+    runStorageTest("sendHistoryAndProfilesKeepLatestRecords", sendHistoryAndProfilesKeepLatestRecords);
+    runStorageTest("uiPreferencesRoundTrip", uiPreferencesRoundTrip);
+    runStorageTest("scanAndMatchRecordsRoundTrip", scanAndMatchRecordsRoundTrip);
+    runStorageTest("scanObservationReadsTargetSessionFromLargeHistory", scanObservationReadsTargetSessionFromLargeHistory);
+    runStorageTest("recentAndLatestReadsStayBoundedAcrossLargeHistory", recentAndLatestReadsStayBoundedAcrossLargeHistory);
+    runStorageTest("scanExecutionWithSameSessionIdReplacesPreviousRecords", scanExecutionWithSameSessionIdReplacesPreviousRecords);
+    runStorageTest("failedScanReplacementRollsBackAllFiles", failedScanReplacementRollsBackAllFiles);
+    runStorageTest("orphanScanChildrenAreHiddenWhenSessionIsMissing", orphanScanChildrenAreHiddenWhenSessionIsMissing);
+    runStorageTest("matchRunWithSameRunIdReplacesPreviousCandidates", matchRunWithSameRunIdReplacesPreviousCandidates);
+    runStorageTest("failedMatchReplacementRollsBackAllFiles", failedMatchReplacementRollsBackAllFiles);
+    runStorageTest("orphanMatchCandidatesAreHiddenWhenRunIsMissing", orphanMatchCandidatesAreHiddenWhenRunIsMissing);
+    runStorageTest("ruleVerificationWithSameRunIdReplacesPreviousResults", ruleVerificationWithSameRunIdReplacesPreviousResults);
+    runStorageTest("failedRuleVerificationReplacementRollsBackAllFiles", failedRuleVerificationReplacementRollsBackAllFiles);
+    runStorageTest("orphanRuleVerificationResultsAreHiddenWhenRunIsMissing", orphanRuleVerificationResultsAreHiddenWhenRunIsMissing);
+    runStorageTest("replacementWritesKeepUnrelatedHistoryRecords", replacementWritesKeepUnrelatedHistoryRecords);
+    runStorageTest("protocolRulesAndVerificationRoundTrip", protocolRulesAndVerificationRoundTrip);
 
     std::cout << "native_storage_tests passed\n";
     return 0;
