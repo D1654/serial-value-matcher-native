@@ -212,20 +212,27 @@ LRESULT CALLBACK nativeProgressWindowProc(HWND window, UINT message, WPARAM wPar
     }
     case PBM_SETRANGE32:
         if (state != nullptr) {
+            const int oldMinimum = state->minimum;
+            const int oldMaximum = state->maximum;
+            const int oldPosition = state->position;
             state->minimum = static_cast<int>(wParam);
             state->maximum = static_cast<int>(lParam);
             if (state->maximum <= state->minimum) {
                 state->maximum = state->minimum + 1;
             }
             state->position = clampNativeProgressPosition(*state, state->position);
-            InvalidateRect(window, nullptr, TRUE);
+            if (state->minimum != oldMinimum || state->maximum != oldMaximum || state->position != oldPosition) {
+                InvalidateRect(window, nullptr, TRUE);
+            }
         }
         return 0;
     case PBM_SETPOS:
         if (state != nullptr) {
             const int previousPosition = state->position;
             state->position = clampNativeProgressPosition(*state, static_cast<int>(wParam));
-            InvalidateRect(window, nullptr, TRUE);
+            if (state->position != previousPosition) {
+                InvalidateRect(window, nullptr, TRUE);
+            }
             return previousPosition;
         }
         return 0;
