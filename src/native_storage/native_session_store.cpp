@@ -1309,38 +1309,41 @@ bool NativeSessionStore::compactRawEventsIfNeeded() {
         return true;
     }
 
-    std::ifstream input(path, std::ios::binary);
-    if (!input) {
-        lastErrorText_ = "压缩 native 原始记录失败：无法打开 raw_io_events.svmr。";
-        return false;
-    }
-
-    if (!skipStoreHeader(input)) {
-        lastErrorText_ = "压缩 native 原始记录失败：无法读取文件头。";
-        return false;
-    }
-
     std::deque<RecordSpan> retainedSpans;
     std::uintmax_t retainedBytes = kHeader.size();
     std::size_t recordCount = 0;
-    std::uintmax_t firstRecordOffset = static_cast<std::uintmax_t>(input.tellg());
-    std::string parseError;
-    while (true) {
-        std::optional<RecordSpan> span = readNextRecordSpan(input, &parseError);
-        if (!parseError.empty()) {
-            lastErrorText_ = parseError;
+    std::uintmax_t firstRecordOffset = 0;
+    {
+        std::ifstream input(path, std::ios::binary);
+        if (!input) {
+            lastErrorText_ = "压缩 native 原始记录失败：无法打开 raw_io_events.svmr。";
             return false;
         }
-        if (!span.has_value()) {
-            break;
+
+        if (!skipStoreHeader(input)) {
+            lastErrorText_ = "压缩 native 原始记录失败：无法读取文件头。";
+            return false;
         }
-        ++recordCount;
-        while (!retainedSpans.empty() && retainedBytes + span->size > rawEventTargetBytes_) {
-            retainedBytes -= retainedSpans.front().size;
-            retainedSpans.pop_front();
+
+        firstRecordOffset = static_cast<std::uintmax_t>(input.tellg());
+        std::string parseError;
+        while (true) {
+            std::optional<RecordSpan> span = readNextRecordSpan(input, &parseError);
+            if (!parseError.empty()) {
+                lastErrorText_ = parseError;
+                return false;
+            }
+            if (!span.has_value()) {
+                break;
+            }
+            ++recordCount;
+            while (!retainedSpans.empty() && retainedBytes + span->size > rawEventTargetBytes_) {
+                retainedBytes -= retainedSpans.front().size;
+                retainedSpans.pop_front();
+            }
+            retainedBytes += span->size;
+            retainedSpans.push_back(*span);
         }
-        retainedBytes += span->size;
-        retainedSpans.push_back(*span);
     }
 
     if (recordCount == 0) {
