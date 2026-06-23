@@ -1146,11 +1146,6 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         handleModbusScanDataBatch(reinterpret_cast<NativeModbusScanDataBatch*>(lParam));
         return 0;
     case WM_CLOSE:
-        stopFileSend({});
-        requestCancelModbusScan();
-        closeModbusScanThread();
-        releaseModbusScanOwnership();
-        saveUiPreferences();
         DestroyWindow(window_);
         return 0;
     case WM_DESTROY:
