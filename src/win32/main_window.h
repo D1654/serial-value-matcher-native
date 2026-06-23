@@ -106,7 +106,7 @@ private:
     void handleModbusScanProgress(NativeModbusScanProgress* progress);
     void handleModbusScanDataBatch(NativeModbusScanDataBatch* batch);
     void handleModbusScanDone(NativeModbusScanResult* result);
-    void joinFinishedModbusScanThread();
+    void closeModbusScanThread();
     void updateCompletedModbusScanProgress(const NativeModbusScanResult& result);
     std::wstring persistCompletedModbusScan(const NativeModbusScanResult& result);
     bool handleCompletedModbusScanDisconnect(const NativeModbusScanResult& result, bool shouldDisconnectAfterScan);

@@ -1148,11 +1148,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
     case WM_CLOSE:
         stopFileSend({});
         requestCancelModbusScan();
-        if (modbusScanThread_ != nullptr) {
-            WaitForSingleObject(modbusScanThread_, INFINITE);
-            CloseHandle(modbusScanThread_);
-            modbusScanThread_ = nullptr;
-        }
+        closeModbusScanThread();
         releaseModbusScanOwnership();
         saveUiPreferences();
         DestroyWindow(window_);
@@ -1168,11 +1164,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         KillTimer(window_, IDT_LOG_FLUSH);
         stopFileSend({});
         requestCancelModbusScan();
-        if (modbusScanThread_ != nullptr) {
-            WaitForSingleObject(modbusScanThread_, INFINITE);
-            CloseHandle(modbusScanThread_);
-            modbusScanThread_ = nullptr;
-        }
+        closeModbusScanThread();
         releaseModbusScanOwnership();
         disconnectSerial();
         if (ownsUiFont_ && uiFont_ != nullptr) {
@@ -3541,11 +3533,7 @@ void NativeMainWindow::runModbusScan() {
     }
 
     appendLog(uiString(T::SystemModbusStartPrefix) + utf8ToWide(requestInput.scanSessionId));
-    if (modbusScanThread_ != nullptr) {
-        WaitForSingleObject(modbusScanThread_, INFINITE);
-        CloseHandle(modbusScanThread_);
-        modbusScanThread_ = nullptr;
-    }
+    closeModbusScanThread();
     modbusScanCancelRequested_ = false;
     disconnectAfterModbusScan_ = false;
     if (!serialIoState_.tryAcquire(NativeSerialIoOwner::ModbusScan)) {
@@ -3556,7 +3544,7 @@ void NativeMainWindow::runModbusScan() {
     updateModbusScanProgress(0, requestResult.request.plan.blocks.size(), 0, 0, 0);
     setStatus(tx(T::ModbusRunning));
 
-    auto* context = new NativeModbusScanContext;
+    auto context = std::make_unique<NativeModbusScanContext>();
     context->notifyWindow = window_;
     context->serialPort = &serialPort_;
     context->cancelRequested = &modbusScanCancelRequested_;
@@ -3565,12 +3553,13 @@ void NativeMainWindow::runModbusScan() {
     context->scanSessionId = requestInput.scanSessionId;
     context->timeoutErrorMessage = wideToUtf8(tx(T::ModbusTimeout));
     context->threadExceptionMessage = wideToUtf8(L"Modbus \u626B\u63CF\u7EBF\u7A0B\u5F02\u5E38\u7EC8\u6B62\u3002");
-    modbusScanThread_ = CreateThread(nullptr, 0, &nativeModbusScanThreadProc, context, 0, nullptr);
+    modbusScanThread_ = CreateThread(nullptr, 0, &nativeModbusScanThreadProc, context.get(), 0, nullptr);
     if (modbusScanThread_ == nullptr) {
-        delete context;
         setModbusScanRunningUi(false);
         setStatus(tx(T::ModbusThreadCreateFailed));
+        return;
     }
+    context.release();
 }
 
 void NativeMainWindow::requestCancelModbusScan() {
@@ -3635,7 +3624,7 @@ void NativeMainWindow::handleModbusScanDone(NativeModbusScanResult* resultPointe
     std::unique_ptr<NativeModbusScanResult> result(resultPointer);
     const bool shouldDisconnectAfterScan = disconnectAfterModbusScan_;
     disconnectAfterModbusScan_ = false;
-    joinFinishedModbusScanThread();
+    closeModbusScanThread();
     if (!result) {
         setModbusScanRunningUi(false);
         return;
@@ -3657,7 +3646,7 @@ void NativeMainWindow::handleModbusScanDone(NativeModbusScanResult* resultPointe
     setStatus(summary);
 }
 
-void NativeMainWindow::joinFinishedModbusScanThread() {
+void NativeMainWindow::closeModbusScanThread() {
     if (modbusScanThread_ == nullptr) {
         return;
     }
