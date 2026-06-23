@@ -87,6 +87,7 @@ if(SVM_BUILD_WIN32_APP)
         src/win32/main_window.cpp
         src/win32/main_window_layout.cpp
         src/win32/main_window_log.cpp
+        src/win32/main_window_preferences.cpp
         src/win32/main_window_send.cpp
         src/win32/main_window_serial.cpp
         src/win32/main_window_workbench.cpp
