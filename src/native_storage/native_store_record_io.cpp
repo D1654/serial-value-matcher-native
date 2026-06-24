@@ -133,8 +133,10 @@ bool skipStoreHeader(std::istream& input) {
     return static_cast<bool>(input);
 }
 
-std::optional<RecordSpan> readNextRecordSpan(std::istream& input, std::string* errorText) {
-    constexpr std::string_view context = "压缩 native 原始记录";
+std::optional<RecordSpan> readNextRecordSpan(
+    std::istream& input,
+    std::string* errorText,
+    std::string_view context) {
     while (true) {
         const int next = input.peek();
         if (next == std::char_traits<char>::eof()) {
@@ -150,7 +152,7 @@ std::optional<RecordSpan> readNextRecordSpan(std::istream& input, std::string* e
     const std::streampos startPosition = input.tellg();
     if (startPosition == std::streampos(-1)) {
         if (errorText != nullptr) {
-            *errorText = "压缩 native 原始记录失败：无法定位记录起点。";
+            *errorText = std::string(context) + "失败：无法定位记录起点。";
         }
         return std::nullopt;
     }
@@ -167,14 +169,14 @@ std::optional<RecordSpan> readNextRecordSpan(std::istream& input, std::string* e
         }
         if (fieldLength > static_cast<std::size_t>(std::numeric_limits<std::streamoff>::max())) {
             if (errorText != nullptr) {
-                *errorText = "压缩 native 原始记录失败：字段长度超出平台限制。";
+                *errorText = std::string(context) + "失败：字段长度超出平台限制。";
             }
             return std::nullopt;
         }
         input.seekg(static_cast<std::streamoff>(fieldLength), std::ios::cur);
         if (!input) {
             if (errorText != nullptr) {
-                *errorText = "压缩 native 原始记录失败：字段内容被截断。";
+                *errorText = std::string(context) + "失败：字段内容被截断。";
             }
             return std::nullopt;
         }
@@ -183,7 +185,7 @@ std::optional<RecordSpan> readNextRecordSpan(std::istream& input, std::string* e
     const std::streampos afterFields = input.tellg();
     if (afterFields == std::streampos(-1)) {
         if (errorText != nullptr) {
-            *errorText = "压缩 native 原始记录失败：无法定位记录终点。";
+            *errorText = std::string(context) + "失败：无法定位记录终点。";
         }
         return std::nullopt;
     }
@@ -199,7 +201,7 @@ std::optional<RecordSpan> readNextRecordSpan(std::istream& input, std::string* e
 
     if (endPosition == std::streampos(-1) || endPosition < startPosition) {
         if (errorText != nullptr) {
-            *errorText = "压缩 native 原始记录失败：记录跨度损坏。";
+            *errorText = std::string(context) + "失败：记录跨度损坏。";
         }
         return std::nullopt;
     }

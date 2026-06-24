@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <deque>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <system_error>
 #include <utility>
@@ -166,21 +167,96 @@ void NativeSessionStore::setRawEventRetentionLimit(std::uintmax_t softLimitBytes
 
 std::int64_t NativeSessionStore::rawEventCount() const {
     std::int64_t count = 0;
-    const bool ok = visitRecords(kRawEventsFile, [&](const Record&) {
+    const auto path = filePath(kRawEventsFile);
+    if (!std::filesystem::exists(path)) {
+        return 0;
+    }
+
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        lastErrorText_ = "读取 native 原始记录数量失败：无法打开 raw_io_events.svmr。";
+        return 0;
+    }
+    if (!skipStoreHeader(input)) {
+        lastErrorText_ = "读取 native 原始记录数量失败：无法读取文件头。";
+        return 0;
+    }
+
+    std::string parseError;
+    while (true) {
+        const std::optional<RecordSpan> span = readNextRecordSpan(input, &parseError, "读取 native 原始记录数量");
+        if (!parseError.empty()) {
+            lastErrorText_ = parseError;
+            return 0;
+        }
+        if (!span.has_value()) {
+            break;
+        }
         ++count;
-        return true;
-    });
-    return ok ? count : 0;
+    }
+    lastErrorText_.clear();
+    return count;
 }
 
 std::vector<RawIoEvent> NativeSessionStore::recentRawEvents(std::size_t limit) const {
-    std::deque<RawIoEvent> events;
+    std::vector<RawIoEvent> events;
     const std::size_t safeLimit = safeRecentLimit(limit);
-    const bool ok = visitRecords(kRawEventsFile, [&](const Record& record) {
-        appendBoundedRecent(events, rawEventFromRecord(record), safeLimit);
-        return true;
-    });
-    return ok ? recentLastFirstFromDeque(events) : std::vector<RawIoEvent>{};
+    std::deque<RecordSpan> retainedSpans;
+    const auto path = filePath(kRawEventsFile);
+    if (!std::filesystem::exists(path)) {
+        return events;
+    }
+
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        lastErrorText_ = "读取 native 原始记录失败：无法打开 raw_io_events.svmr。";
+        return events;
+    }
+    if (!skipStoreHeader(input)) {
+        lastErrorText_ = "读取 native 原始记录失败：无法读取文件头。";
+        return events;
+    }
+
+    std::string parseError;
+    while (true) {
+        const std::optional<RecordSpan> span = readNextRecordSpan(input, &parseError, "读取 native 最近原始记录");
+        if (!parseError.empty()) {
+            lastErrorText_ = parseError;
+            return {};
+        }
+        if (!span.has_value()) {
+            break;
+        }
+        appendBoundedRecent(retainedSpans, *span, safeLimit);
+    }
+
+    events.reserve(retainedSpans.size());
+    for (auto iterator = retainedSpans.rbegin(); iterator != retainedSpans.rend(); ++iterator) {
+        if (iterator->offset > static_cast<std::uintmax_t>(std::numeric_limits<std::streamoff>::max())) {
+            lastErrorText_ = "读取 native 原始记录失败：记录偏移超出平台限制。";
+            return {};
+        }
+        input.clear();
+        input.seekg(static_cast<std::streamoff>(iterator->offset), std::ios::beg);
+        if (!input) {
+            lastErrorText_ = "读取 native 原始记录失败：无法定位最近记录。";
+            return {};
+        }
+        std::string decodeError;
+        std::optional<Record> record = readNextRecordFromStream(input, &decodeError, "读取 native 原始记录");
+        if (!decodeError.empty()) {
+            lastErrorText_ = decodeError;
+            return {};
+        }
+        if (!record.has_value()) {
+            lastErrorText_ = "读取 native 原始记录失败：最近记录缺失。";
+            return {};
+        }
+        events.push_back(rawEventFromRecord(*record));
+    }
+
+    lastErrorText_.clear();
+    return events;
 }
 
 bool NativeSessionStore::saveSendHistory(SendHistoryEntry entry, int limit) {
@@ -696,7 +772,7 @@ bool NativeSessionStore::compactRawEventsIfNeeded() {
         firstRecordOffset = static_cast<std::uintmax_t>(input.tellg());
         std::string parseError;
         while (true) {
-            std::optional<RecordSpan> span = readNextRecordSpan(input, &parseError);
+            std::optional<RecordSpan> span = readNextRecordSpan(input, &parseError, "压缩 native 原始记录");
             if (!parseError.empty()) {
                 lastErrorText_ = parseError;
                 return false;

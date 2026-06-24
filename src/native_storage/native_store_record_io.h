@@ -22,7 +22,10 @@ struct RecordSpan {
 bool writeRecord(std::ostream& output, const Record& record);
 std::vector<Record> parseRecords(const std::string& data, std::string* errorText);
 bool skipStoreHeader(std::istream& input);
-std::optional<RecordSpan> readNextRecordSpan(std::istream& input, std::string* errorText);
+std::optional<RecordSpan> readNextRecordSpan(
+    std::istream& input,
+    std::string* errorText,
+    std::string_view context);
 std::optional<Record> readNextRecordFromStream(
     std::istream& input,
     std::string* errorText,
