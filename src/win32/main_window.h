@@ -69,6 +69,14 @@ private:
     static LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
 
     LRESULT handleMessage(UINT message, WPARAM wParam, LPARAM lParam);
+    LRESULT handleCreateMessage();
+    std::optional<LRESULT> handleNotifyMessage(LPARAM lParam);
+    LRESULT handleEditColorMessage(WPARAM wParam);
+    std::optional<LRESULT> handleStaticColorMessage(WPARAM wParam, LPARAM lParam);
+    LRESULT handleButtonColorMessage(WPARAM wParam);
+    std::optional<LRESULT> handleCommandMessage(WPARAM wParam);
+    std::optional<LRESULT> handleTimerMessage(WPARAM wParam);
+    LRESULT handleDestroyMessage();
     void createMenus();
     void createControls();
     void populateSerialOptionControls();
