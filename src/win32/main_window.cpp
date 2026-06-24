@@ -9,6 +9,7 @@
 #include "win32/native_log_scroll_state.h"
 #include "win32/native_modbus_scan_request.h"
 #include "win32/native_modbus_scan_ui_state.h"
+#include "win32/native_progress_control.h"
 #include "win32/native_send_codec.h"
 #include "win32/native_send_control_state.h"
 #include "win32/native_send_history_state.h"
@@ -23,7 +24,6 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <commctrl.h>
 #include <richedit.h>
 #include <cstdio>
@@ -39,20 +39,10 @@ using T = TextId;
 
 constexpr std::size_t kMaxRenderedLogLineChars = 4096;
 constexpr COLORREF kFormBackgroundColor = RGB(228, 228, 228);
-constexpr wchar_t kNativeProgressClassName[] = L"SvmNativeProgress";
-constexpr COLORREF kNativeProgressBorderColor = RGB(96, 96, 96);
-constexpr COLORREF kNativeProgressBackgroundColor = RGB(255, 255, 255);
-constexpr COLORREF kNativeProgressFillColor = RGB(0, 120, 215);
 
 const wchar_t* tx(T id) {
     return uiText(id);
 }
-
-struct NativeProgressState {
-    int minimum = 0;
-    int maximum = 1000;
-    int position = 0;
-};
 
 HBRUSH formBackgroundBrush() {
     static HBRUSH brush = CreateSolidBrush(kFormBackgroundColor);
@@ -75,144 +65,6 @@ HWND createSingleLineEdit(HWND parent, HINSTANCE instance, int controlId, const 
         L"EDIT",
         text,
         WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | extraStyle,
-        0,
-        0,
-        0,
-        0,
-        parent,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(controlId)),
-        instance,
-        nullptr);
-}
-
-int clampNativeProgressPosition(const NativeProgressState& state, int position) {
-    return std::clamp(position, state.minimum, state.maximum);
-}
-
-void paintNativeProgress(HWND window, HDC dc) {
-    RECT rect = {};
-    GetClientRect(window, &rect);
-    if (rect.right <= rect.left || rect.bottom <= rect.top) {
-        return;
-    }
-
-    auto* state = reinterpret_cast<NativeProgressState*>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    NativeProgressState fallbackState;
-    if (state == nullptr) {
-        state = &fallbackState;
-    }
-
-    HBRUSH borderBrush = CreateSolidBrush(kNativeProgressBorderColor);
-    FillRect(dc, &rect, borderBrush);
-    DeleteObject(borderBrush);
-
-    RECT innerRect = {
-        rect.left + 2,
-        rect.top + 2,
-        std::max<LONG>(rect.left + 2, rect.right - 2),
-        std::max<LONG>(rect.top + 2, rect.bottom - 2),
-    };
-    HBRUSH backgroundBrush = CreateSolidBrush(kNativeProgressBackgroundColor);
-    FillRect(dc, &innerRect, backgroundBrush);
-    DeleteObject(backgroundBrush);
-
-    const int innerWidth = std::max(0, static_cast<int>(innerRect.right - innerRect.left));
-    const int range = std::max(1, state->maximum - state->minimum);
-    const int fillWidth = std::clamp(
-        ((clampNativeProgressPosition(*state, state->position) - state->minimum) * innerWidth) / range,
-        0,
-        innerWidth);
-    if (fillWidth > 0) {
-        RECT fillRect = {innerRect.left, innerRect.top, innerRect.left + fillWidth, innerRect.bottom};
-        HBRUSH fillBrush = CreateSolidBrush(kNativeProgressFillColor);
-        FillRect(dc, &fillRect, fillBrush);
-        DeleteObject(fillBrush);
-    }
-}
-
-LRESULT CALLBACK nativeProgressWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
-    auto* state = reinterpret_cast<NativeProgressState*>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    switch (message) {
-    case WM_NCCREATE:
-        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(new NativeProgressState()));
-        return TRUE;
-    case WM_NCDESTROY:
-        delete state;
-        SetWindowLongPtrW(window, GWLP_USERDATA, 0);
-        return 0;
-    case WM_ERASEBKGND:
-        return 1;
-    case WM_SIZE:
-        InvalidateRect(window, nullptr, TRUE);
-        return 0;
-    case WM_PAINT: {
-        PAINTSTRUCT paint = {};
-        HDC dc = BeginPaint(window, &paint);
-        paintNativeProgress(window, dc);
-        EndPaint(window, &paint);
-        return 0;
-    }
-    case PBM_SETRANGE32:
-        if (state != nullptr) {
-            const int oldMinimum = state->minimum;
-            const int oldMaximum = state->maximum;
-            const int oldPosition = state->position;
-            state->minimum = static_cast<int>(wParam);
-            state->maximum = static_cast<int>(lParam);
-            if (state->maximum <= state->minimum) {
-                state->maximum = state->minimum + 1;
-            }
-            state->position = clampNativeProgressPosition(*state, state->position);
-            if (state->minimum != oldMinimum || state->maximum != oldMaximum || state->position != oldPosition) {
-                InvalidateRect(window, nullptr, TRUE);
-            }
-        }
-        return 0;
-    case PBM_SETPOS:
-        if (state != nullptr) {
-            const int previousPosition = state->position;
-            state->position = clampNativeProgressPosition(*state, static_cast<int>(wParam));
-            if (state->position != previousPosition) {
-                InvalidateRect(window, nullptr, TRUE);
-            }
-            return previousPosition;
-        }
-        return 0;
-    case PBM_GETPOS:
-        return state != nullptr ? state->position : 0;
-    default:
-        return DefWindowProcW(window, message, wParam, lParam);
-    }
-}
-
-bool registerNativeProgressClass(HINSTANCE instance) {
-    WNDCLASSEXW windowClass = {};
-    windowClass.cbSize = sizeof(windowClass);
-    windowClass.lpfnWndProc = nativeProgressWindowProc;
-    windowClass.hInstance = instance;
-    windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    windowClass.lpszClassName = kNativeProgressClassName;
-    if (RegisterClassExW(&windowClass) != 0) {
-        return true;
-    }
-    return GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
-}
-
-bool nativeProgressStyleHasVisibleFrame() {
-    return kNativeProgressBorderColor != kFormBackgroundColor
-        && kNativeProgressBorderColor != kNativeProgressBackgroundColor
-        && kNativeProgressClassName[0] != L'\0';
-}
-
-HWND createProgressControl(HWND parent, HINSTANCE instance, int controlId) {
-    if (!registerNativeProgressClass(instance)) {
-        return nullptr;
-    }
-    return CreateWindowExW(
-        0,
-        kNativeProgressClassName,
-        L"",
-        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
         0,
         0,
         0,
@@ -290,7 +142,7 @@ bool NativeMainWindow::runSelfTest() {
     if (!scanTabLayoutIsSane(554, 132)) {
         return fail("scan-tab-layout-554x132");
     }
-    if (!nativeProgressStyleHasVisibleFrame()) {
+    if (!nativeProgressStyleHasVisibleFrame(kFormBackgroundColor)) {
         return fail("progress-border-style");
     }
     if (!mainLayoutProbeIsFullyUsableAtSize(kMinTrackWidth, kMinTrackHeight)) {
@@ -1000,7 +852,7 @@ void NativeMainWindow::createControls() {
     fileDelayLabel_ = CreateWindowExW(0, L"STATIC", tx(T::FileDelayLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     fileDelayCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_FILE_DELAY_COMBO), instance_, nullptr);
     fileProgressLabel_ = CreateWindowExW(0, L"STATIC", tx(T::FileProgressLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
-    fileProgress_ = createProgressControl(window_, instance_, IDC_FILE_PROGRESS);
+    fileProgress_ = createNativeProgressControl(window_, instance_, IDC_FILE_PROGRESS);
     logCacheLabel_ = CreateWindowExW(0, L"STATIC", tx(T::LogCacheLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     logCacheCombo_ = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 0, 0, 0, 0, window_, reinterpret_cast<HMENU>(IDC_LOG_CACHE_COMBO), instance_, nullptr);
     rawEventRetentionLabel_ = CreateWindowExW(0, L"STATIC", tx(T::RawEventRetentionLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
@@ -1026,7 +878,7 @@ void NativeMainWindow::createControls() {
     scanEndLabel_ = CreateWindowExW(0, L"STATIC", tx(T::ScanEndLabel), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     scanEndEdit_ = createSingleLineEdit(window_, instance_, IDC_SCAN_END_EDIT, L"15", ES_NUMBER);
     modbusProgressLabel_ = CreateWindowExW(0, L"STATIC", tx(T::ModbusProgressLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
-    modbusProgress_ = createProgressControl(window_, instance_, IDC_MODBUS_PROGRESS);
+    modbusProgress_ = createNativeProgressControl(window_, instance_, IDC_MODBUS_PROGRESS);
     modbusProgressText_ = CreateWindowExW(0, L"STATIC", L"0/0", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     analysisSectionLabel_ = CreateWindowExW(0, L"STATIC", tx(T::AnalysisSectionLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);
     targetStatic_ = CreateWindowExW(0, L"STATIC", tx(T::TargetNameLabel), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0, window_, nullptr, instance_, nullptr);

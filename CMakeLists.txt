@@ -110,6 +110,7 @@ if(SVM_BUILD_WIN32_APP)
         src/win32/native_modbus_scan_request.cpp
         src/win32/native_modbus_scan_ui_state.cpp
         src/win32/native_modbus_scan_worker.cpp
+        src/win32/native_progress_control.cpp
         src/win32/native_reconnect_state.cpp
         src/win32/native_serial_io_state.cpp
         src/win32/native_serial_profile_codec.cpp
