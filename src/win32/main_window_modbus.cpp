@@ -54,7 +54,7 @@ void NativeMainWindow::updateModbusScanProgress(
         + L" \u89C2"
         + std::to_wstring(observations);
     if (modbusProgressText_ != nullptr) {
-        setControlText(modbusProgressText_, text);
+        SetWindowTextW(modbusProgressText_, text.c_str());
     }
 }
 
