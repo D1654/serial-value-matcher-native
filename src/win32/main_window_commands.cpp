@@ -62,6 +62,22 @@ std::optional<LRESULT> NativeMainWindow::handleQuickCommand(WORD commandId, WORD
 }
 
 std::optional<LRESULT> NativeMainWindow::handleControlCommand(WORD commandId, WORD notificationCode) {
+    if (const auto result = handleSerialControlCommand(commandId, notificationCode); result.has_value()) {
+        return result;
+    }
+    if (const auto result = handleLogControlCommand(commandId, notificationCode); result.has_value()) {
+        return result;
+    }
+    if (const auto result = handleSendControlCommand(commandId, notificationCode); result.has_value()) {
+        return result;
+    }
+    if (const auto result = handleFileControlCommand(commandId, notificationCode); result.has_value()) {
+        return result;
+    }
+    return handleAnalysisControlCommand(commandId);
+}
+
+std::optional<LRESULT> NativeMainWindow::handleSerialControlCommand(WORD commandId, WORD notificationCode) {
     switch (commandId) {
     case IDC_REFRESH_BUTTON:
         refreshPorts();
@@ -71,12 +87,6 @@ std::optional<LRESULT> NativeMainWindow::handleControlCommand(WORD commandId, WO
         return 0;
     case IDC_DISCONNECT_BUTTON:
         disconnectSerial();
-        return 0;
-    case IDC_SEND_BUTTON:
-        sendPayload();
-        return 0;
-    case IDC_CLEAR_BUTTON:
-        clearLog();
         return 0;
     case IDC_DTR_CHECK:
     case IDC_RTS_CHECK:
@@ -95,6 +105,21 @@ std::optional<LRESULT> NativeMainWindow::handleControlCommand(WORD commandId, WO
                 setStatus(tx(T::RtsHardwareManaged));
             }
         }
+        return 0;
+    case IDC_SAVE_PROFILE_BUTTON:
+        saveCurrentSerialProfile();
+        return 0;
+    default:
+        break;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<LRESULT> NativeMainWindow::handleLogControlCommand(WORD commandId, WORD notificationCode) {
+    switch (commandId) {
+    case IDC_CLEAR_BUTTON:
+        clearLog();
         return 0;
     case IDC_LOG_FORMAT_COMBO:
         if (notificationCode == CBN_SELCHANGE) {
@@ -135,6 +160,41 @@ std::optional<LRESULT> NativeMainWindow::handleControlCommand(WORD commandId, WO
                     + L"M\u3002"));
         }
         return 0;
+    case IDC_LOG_FILTER_EDIT:
+        if (notificationCode == EN_CHANGE) {
+            KillTimer(window_, IDT_LOG_FILTER);
+            SetTimer(window_, IDT_LOG_FILTER, 180, nullptr);
+        }
+        return 0;
+    case IDC_LOG_SEARCH_EDIT:
+        if (notificationCode == EN_CHANGE) {
+            logFilterState_.resetSearch();
+        }
+        return 0;
+    case IDC_LOG_FIND_BUTTON:
+        findNextLogMatch();
+        return 0;
+    case IDC_COPY_LOG_BUTTON:
+        copyVisibleLogToClipboard();
+        return 0;
+    case IDC_EXPORT_LOG_BUTTON:
+        exportVisibleLog();
+        return 0;
+    case IDC_PAUSE_SCROLL_BUTTON:
+        toggleLogScrollPause();
+        return 0;
+    default:
+        break;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<LRESULT> NativeMainWindow::handleSendControlCommand(WORD commandId, WORD notificationCode) {
+    switch (commandId) {
+    case IDC_SEND_BUTTON:
+        sendPayload();
+        return 0;
     case IDC_SEND_MODE_COMBO:
         if (notificationCode == CBN_SELCHANGE) {
             saveUiPreferences();
@@ -162,6 +222,20 @@ std::optional<LRESULT> NativeMainWindow::handleControlCommand(WORD commandId, WO
             saveUiPreferences();
         }
         return 0;
+    case IDC_HISTORY_COMBO:
+        if (notificationCode == CBN_SELCHANGE) {
+            applySelectedHistory();
+        }
+        return 0;
+    default:
+        break;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<LRESULT> NativeMainWindow::handleFileControlCommand(WORD commandId, WORD notificationCode) {
+    switch (commandId) {
     case IDC_FILE_BROWSE_BUTTON:
         browseFileSend();
         return 0;
@@ -180,37 +254,15 @@ std::optional<LRESULT> NativeMainWindow::handleControlCommand(WORD commandId, WO
             saveUiPreferences();
         }
         return 0;
-    case IDC_LOG_FILTER_EDIT:
-        if (notificationCode == EN_CHANGE) {
-            KillTimer(window_, IDT_LOG_FILTER);
-            SetTimer(window_, IDT_LOG_FILTER, 180, nullptr);
-        }
-        return 0;
-    case IDC_LOG_SEARCH_EDIT:
-        if (notificationCode == EN_CHANGE) {
-            logFilterState_.resetSearch();
-        }
-        return 0;
-    case IDC_LOG_FIND_BUTTON:
-        findNextLogMatch();
-        return 0;
-    case IDC_COPY_LOG_BUTTON:
-        copyVisibleLogToClipboard();
-        return 0;
-    case IDC_EXPORT_LOG_BUTTON:
-        exportVisibleLog();
-        return 0;
-    case IDC_SAVE_PROFILE_BUTTON:
-        saveCurrentSerialProfile();
-        return 0;
-    case IDC_PAUSE_SCROLL_BUTTON:
-        toggleLogScrollPause();
-        return 0;
-    case IDC_HISTORY_COMBO:
-        if (notificationCode == CBN_SELCHANGE) {
-            applySelectedHistory();
-        }
-        return 0;
+    default:
+        break;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<LRESULT> NativeMainWindow::handleAnalysisControlCommand(WORD commandId) {
+    switch (commandId) {
     case IDC_MODBUS_BUTTON:
         runModbusScan();
         return 0;

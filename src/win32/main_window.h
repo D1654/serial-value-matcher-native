@@ -77,6 +77,11 @@ private:
     std::optional<LRESULT> handleCommandMessage(WPARAM wParam);
     std::optional<LRESULT> handleQuickCommand(WORD commandId, WORD notificationCode);
     std::optional<LRESULT> handleControlCommand(WORD commandId, WORD notificationCode);
+    std::optional<LRESULT> handleSerialControlCommand(WORD commandId, WORD notificationCode);
+    std::optional<LRESULT> handleLogControlCommand(WORD commandId, WORD notificationCode);
+    std::optional<LRESULT> handleSendControlCommand(WORD commandId, WORD notificationCode);
+    std::optional<LRESULT> handleFileControlCommand(WORD commandId, WORD notificationCode);
+    std::optional<LRESULT> handleAnalysisControlCommand(WORD commandId);
     std::optional<LRESULT> handleMenuCommand(WORD commandId);
     std::optional<LRESULT> handleTimerMessage(WPARAM wParam);
     LRESULT handleDestroyMessage();
