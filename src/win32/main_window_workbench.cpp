@@ -202,7 +202,6 @@ void NativeMainWindow::applyWorkbenchTabVisibility(int tabIndex) {
         return;
     }
 
-    updateSideHelp(tabIndex);
     if (suspendRedraw) {
         SendMessageW(window_, WM_SETREDRAW, FALSE, 0);
     }
@@ -213,6 +212,7 @@ void NativeMainWindow::applyWorkbenchTabVisibility(int tabIndex) {
         }
     };
 
+    updateSideHelp(tabIndex);
     if (plan.hideAllControls) {
         hideWorkbenchTabControls();
     } else if (plan.hidePreviousTab) {
