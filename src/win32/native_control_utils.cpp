@@ -92,7 +92,7 @@ void moveTopControl(HWND control, int x, int y, int width, int height) {
     }
 
     SetWindowPos(control, HWND_TOP, x, y, width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-    InvalidateRect(control, nullptr, TRUE);
+    InvalidateRect(control, nullptr, FALSE);
 }
 
 void addControlFont(HWND control, HFONT font) {

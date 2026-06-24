@@ -180,7 +180,7 @@ void nativeLogApplyTheme(HWND logControl, bool usesRichEdit, int themeIndex) {
     format.dwMask = CFM_COLOR;
     format.crTextColor = palette.normal;
     SendMessageW(logControl, EM_SETCHARFORMAT, SCF_DEFAULT, reinterpret_cast<LPARAM>(&format));
-    InvalidateRect(logControl, nullptr, TRUE);
+    InvalidateRect(logControl, nullptr, FALSE);
 }
 
 void nativeLogSetTextLimit(HWND logControl, std::size_t limit) {

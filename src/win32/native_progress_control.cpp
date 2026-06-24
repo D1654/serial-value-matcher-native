@@ -86,7 +86,7 @@ LRESULT CALLBACK nativeProgressWindowProc(HWND window, UINT message, WPARAM wPar
     case WM_ERASEBKGND:
         return 1;
     case WM_SIZE:
-        InvalidateRect(window, nullptr, TRUE);
+        InvalidateRect(window, nullptr, FALSE);
         return 0;
     case WM_PAINT: {
         PAINTSTRUCT paint = {};
@@ -107,7 +107,7 @@ LRESULT CALLBACK nativeProgressWindowProc(HWND window, UINT message, WPARAM wPar
             }
             state->position = clampNativeProgressPosition(*state, state->position);
             if (state->minimum != oldMinimum || state->maximum != oldMaximum || state->position != oldPosition) {
-                InvalidateRect(window, nullptr, TRUE);
+                InvalidateRect(window, nullptr, FALSE);
             }
         }
         return 0;
@@ -116,7 +116,7 @@ LRESULT CALLBACK nativeProgressWindowProc(HWND window, UINT message, WPARAM wPar
             const int previousPosition = state->position;
             state->position = clampNativeProgressPosition(*state, static_cast<int>(wParam));
             if (state->position != previousPosition) {
-                InvalidateRect(window, nullptr, TRUE);
+                InvalidateRect(window, nullptr, FALSE);
             }
             return previousPosition;
         }
