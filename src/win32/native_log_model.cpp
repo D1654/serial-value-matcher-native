@@ -9,6 +9,10 @@ const std::wstring& NativeLogFilterState::filterText() const noexcept {
     return filterText_;
 }
 
+const std::wstring& NativeLogFilterState::loweredFilterText() const noexcept {
+    return loweredFilterText_;
+}
+
 std::size_t NativeLogFilterState::searchOffset() const noexcept {
     return searchOffset_;
 }
@@ -22,12 +26,14 @@ NativeLogFilterUpdate NativeLogFilterState::setFilterText(std::wstring text) {
         return {false, filterText_};
     }
     filterText_ = std::move(text);
+    loweredFilterText_ = lowerCopy(filterText_);
     resetSearch();
     return {true, filterText_};
 }
 
 void NativeLogFilterState::clear() {
     filterText_.clear();
+    loweredFilterText_.clear();
     resetSearch();
 }
 
@@ -97,11 +103,15 @@ std::wstring lowerCopy(std::wstring_view text) {
     return lowered;
 }
 
-bool containsCaseInsensitive(std::wstring_view haystack, std::wstring_view needle) {
-    if (needle.empty()) {
+bool containsLoweredNeedle(std::wstring_view haystack, std::wstring_view loweredNeedle) {
+    if (loweredNeedle.empty()) {
         return true;
     }
-    return lowerCopy(haystack).find(lowerCopy(needle)) != std::wstring::npos;
+    return lowerCopy(haystack).find(loweredNeedle) != std::wstring::npos;
+}
+
+bool containsCaseInsensitive(std::wstring_view haystack, std::wstring_view needle) {
+    return containsLoweredNeedle(haystack, lowerCopy(needle));
 }
 
 std::wstring clipRenderedLogLine(std::wstring text, std::size_t maxChars, std::wstring_view suffix) {

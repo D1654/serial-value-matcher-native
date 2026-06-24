@@ -28,6 +28,7 @@ void changedFilterResetsSearchState() {
     const auto update = state.setFilterText(L"RX");
     assert(update.changed);
     assert(state.filterText() == L"RX");
+    assert(state.loweredFilterText() == L"rx");
     assert(state.searchText().empty());
     assert(state.searchOffset() == 0);
 }

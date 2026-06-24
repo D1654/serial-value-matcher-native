@@ -107,10 +107,10 @@ std::size_t NativeMainWindow::rebuildLogView() {
     const int firstVisibleLine = nativeLogFirstVisibleLine(receiveLog_);
     std::deque<std::pair<NativeLogKind, std::wstring>> visibleLines;
     std::size_t visibleChars = 0;
-    const std::wstring& filterText = logFilterState_.filterText();
+    const std::wstring& loweredFilterText = logFilterState_.loweredFilterText();
     for (const NativeLogEntry& entry : logEntries_) {
         std::wstring rendered = renderLogEntry(entry);
-        if (!filterText.empty() && !containsCaseInsensitive(rendered, filterText)) {
+        if (!containsLoweredNeedle(rendered, loweredFilterText)) {
             continue;
         }
         const std::size_t renderedSize = rendered.size();
@@ -266,14 +266,14 @@ void NativeMainWindow::addLogEntry(NativeLogEntry entry) {
     }
 
     const NativeLogEntry& latest = logEntries_.back();
-    const std::wstring& filterText = logFilterState_.filterText();
-    if (filterText.empty()) {
+    const std::wstring& loweredFilterText = logFilterState_.loweredFilterText();
+    if (loweredFilterText.empty()) {
         queueVisibleLogEntry(latest);
         return;
     }
 
     std::wstring rendered = renderLogEntry(latest);
-    if (containsCaseInsensitive(rendered, filterText)) {
+    if (containsLoweredNeedle(rendered, loweredFilterText)) {
         queueVisibleLogText(latest.kind, std::move(rendered));
     } else if (logTrimmedSinceRebuild_ >= kLogTrimRebuildBatch) {
         scheduleLogFlush();

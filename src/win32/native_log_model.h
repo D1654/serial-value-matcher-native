@@ -46,6 +46,7 @@ struct NativeLogSearchResult {
 class NativeLogFilterState final {
 public:
     const std::wstring& filterText() const noexcept;
+    const std::wstring& loweredFilterText() const noexcept;
     std::size_t searchOffset() const noexcept;
     const std::wstring& searchText() const noexcept;
 
@@ -56,12 +57,14 @@ public:
 
 private:
     std::wstring filterText_;
+    std::wstring loweredFilterText_;
     std::wstring searchText_;
     std::size_t searchOffset_ = 0;
 };
 
 std::wstring sanitizeLogText(std::wstring_view text);
 std::wstring lowerCopy(std::wstring_view text);
+bool containsLoweredNeedle(std::wstring_view haystack, std::wstring_view loweredNeedle);
 bool containsCaseInsensitive(std::wstring_view haystack, std::wstring_view needle);
 std::wstring clipRenderedLogLine(std::wstring text, std::size_t maxChars, std::wstring_view suffix);
 std::wstring_view nativeLogPayloadPrefix(NativeLogKind kind);
