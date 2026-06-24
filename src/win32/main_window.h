@@ -75,6 +75,9 @@ private:
     std::optional<LRESULT> handleStaticColorMessage(WPARAM wParam, LPARAM lParam);
     LRESULT handleButtonColorMessage(WPARAM wParam);
     std::optional<LRESULT> handleCommandMessage(WPARAM wParam);
+    std::optional<LRESULT> handleQuickCommand(WORD commandId, WORD notificationCode);
+    std::optional<LRESULT> handleControlCommand(WORD commandId, WORD notificationCode);
+    std::optional<LRESULT> handleMenuCommand(WORD commandId);
     std::optional<LRESULT> handleTimerMessage(WPARAM wParam);
     LRESULT handleDestroyMessage();
     void createMenus();

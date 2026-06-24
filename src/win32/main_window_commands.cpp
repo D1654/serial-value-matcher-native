@@ -35,19 +35,33 @@ std::wstring formatLogCacheLimit(std::size_t charLimit) {
 
 std::optional<LRESULT> NativeMainWindow::handleCommandMessage(WPARAM wParam) {
     const WORD commandId = LOWORD(wParam);
+    const WORD notificationCode = HIWORD(wParam);
+    if (const auto result = handleQuickCommand(commandId, notificationCode); result.has_value()) {
+        return result;
+    }
+    if (const auto result = handleControlCommand(commandId, notificationCode); result.has_value()) {
+        return result;
+    }
+    return handleMenuCommand(commandId);
+}
+
+std::optional<LRESULT> NativeMainWindow::handleQuickCommand(WORD commandId, WORD notificationCode) {
     if (commandId >= IDC_QUICK_SEND_BUTTON_BASE && commandId < IDC_QUICK_SEND_BUTTON_BASE + quickSendButtons_.size()) {
-        if (HIWORD(wParam) == BN_CLICKED) {
+        if (notificationCode == BN_CLICKED) {
             sendQuickPayload(static_cast<std::size_t>(commandId - IDC_QUICK_SEND_BUTTON_BASE));
         }
         return 0;
     }
     if (commandId >= IDC_QUICK_SEND_EDIT_BASE && commandId < IDC_QUICK_SEND_EDIT_BASE + quickSendEdits_.size()) {
-        if (HIWORD(wParam) == EN_KILLFOCUS) {
+        if (notificationCode == EN_KILLFOCUS) {
             saveUiPreferences();
         }
         return 0;
     }
+    return std::nullopt;
+}
 
+std::optional<LRESULT> NativeMainWindow::handleControlCommand(WORD commandId, WORD notificationCode) {
     switch (commandId) {
     case IDC_REFRESH_BUTTON:
         refreshPorts();
@@ -66,12 +80,12 @@ std::optional<LRESULT> NativeMainWindow::handleCommandMessage(WPARAM wParam) {
         return 0;
     case IDC_DTR_CHECK:
     case IDC_RTS_CHECK:
-        if (HIWORD(wParam) == BN_CLICKED) {
-            applySerialLineControl(static_cast<WORD>(LOWORD(wParam)));
+        if (notificationCode == BN_CLICKED) {
+            applySerialLineControl(commandId);
         }
         return 0;
     case IDC_FLOW_CONTROL_COMBO:
-        if (HIWORD(wParam) == CBN_SELCHANGE) {
+        if (notificationCode == CBN_SELCHANGE) {
             updateRtsControlState();
             saveUiPreferences();
             if ((!serialPort_.isOpen()
@@ -83,21 +97,21 @@ std::optional<LRESULT> NativeMainWindow::handleCommandMessage(WPARAM wParam) {
         }
         return 0;
     case IDC_LOG_FORMAT_COMBO:
-        if (HIWORD(wParam) == CBN_SELCHANGE) {
+        if (notificationCode == CBN_SELCHANGE) {
             rebuildLogView();
             saveUiPreferences();
             setStatus(tx(T::LogFormatChanged));
         }
         return 0;
     case IDC_LOG_ENCODING_COMBO:
-        if (HIWORD(wParam) == CBN_SELCHANGE) {
+        if (notificationCode == CBN_SELCHANGE) {
             rebuildLogView();
             saveUiPreferences();
             setStatus(tx(T::LogEncodingChanged));
         }
         return 0;
     case IDC_LOG_CACHE_COMBO:
-        if (HIWORD(wParam) == CBN_SELCHANGE) {
+        if (notificationCode == CBN_SELCHANGE) {
             applyLogCacheLimit(static_cast<std::size_t>(selectedComboData(logCacheCombo_, kNativeDefaultLogVisibleChars)));
             rebuildLogView();
             saveUiPreferences();
@@ -110,7 +124,7 @@ std::optional<LRESULT> NativeMainWindow::handleCommandMessage(WPARAM wParam) {
         }
         return 0;
     case IDC_RAW_EVENT_RETENTION_COMBO:
-        if (HIWORD(wParam) == CBN_SELCHANGE) {
+        if (notificationCode == CBN_SELCHANGE) {
             const int retentionLimitMb = static_cast<int>(selectedComboData(rawEventRetentionCombo_, kNativeDefaultRawEventRetentionMb));
             applyRawEventRetentionLimit(retentionLimitMb);
             saveUiPreferences();
@@ -122,19 +136,19 @@ std::optional<LRESULT> NativeMainWindow::handleCommandMessage(WPARAM wParam) {
         }
         return 0;
     case IDC_SEND_MODE_COMBO:
-        if (HIWORD(wParam) == CBN_SELCHANGE) {
+        if (notificationCode == CBN_SELCHANGE) {
             saveUiPreferences();
             setSendModeStatus();
         }
         return 0;
     case IDC_TEXT_ENCODING_COMBO:
     case IDC_LINE_ENDING_COMBO:
-        if (HIWORD(wParam) == CBN_SELCHANGE) {
+        if (notificationCode == CBN_SELCHANGE) {
             saveUiPreferences();
         }
         return 0;
     case IDC_TIMED_SEND_CHECK:
-        if (HIWORD(wParam) == BN_CLICKED) {
+        if (notificationCode == BN_CLICKED) {
             sendControlState_.setTimedSendEnabled(SendMessageW(timedSendCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED);
             updateTimedSendTimer();
             saveUiPreferences();
@@ -142,9 +156,9 @@ std::optional<LRESULT> NativeMainWindow::handleCommandMessage(WPARAM wParam) {
         }
         return 0;
     case IDC_TIMED_PERIOD_EDIT:
-        if (HIWORD(wParam) == EN_CHANGE && sendControlState_.timedSendEnabled()) {
+        if (notificationCode == EN_CHANGE && sendControlState_.timedSendEnabled()) {
             updateTimedSendTimer();
-        } else if (HIWORD(wParam) == EN_KILLFOCUS) {
+        } else if (notificationCode == EN_KILLFOCUS) {
             saveUiPreferences();
         }
         return 0;
@@ -158,7 +172,7 @@ std::optional<LRESULT> NativeMainWindow::handleCommandMessage(WPARAM wParam) {
         stopFileSend();
         return 0;
     case IDC_FILE_DELAY_COMBO:
-        if (HIWORD(wParam) == CBN_SELCHANGE) {
+        if (notificationCode == CBN_SELCHANGE) {
             if (fileSend_.active()) {
                 KillTimer(window_, IDT_FILE_SEND);
                 SetTimer(window_, IDT_FILE_SEND, static_cast<UINT>(std::max<int>(1, static_cast<int>(selectedComboData(fileDelayCombo_, 0)))), nullptr);
@@ -167,13 +181,13 @@ std::optional<LRESULT> NativeMainWindow::handleCommandMessage(WPARAM wParam) {
         }
         return 0;
     case IDC_LOG_FILTER_EDIT:
-        if (HIWORD(wParam) == EN_CHANGE) {
+        if (notificationCode == EN_CHANGE) {
             KillTimer(window_, IDT_LOG_FILTER);
             SetTimer(window_, IDT_LOG_FILTER, 180, nullptr);
         }
         return 0;
     case IDC_LOG_SEARCH_EDIT:
-        if (HIWORD(wParam) == EN_CHANGE) {
+        if (notificationCode == EN_CHANGE) {
             logFilterState_.resetSearch();
         }
         return 0;
@@ -193,7 +207,7 @@ std::optional<LRESULT> NativeMainWindow::handleCommandMessage(WPARAM wParam) {
         toggleLogScrollPause();
         return 0;
     case IDC_HISTORY_COMBO:
-        if (HIWORD(wParam) == CBN_SELCHANGE) {
+        if (notificationCode == CBN_SELCHANGE) {
             applySelectedHistory();
         }
         return 0;
@@ -209,6 +223,15 @@ std::optional<LRESULT> NativeMainWindow::handleCommandMessage(WPARAM wParam) {
     case IDC_EXPORT_REPORT_BUTTON:
         exportReport();
         return 0;
+    default:
+        break;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<LRESULT> NativeMainWindow::handleMenuCommand(WORD commandId) {
+    switch (commandId) {
     case IDM_FILE_SAVE_PROFILE:
         saveCurrentSerialProfile();
         return 0;
