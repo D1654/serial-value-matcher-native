@@ -107,11 +107,12 @@ std::size_t NativeMainWindow::rebuildLogView() {
     const int firstVisibleLine = nativeLogFirstVisibleLine(receiveLog_);
     std::deque<std::pair<NativeLogKind, std::wstring>> visibleLines;
     std::size_t visibleChars = 0;
+    const std::wstring& filterText = logFilterState_.filterText();
     for (const NativeLogEntry& entry : logEntries_) {
-        if (!logEntryMatchesFilter(entry)) {
+        std::wstring rendered = renderLogEntry(entry);
+        if (!filterText.empty() && !containsCaseInsensitive(rendered, filterText)) {
             continue;
         }
-        std::wstring rendered = renderLogEntry(entry);
         const std::size_t renderedSize = rendered.size();
         while (!visibleLines.empty() && visibleChars + renderedSize > logVisibleCharLimit_) {
             visibleChars -= visibleLines.front().second.size();
@@ -265,8 +266,15 @@ void NativeMainWindow::addLogEntry(NativeLogEntry entry) {
     }
 
     const NativeLogEntry& latest = logEntries_.back();
-    if (logEntryMatchesFilter(latest)) {
+    const std::wstring& filterText = logFilterState_.filterText();
+    if (filterText.empty()) {
         queueVisibleLogEntry(latest);
+        return;
+    }
+
+    std::wstring rendered = renderLogEntry(latest);
+    if (containsCaseInsensitive(rendered, filterText)) {
+        queueVisibleLogText(latest.kind, std::move(rendered));
     } else if (logTrimmedSinceRebuild_ >= kLogTrimRebuildBatch) {
         scheduleLogFlush();
     }
@@ -289,13 +297,6 @@ std::wstring NativeMainWindow::renderLogEntry(const NativeLogEntry& entry) const
     line = clipRenderedLogLine(sanitizeLogText(line), kMaxRenderedLogLineChars, tx(T::LogEntryClippedSuffix));
     line += L"\r\n";
     return line;
-}
-
-bool NativeMainWindow::logEntryMatchesFilter(const NativeLogEntry& entry) const {
-    if (logFilterState_.filterText().empty()) {
-        return true;
-    }
-    return containsCaseInsensitive(renderLogEntry(entry), logFilterState_.filterText());
 }
 
 std::wstring NativeMainWindow::visibleLogText() const {

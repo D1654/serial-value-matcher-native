@@ -164,7 +164,6 @@ private:
     void insertVisibleLogText(NativeLogKind kind, const std::wstring& text);
     void addLogEntry(NativeLogEntry entry);
     std::wstring renderLogEntry(const NativeLogEntry& entry) const;
-    bool logEntryMatchesFilter(const NativeLogEntry& entry) const;
     std::wstring visibleLogText() const;
     void updateLogFilter();
     void findNextLogMatch();
