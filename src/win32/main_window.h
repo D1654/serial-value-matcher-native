@@ -83,6 +83,12 @@ private:
     std::optional<LRESULT> handleFileControlCommand(WORD commandId, WORD notificationCode);
     std::optional<LRESULT> handleAnalysisControlCommand(WORD commandId);
     std::optional<LRESULT> handleMenuCommand(WORD commandId);
+    std::optional<LRESULT> handleFileMenuCommand(WORD commandId);
+    std::optional<LRESULT> handleSerialMenuCommand(WORD commandId);
+    std::optional<LRESULT> handleToolsMenuCommand(WORD commandId);
+    std::optional<LRESULT> handleAnalysisMenuCommand(WORD commandId);
+    std::optional<LRESULT> handleViewMenuCommand(WORD commandId);
+    std::optional<LRESULT> handleHelpMenuCommand(WORD commandId);
     std::optional<LRESULT> handleTimerMessage(WPARAM wParam);
     LRESULT handleDestroyMessage();
     void createMenus();

@@ -283,6 +283,25 @@ std::optional<LRESULT> NativeMainWindow::handleAnalysisControlCommand(WORD comma
 }
 
 std::optional<LRESULT> NativeMainWindow::handleMenuCommand(WORD commandId) {
+    if (const auto result = handleFileMenuCommand(commandId); result.has_value()) {
+        return result;
+    }
+    if (const auto result = handleSerialMenuCommand(commandId); result.has_value()) {
+        return result;
+    }
+    if (const auto result = handleToolsMenuCommand(commandId); result.has_value()) {
+        return result;
+    }
+    if (const auto result = handleAnalysisMenuCommand(commandId); result.has_value()) {
+        return result;
+    }
+    if (const auto result = handleViewMenuCommand(commandId); result.has_value()) {
+        return result;
+    }
+    return handleHelpMenuCommand(commandId);
+}
+
+std::optional<LRESULT> NativeMainWindow::handleFileMenuCommand(WORD commandId) {
     switch (commandId) {
     case IDM_FILE_SAVE_PROFILE:
         saveCurrentSerialProfile();
@@ -290,6 +309,15 @@ std::optional<LRESULT> NativeMainWindow::handleMenuCommand(WORD commandId) {
     case IDM_FILE_EXIT:
         DestroyWindow(window_);
         return 0;
+    default:
+        break;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<LRESULT> NativeMainWindow::handleSerialMenuCommand(WORD commandId) {
+    switch (commandId) {
     case IDM_SERIAL_REFRESH:
         refreshPorts();
         return 0;
@@ -307,6 +335,15 @@ std::optional<LRESULT> NativeMainWindow::handleMenuCommand(WORD commandId) {
             0);
         setStatus(SendMessageW(autoReconnectCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED ? tx(T::AutoReconnectEnabled) : tx(T::AutoReconnectDisabled));
         return 0;
+    default:
+        break;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<LRESULT> NativeMainWindow::handleToolsMenuCommand(WORD commandId) {
+    switch (commandId) {
     case IDM_TOOLS_SEND:
         sendPayload();
         return 0;
@@ -328,6 +365,15 @@ std::optional<LRESULT> NativeMainWindow::handleMenuCommand(WORD commandId) {
     case IDM_TOOLS_FIND_LOG:
         findNextLogMatch();
         return 0;
+    default:
+        break;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<LRESULT> NativeMainWindow::handleAnalysisMenuCommand(WORD commandId) {
+    switch (commandId) {
     case IDM_ANALYSIS_MODBUS_SCAN:
         runModbusScan();
         return 0;
@@ -340,6 +386,15 @@ std::optional<LRESULT> NativeMainWindow::handleMenuCommand(WORD commandId) {
     case IDM_ANALYSIS_EXPORT_REPORT:
         exportReport();
         return 0;
+    default:
+        break;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<LRESULT> NativeMainWindow::handleViewMenuCommand(WORD commandId) {
+    switch (commandId) {
     case IDM_VIEW_THEME_DEFAULT:
         applyLogTheme(0);
         rebuildLogView();
@@ -365,6 +420,15 @@ std::optional<LRESULT> NativeMainWindow::handleMenuCommand(WORD commandId) {
         saveUiPreferences();
         setStatus(showLogTimestamps_ ? tx(T::LogTimestampsEnabledStatus) : tx(T::LogTimestampsDisabledStatus));
         return 0;
+    default:
+        break;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<LRESULT> NativeMainWindow::handleHelpMenuCommand(WORD commandId) {
+    switch (commandId) {
     case IDM_HELP_ABOUT:
         showAbout();
         return 0;
