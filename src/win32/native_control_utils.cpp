@@ -51,6 +51,27 @@ void enableControl(HWND control, bool enabled) {
     }
 }
 
+void moveControl(HWND control, int x, int y, int width, int height, BOOL repaint) {
+    if (control == nullptr) {
+        return;
+    }
+
+    RECT rect = {};
+    if (GetWindowRect(control, &rect) != FALSE) {
+        POINT topLeft = {rect.left, rect.top};
+        HWND parent = GetParent(control);
+        if (parent != nullptr && ScreenToClient(parent, &topLeft) != FALSE) {
+            const int currentWidth = rect.right - rect.left;
+            const int currentHeight = rect.bottom - rect.top;
+            if (topLeft.x == x && topLeft.y == y && currentWidth == width && currentHeight == height) {
+                return;
+            }
+        }
+    }
+
+    MoveWindow(control, x, y, width, height, repaint);
+}
+
 void moveTopControl(HWND control, int x, int y, int width, int height) {
     if (control != nullptr) {
         SetWindowPos(control, HWND_TOP, x, y, width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
