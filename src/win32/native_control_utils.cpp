@@ -8,6 +8,25 @@
 #include <cwctype>
 
 namespace svm::win32 {
+namespace {
+
+bool controlGeometryMatches(HWND control, int x, int y, int width, int height) {
+    RECT rect = {};
+    if (GetWindowRect(control, &rect) == FALSE) {
+        return false;
+    }
+    POINT topLeft = {rect.left, rect.top};
+    HWND parent = GetParent(control);
+    if (parent == nullptr || ScreenToClient(parent, &topLeft) == FALSE) {
+        return false;
+    }
+
+    const int currentWidth = rect.right - rect.left;
+    const int currentHeight = rect.bottom - rect.top;
+    return topLeft.x == x && topLeft.y == y && currentWidth == width && currentHeight == height;
+}
+
+} // namespace
 
 bool nativeControlHasClass(HWND control, const wchar_t* expectedClassName) {
     wchar_t className[32] = {};
@@ -56,27 +75,24 @@ void moveControl(HWND control, int x, int y, int width, int height, BOOL repaint
         return;
     }
 
-    RECT rect = {};
-    if (GetWindowRect(control, &rect) != FALSE) {
-        POINT topLeft = {rect.left, rect.top};
-        HWND parent = GetParent(control);
-        if (parent != nullptr && ScreenToClient(parent, &topLeft) != FALSE) {
-            const int currentWidth = rect.right - rect.left;
-            const int currentHeight = rect.bottom - rect.top;
-            if (topLeft.x == x && topLeft.y == y && currentWidth == width && currentHeight == height) {
-                return;
-            }
-        }
+    if (controlGeometryMatches(control, x, y, width, height)) {
+        return;
     }
 
     MoveWindow(control, x, y, width, height, repaint);
 }
 
 void moveTopControl(HWND control, int x, int y, int width, int height) {
-    if (control != nullptr) {
-        SetWindowPos(control, HWND_TOP, x, y, width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-        InvalidateRect(control, nullptr, TRUE);
+    if (control == nullptr) {
+        return;
     }
+
+    if (controlGeometryMatches(control, x, y, width, height)) {
+        return;
+    }
+
+    SetWindowPos(control, HWND_TOP, x, y, width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    InvalidateRect(control, nullptr, TRUE);
 }
 
 void addControlFont(HWND control, HFONT font) {
