@@ -183,8 +183,8 @@ void NativeMainWindow::updateSideHelp(int tabIndex) {
         break;
     }
 
-    SetWindowTextW(sideHelpTitle_, tx(T::SideHelpTitle));
-    SetWindowTextW(sideHelpText_, tx(helpId));
+    setControlText(sideHelpTitle_, tx(T::SideHelpTitle));
+    setControlText(sideHelpText_, tx(helpId));
     workbenchTabState_.markHelpUpdated(tabIndex);
 }
 

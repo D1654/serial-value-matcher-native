@@ -287,7 +287,7 @@ void NativeMainWindow::applySerialLineControl(WORD controlId) {
 
 void NativeMainWindow::updateConnectionButtonState() {
     const NativeConnectionButtonMode mode = connectionUiState_.buttonMode(serialPort_.isOpen());
-    SetWindowTextW(connectButton_, mode == NativeConnectionButtonMode::Disconnect ? tx(T::DisconnectButton) : tx(T::ConnectButton));
+    setControlText(connectButton_, mode == NativeConnectionButtonMode::Disconnect ? tx(T::DisconnectButton) : tx(T::ConnectButton));
 }
 
 void NativeMainWindow::updateRtsControlState() {

@@ -54,7 +54,7 @@ void NativeMainWindow::updateModbusScanProgress(
         + L" \u89C2"
         + std::to_wstring(observations);
     if (modbusProgressText_ != nullptr) {
-        SetWindowTextW(modbusProgressText_, text.c_str());
+        setControlText(modbusProgressText_, text);
     }
 }
 
@@ -265,7 +265,7 @@ void NativeMainWindow::setModbusScanRunningUi(bool running) {
         updateTimedSendTimer();
     }
     const NativeModbusScanUiSnapshot ui = modbusScanUiState_.snapshot(running);
-    SetWindowTextW(modbusButton_, ui.buttonMode == NativeModbusScanButtonMode::Stop ? tx(T::ModbusStopButton) : tx(T::ModbusScanButton));
+    setControlText(modbusButton_, ui.buttonMode == NativeModbusScanButtonMode::Stop ? tx(T::ModbusStopButton) : tx(T::ModbusScanButton));
 
     for (HWND control : {
              portCombo_,

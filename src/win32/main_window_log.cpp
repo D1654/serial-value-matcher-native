@@ -339,7 +339,7 @@ void NativeMainWindow::toggleLogScrollPause() {
         flushPendingLogEntries();
     }
     const bool paused = logScrollState_.togglePause();
-    SetWindowTextW(pauseScrollButton_, paused ? tx(T::ResumeScrollButton) : tx(T::PauseScrollButton));
+    setControlText(pauseScrollButton_, paused ? tx(T::ResumeScrollButton) : tx(T::PauseScrollButton));
     if (!paused) {
         rebuildLogView();
         followLatestLogSilently();
@@ -350,7 +350,7 @@ void NativeMainWindow::toggleLogScrollPause() {
 void NativeMainWindow::followLatestLogSilently() {
     if (logScrollState_.paused()) {
         logScrollState_.resume();
-        SetWindowTextW(pauseScrollButton_, tx(T::PauseScrollButton));
+        setControlText(pauseScrollButton_, tx(T::PauseScrollButton));
         rebuildLogView();
     }
     logScrollState_.followLatest();

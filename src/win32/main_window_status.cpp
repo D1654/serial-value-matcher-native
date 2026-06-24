@@ -62,6 +62,9 @@ std::wstring NativeMainWindow::analysisInputText(HWND control) const {
 }
 
 void NativeMainWindow::setControlText(HWND control, const std::wstring& text) {
+    if (control == nullptr || controlText(control) == text) {
+        return;
+    }
     SetWindowTextW(control, text.c_str());
 }
 
