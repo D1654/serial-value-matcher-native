@@ -93,6 +93,7 @@ if(SVM_BUILD_WIN32_APP)
         src/win32/main_window_modbus.cpp
         src/win32/main_window_preferences.cpp
         src/win32/main_window_send.cpp
+        src/win32/main_window_self_test.cpp
         src/win32/main_window_serial.cpp
         src/win32/main_window_serial_io.cpp
         src/win32/main_window_status.cpp
