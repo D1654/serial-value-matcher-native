@@ -93,6 +93,7 @@ if(SVM_BUILD_WIN32_APP)
         src/win32/main_window_send.cpp
         src/win32/main_window_serial.cpp
         src/win32/main_window_serial_io.cpp
+        src/win32/main_window_status.cpp
         src/win32/main_window_workbench.cpp
         src/win32/native_analysis_workflow.cpp
         src/win32/native_candidate_cache_state.cpp
