@@ -19,6 +19,21 @@ struct NativeProgressState {
     int position = 0;
 };
 
+HBRUSH nativeProgressBorderBrush() {
+    static HBRUSH brush = CreateSolidBrush(kNativeProgressBorderColor);
+    return brush;
+}
+
+HBRUSH nativeProgressBackgroundBrush() {
+    static HBRUSH brush = CreateSolidBrush(kNativeProgressBackgroundColor);
+    return brush;
+}
+
+HBRUSH nativeProgressFillBrush() {
+    static HBRUSH brush = CreateSolidBrush(kNativeProgressFillColor);
+    return brush;
+}
+
 int clampNativeProgressPosition(const NativeProgressState& state, int position) {
     return std::clamp(position, state.minimum, state.maximum);
 }
@@ -36,9 +51,7 @@ void paintNativeProgress(HWND window, HDC dc) {
         state = &fallbackState;
     }
 
-    HBRUSH borderBrush = CreateSolidBrush(kNativeProgressBorderColor);
-    FillRect(dc, &rect, borderBrush);
-    DeleteObject(borderBrush);
+    FillRect(dc, &rect, nativeProgressBorderBrush());
 
     RECT innerRect = {
         rect.left + 2,
@@ -46,9 +59,7 @@ void paintNativeProgress(HWND window, HDC dc) {
         std::max<LONG>(rect.left + 2, rect.right - 2),
         std::max<LONG>(rect.top + 2, rect.bottom - 2),
     };
-    HBRUSH backgroundBrush = CreateSolidBrush(kNativeProgressBackgroundColor);
-    FillRect(dc, &innerRect, backgroundBrush);
-    DeleteObject(backgroundBrush);
+    FillRect(dc, &innerRect, nativeProgressBackgroundBrush());
 
     const int innerWidth = std::max(0, static_cast<int>(innerRect.right - innerRect.left));
     const int range = std::max(1, state->maximum - state->minimum);
@@ -58,9 +69,7 @@ void paintNativeProgress(HWND window, HDC dc) {
         innerWidth);
     if (fillWidth > 0) {
         RECT fillRect = {innerRect.left, innerRect.top, innerRect.left + fillWidth, innerRect.bottom};
-        HBRUSH fillBrush = CreateSolidBrush(kNativeProgressFillColor);
-        FillRect(dc, &fillRect, fillBrush);
-        DeleteObject(fillBrush);
+        FillRect(dc, &fillRect, nativeProgressFillBrush());
     }
 }
 
