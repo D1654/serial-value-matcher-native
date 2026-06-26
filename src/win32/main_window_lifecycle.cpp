@@ -49,6 +49,7 @@ bool NativeMainWindow::create(HINSTANCE instance) {
 
 void NativeMainWindow::show(int commandShow) {
     ShowWindow(window_, commandShow);
+    RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
     UpdateWindow(window_);
 }
 

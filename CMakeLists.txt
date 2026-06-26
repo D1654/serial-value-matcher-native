@@ -509,6 +509,18 @@ target_link_libraries(native_storage_tests PRIVATE svm_native_storage)
 add_test(NAME native_storage_tests COMMAND native_storage_tests)
 
 if(SVM_BUILD_WIN32_APP)
+    add_executable(native_layout_metrics_tests
+        tests/native_layout_metrics_tests.cpp
+        src/win32/native_layout_metrics.cpp
+    )
+    set_target_properties(native_layout_metrics_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    target_include_directories(native_layout_metrics_tests PRIVATE src)
+    add_test(NAME native_layout_metrics_tests COMMAND native_layout_metrics_tests)
+
     add_executable(native_win32_analysis_workflow_tests
         tests/native_win32_analysis_workflow_tests.cpp
         src/win32/native_analysis_workflow.cpp

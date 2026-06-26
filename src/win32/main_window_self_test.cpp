@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <string>
 
 namespace svm::win32 {
@@ -39,6 +40,26 @@ void writeSelfTestTrace(const char* message) {
     if (output) {
         output << message << '\n';
     }
+}
+
+bool controlIsVisible(HWND control) {
+    if (control == nullptr || IsWindowVisible(control) == FALSE) {
+        return false;
+    }
+    RECT rect = {};
+    if (GetWindowRect(control, &rect) == FALSE) {
+        return false;
+    }
+    return rect.right > rect.left && rect.bottom > rect.top;
+}
+
+bool controlsAreVisible(std::initializer_list<HWND> controls) {
+    for (HWND control : controls) {
+        if (!controlIsVisible(control)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 } // namespace
@@ -194,9 +215,110 @@ bool NativeMainWindow::runUiPerformanceTest() {
         return fail("ui-perf-create-window");
     }
 
-    ShowWindow(window.window_, SW_SHOWNOACTIVATE);
-    UpdateWindow(window.window_);
+    window.show(SW_SHOWNOACTIVATE);
     window.layoutControls(kMinTrackWidth, kMinTrackHeight);
+    const auto selectWorkbenchTab = [&](int tabIndex) {
+        if (TabCtrl_SetCurSel(window.workTabs_, tabIndex) < 0) {
+            return false;
+        }
+        NMHDR notification = {};
+        notification.hwndFrom = window.workTabs_;
+        notification.idFrom = IDC_WORK_TABS;
+        notification.code = TCN_SELCHANGE;
+        SendMessageW(window.window_, WM_NOTIFY, IDC_WORK_TABS, reinterpret_cast<LPARAM>(&notification));
+        return true;
+    };
+    const auto keyWorkbenchControlsVisible = [&]() {
+        if (!selectWorkbenchTab(0)
+            || !controlsAreVisible({
+                window.sendModeCombo_,
+                window.textEncodingCombo_,
+                window.lineEndingCombo_,
+                window.historyCombo_,
+                window.sendEdit_,
+                window.sendButton_,
+                window.timedSendCheck_,
+                window.timedPeriodEdit_,
+            })) {
+            return false;
+        }
+
+        if (!selectWorkbenchTab(1)) {
+            return false;
+        }
+        for (std::size_t index = 0; index < window.quickSendEdits_.size(); ++index) {
+            if (!controlIsVisible(window.quickSendEdits_[index]) || !controlIsVisible(window.quickSendButtons_[index])) {
+                return false;
+            }
+        }
+
+        if (!selectWorkbenchTab(2)
+            || !controlsAreVisible({
+                window.filePathEdit_,
+                window.fileBrowseButton_,
+                window.fileSendButton_,
+                window.fileStopButton_,
+                window.fileDelayCombo_,
+                window.fileProgress_,
+            })) {
+            return false;
+        }
+
+        if (!selectWorkbenchTab(3)
+            || !controlsAreVisible({
+                window.scanSlaveEdit_,
+                window.scanFunctionCombo_,
+                window.scanStartEdit_,
+                window.scanEndEdit_,
+                window.modbusButton_,
+                window.modbusProgress_,
+                window.targetLabelEdit_,
+                window.targetValueEdit_,
+                window.targetUnitEdit_,
+                window.toleranceEdit_,
+                window.candidateCombo_,
+                window.analysisButton_,
+                window.ruleVerifyButton_,
+                window.exportReportButton_,
+            })) {
+            return false;
+        }
+
+        return selectWorkbenchTab(4)
+            && controlsAreVisible({
+                window.logCacheCombo_,
+                window.rawEventRetentionCombo_,
+            });
+    };
+    if (!controlsAreVisible({
+            window.serialPanelTitle_,
+            window.portCombo_,
+            window.refreshButton_,
+            window.saveProfileButton_,
+            window.baudCombo_,
+            window.stopBitsCombo_,
+            window.dataBitsCombo_,
+            window.parityCombo_,
+            window.flowControlCombo_,
+            window.connectButton_,
+            window.dtrCheck_,
+            window.rtsCheck_,
+            window.autoReconnectCheck_,
+            window.logPanelTitle_,
+            window.logFormatCombo_,
+            window.logEncodingCombo_,
+            window.logFilterEdit_,
+            window.logSearchEdit_,
+            window.findLogButton_,
+            window.copyLogButton_,
+            window.exportLogButton_,
+            window.receiveLog_,
+        })) {
+        return fail("ui-visible-fixed-controls");
+    }
+    if (!keyWorkbenchControlsVisible()) {
+        return fail("ui-visible-workbench-controls");
+    }
 
     constexpr int kIterations = 300;
     constexpr auto kMaxElapsed = std::chrono::milliseconds(12000);

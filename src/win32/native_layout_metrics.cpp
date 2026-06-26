@@ -34,7 +34,7 @@ NativeUiMetrics nativeUiMetricsForSize(int width, int height) {
     metrics.smallButtonWidth = metrics.tight ? 44 : (metrics.compact ? 48 : 52);
     metrics.desiredSideWidth = metrics.tight ? 150 : (metrics.compact ? 154 : 170);
     metrics.minSideWidth = metrics.tight ? 112 : 140;
-    metrics.desiredWorkHeight = metrics.compact ? 192 : 190;
+    metrics.desiredWorkHeight = metrics.compact ? 230 : 236;
     metrics.minimumLogHeight = metrics.compact ? 150 : 210;
     metrics.logActionWidth = metrics.compact ? 38 : 42;
     return metrics;

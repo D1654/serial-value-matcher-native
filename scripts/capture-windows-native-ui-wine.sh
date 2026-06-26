@@ -145,11 +145,38 @@ assert_screenshot_visible() {
     fi
 }
 
+assert_screenshot_region_detail() {
+    local file="$1"
+    local label="$2"
+    local crop="$3"
+    local min_dark_ratio="$4"
+    local dark_ratio
+    dark_ratio="$(convert "$file" -crop "$crop" -colorspace Gray -threshold 80% -format "%[fx:1-mean]" info: 2>/dev/null || true)"
+    if [[ -z "$dark_ratio" ]]; then
+        echo "无法分析截图区域：$file $label crop=$crop" >&2
+        exit 8
+    fi
+    if awk -v ratio="$dark_ratio" -v min="$min_dark_ratio" "BEGIN { exit !(ratio < min) }"; then
+        echo "截图区域疑似缺少 UI 细节：$label crop=$crop dark=$dark_ratio min=$min_dark_ratio" >&2
+        exit 8
+    fi
+}
+
 capture_checked_screen() {
     local file="$1"
     capture_screen "$file"
     assert_screenshot_visible "$file"
 }
+
+first_window_id="$(head -n 1 "$output_dir/window.ids")"
+geometry="$(xdotool getwindowgeometry --shell "$first_window_id")"
+eval "$geometry"
+toolbar_width=$((WIDTH - 180))
+if [[ "$toolbar_width" -lt 240 ]]; then
+    toolbar_width=240
+fi
+assert_screenshot_region_detail "$output_dir/root.png" "日志工具条" "${toolbar_width}x80+$X+$((Y + 12))" "0.05"
+assert_screenshot_region_detail "$output_dir/root.png" "串口侧栏" "260x330+$((X + WIDTH - 260))+$((Y + 12))" "0.045"
 
 capture_tab_set() {
     local window_id="$1"
@@ -159,9 +186,9 @@ capture_tab_set() {
     local geometry
     geometry="$(xdotool getwindowgeometry --shell "$window_id")"
     eval "$geometry"
-    local tab_y_offset="${SVM_WINE_UI_TAB_Y_OFFSET:-205}"
+    local tab_y_offset="${SVM_WINE_UI_TAB_Y_OFFSET:-251}"
     if [[ "$prefix" == compact-tab-* ]]; then
-        tab_y_offset="${SVM_WINE_UI_COMPACT_TAB_Y_OFFSET:-205}"
+        tab_y_offset="${SVM_WINE_UI_COMPACT_TAB_Y_OFFSET:-243}"
     fi
     local tab_y=$((HEIGHT - tab_y_offset))
     if [[ "$tab_y" -lt 80 ]]; then
@@ -184,10 +211,18 @@ capture_tab_set() {
         sleep 0.55
         capture_checked_screen "$output_dir/${prefix}${tab_names[$index]}.png"
     done
+
+    local single_size
+    local scan_size
+    single_size="$(stat -c%s "$output_dir/${prefix}single.png")"
+    scan_size="$(stat -c%s "$output_dir/${prefix}scan.png")"
+    if (( scan_size * 10 <= single_size * 12 )); then
+        echo "标签页截图疑似未切换到扫描页：${prefix}single.png=${single_size} ${prefix}scan.png=${scan_size}" >&2
+        exit 7
+    fi
 }
 
 if [[ "$capture_tabs" != "0" ]]; then
-    first_window_id="$(head -n 1 "$output_dir/window.ids")"
     capture_tab_set "$first_window_id" "tab-" "$capture_fast_frames" "$fast_frame_delay"
     if [[ "$capture_compact" != "0" ]]; then
         xdotool windowsize --sync "$first_window_id" 760 520 >/dev/null 2>&1 || true

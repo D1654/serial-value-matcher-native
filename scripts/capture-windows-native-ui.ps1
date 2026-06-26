@@ -190,6 +190,65 @@ function Assert-ImageVisible {
     }
 }
 
+function Get-ImageDarkRatio {
+    param(
+        [string]$Path,
+        [int]$X,
+        [int]$Y,
+        [int]$Width,
+        [int]$Height
+    )
+
+    $bitmap = [System.Drawing.Bitmap]::FromFile($Path)
+    try {
+        $left = [Math]::Max(0, $X)
+        $top = [Math]::Max(0, $Y)
+        $right = [Math]::Min($bitmap.Width, $left + [Math]::Max(1, $Width))
+        $bottom = [Math]::Min($bitmap.Height, $top + [Math]::Max(1, $Height))
+        if ($right -le $left -or $bottom -le $top) {
+            throw "截图区域越界：$Path X=$X Y=$Y Width=$Width Height=$Height"
+        }
+
+        $stepX = [Math]::Max(1, [int](($right - $left) / 96))
+        $stepY = [Math]::Max(1, [int](($bottom - $top) / 96))
+        [int64]$dark = 0
+        [int64]$total = 0
+        for ($y = $top; $y -lt $bottom; $y += $stepY) {
+            for ($x = $left; $x -lt $right; $x += $stepX) {
+                $pixel = $bitmap.GetPixel($x, $y)
+                $brightness = [int](($pixel.R + $pixel.G + $pixel.B) / 3)
+                if ($brightness -lt 204) {
+                    $dark += 1
+                }
+                $total += 1
+            }
+        }
+        if ($total -eq 0) {
+            return 0.0
+        }
+        return [double]$dark / [double]$total
+    } finally {
+        $bitmap.Dispose()
+    }
+}
+
+function Assert-ImageRegionDetail {
+    param(
+        [string]$Path,
+        [string]$Label,
+        [int]$X,
+        [int]$Y,
+        [int]$Width,
+        [int]$Height,
+        [double]$MinDarkRatio
+    )
+
+    $darkRatio = Get-ImageDarkRatio -Path $Path -X $X -Y $Y -Width $Width -Height $Height
+    if ($darkRatio -lt $MinDarkRatio) {
+        throw "截图区域疑似缺少 UI 细节：$Label Path=$Path DarkRatio=$darkRatio Min=$MinDarkRatio"
+    }
+}
+
 function Wait-MainWindow {
     param(
         [System.Diagnostics.Process]$Process,
@@ -235,7 +294,7 @@ function Select-NativeTab {
     $margin = if ($tight) { 3 } elseif ($compact) { 4 } else { 6 }
     $statusHeight = if ($compact) { 20 } else { 22 }
     $sideGap = if ($tight) { 4 } elseif ($compact) { 5 } else { 6 }
-    $desiredWorkHeight = if ($compact) { 192 } else { 190 }
+    $desiredWorkHeight = if ($compact) { 230 } else { 236 }
     $minimumLogHeight = if ($compact) { 150 } else { 210 }
 
     $statusY = [Math]::Max($margin, $clientHeight - $statusHeight - 4)
@@ -303,6 +362,14 @@ function Capture-TabSet {
         Assert-ImageVisible -Path $file
         Write-Host "截图完成：$file"
     }
+
+    $singleFile = Join-Path $outputPath "${Prefix}single.png"
+    $scanFile = Join-Path $outputPath "${Prefix}scan.png"
+    $singleSize = [int64](Get-Item $singleFile).Length
+    $scanSize = [int64](Get-Item $scanFile).Length
+    if (($scanSize * 10) -le ($singleSize * 12)) {
+        throw "标签页截图疑似未切换到扫描页：$singleFile=$singleSize $scanFile=$scanSize"
+    }
 }
 
 Write-Host "启动：$ExePath"
@@ -325,6 +392,15 @@ try {
     $rootFile = Join-Path $outputPath "root.png"
     Capture-WindowImage -WindowHandle $windowHandle -Path $rootFile
     Assert-ImageVisible -Path $rootFile
+    $rootImage = [System.Drawing.Bitmap]::FromFile($rootFile)
+    try {
+        $rootWidth = $rootImage.Width
+    } finally {
+        $rootImage.Dispose()
+    }
+    $toolbarWidth = [Math]::Max(240, $rootWidth - 180)
+    Assert-ImageRegionDetail -Path $rootFile -Label "日志工具条" -X 0 -Y 12 -Width $toolbarWidth -Height 80 -MinDarkRatio 0.05
+    Assert-ImageRegionDetail -Path $rootFile -Label "串口侧栏" -X ([Math]::Max(0, $rootWidth - 260)) -Y 12 -Width 260 -Height 330 -MinDarkRatio 0.045
 
     Capture-TabSet -WindowHandle $windowHandle -Prefix "tab-" -Width $DefaultWidth -Height $DefaultHeight
     Capture-TabSet -WindowHandle $windowHandle -Prefix "compact-tab-" -Width $CompactWidth -Height $CompactHeight
