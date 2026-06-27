@@ -16,6 +16,29 @@ const wchar_t* tx(T id) {
     return uiText(id);
 }
 
+bool controlHasVisibleStyle(HWND control) {
+    if (control == nullptr) {
+        return false;
+    }
+    const auto style = static_cast<LONG_PTR>(GetWindowLongPtrW(control, GWL_STYLE));
+    return (style & WS_VISIBLE) != 0;
+}
+
+void raiseVisibleControl(HWND control) {
+    if (!controlHasVisibleStyle(control)) {
+        return;
+    }
+
+    SetWindowPos(
+        control,
+        HWND_TOP,
+        0,
+        0,
+        0,
+        0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+}
+
 } // namespace
 
 void NativeMainWindow::setDefaultFonts() {
@@ -154,6 +177,111 @@ void NativeMainWindow::setWorkbenchTabControlsVisible(int tabIndex, bool visible
     }
 }
 
+void NativeMainWindow::scheduleWorkbenchTabRepaint() {
+    if (workbenchTabRepaintPending_ || window_ == nullptr) {
+        return;
+    }
+    workbenchTabRepaintPending_ = true;
+    PostMessageW(window_, kNativeWorkbenchTabRepaintMessage, 0, 0);
+}
+
+void NativeMainWindow::repaintWorkbenchTabControls() {
+    workbenchTabRepaintPending_ = false;
+    int tabIndex = static_cast<int>(TabCtrl_GetCurSel(workTabs_));
+    if (tabIndex < 0) {
+        tabIndex = 0;
+    }
+    const bool canRedrawWorkbench = workbenchRedrawRect_.right > workbenchRedrawRect_.left
+        && workbenchRedrawRect_.bottom > workbenchRedrawRect_.top;
+    if (workTabs_ != nullptr) {
+        RedrawWindow(workTabs_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
+    }
+    if (workPageBackground_ != nullptr) {
+        SetWindowPos(
+            workPageBackground_,
+            HWND_BOTTOM,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+    }
+
+    const auto raiseCached = [](HWND control, bool cachedVisible) {
+        if (cachedVisible) {
+            raiseVisibleControl(control);
+        }
+    };
+
+    if (tabIndex == 0) {
+        raiseCached(sendModeCombo_, workbenchVisibility_.singleFormatRow);
+        raiseCached(textEncodingCombo_, workbenchVisibility_.singleFormatRow);
+        raiseCached(lineEndingCombo_, workbenchVisibility_.singleFormatRow);
+        raiseCached(historyCombo_, workbenchVisibility_.singleHistory);
+        raiseCached(sendEdit_, workbenchVisibility_.singleSend);
+        raiseCached(sendButton_, workbenchVisibility_.singleSend);
+        raiseCached(timedSendCheck_, workbenchVisibility_.singleTimed);
+        raiseCached(timedPeriodLabel_, workbenchVisibility_.singleTimed);
+        raiseCached(timedPeriodEdit_, workbenchVisibility_.singleTimed);
+    } else if (tabIndex == 1) {
+        for (std::size_t index = 0; index < quickSendEdits_.size(); ++index) {
+            raiseCached(quickSendEdits_[index], workbenchVisibility_.quickSlots[index]);
+            raiseCached(quickSendButtons_[index], workbenchVisibility_.quickSlots[index]);
+        }
+    } else if (tabIndex == 2) {
+        raiseCached(filePathLabel_, workbenchVisibility_.fileFirstRow);
+        raiseCached(filePathEdit_, workbenchVisibility_.fileFirstRow);
+        raiseCached(fileBrowseButton_, workbenchVisibility_.fileFirstRow);
+        raiseCached(fileSendButton_, workbenchVisibility_.fileFirstRow);
+        raiseCached(fileStopButton_, workbenchVisibility_.fileFirstRow);
+        raiseCached(fileDelayLabel_, workbenchVisibility_.fileSecondRow);
+        raiseCached(fileDelayCombo_, workbenchVisibility_.fileSecondRow);
+        raiseCached(fileProgressLabel_, workbenchVisibility_.fileSecondRow);
+        raiseCached(fileProgress_, workbenchVisibility_.fileSecondRow);
+    } else if (tabIndex == 3) {
+        raiseCached(scanSectionLabel_, workbenchVisibility_.scanSection);
+        raiseCached(scanSlaveLabel_, workbenchVisibility_.scanParameterRow);
+        raiseCached(scanSlaveEdit_, workbenchVisibility_.scanParameterRow);
+        raiseCached(scanFunctionLabel_, workbenchVisibility_.scanParameterRow);
+        raiseCached(scanFunctionCombo_, workbenchVisibility_.scanParameterRow);
+        raiseCached(scanStartLabel_, workbenchVisibility_.scanParameterRow);
+        raiseCached(scanStartEdit_, workbenchVisibility_.scanParameterRow);
+        raiseCached(scanEndLabel_, workbenchVisibility_.scanParameterRow);
+        raiseCached(scanEndEdit_, workbenchVisibility_.scanParameterRow);
+        raiseCached(modbusButton_, workbenchVisibility_.scanParameterRow);
+        raiseCached(modbusProgressLabel_, workbenchVisibility_.scanProgressRow);
+        raiseCached(modbusProgress_, workbenchVisibility_.scanProgressRow);
+        raiseCached(modbusProgressText_, workbenchVisibility_.scanProgressRow);
+        raiseCached(analysisSectionLabel_, workbenchVisibility_.scanAnalysisSection);
+        raiseCached(targetStatic_, workbenchVisibility_.scanTargetRow);
+        raiseCached(targetLabelEdit_, workbenchVisibility_.scanTargetRow);
+        raiseCached(targetValueStatic_, workbenchVisibility_.scanTargetRow);
+        raiseCached(targetValueEdit_, workbenchVisibility_.scanTargetRow);
+        raiseCached(targetUnitStatic_, workbenchVisibility_.scanTargetRow);
+        raiseCached(targetUnitEdit_, workbenchVisibility_.scanTargetRow);
+        raiseCached(toleranceStatic_, workbenchVisibility_.scanTargetRow);
+        raiseCached(toleranceEdit_, workbenchVisibility_.scanTargetRow);
+        raiseCached(candidateStatic_, workbenchVisibility_.scanCandidateRow);
+        raiseCached(candidateCombo_, workbenchVisibility_.scanCandidateRow);
+        raiseCached(analysisButton_, workbenchVisibility_.scanCandidateRow);
+        raiseCached(ruleVerifyButton_, workbenchVisibility_.scanCandidateRow);
+        raiseCached(exportReportButton_, workbenchVisibility_.scanCandidateRow);
+    } else if (tabIndex == 4) {
+        raiseCached(logCacheLabel_, workbenchVisibility_.settingsRow);
+        raiseCached(logCacheCombo_, workbenchVisibility_.settingsRow);
+        raiseCached(rawEventRetentionLabel_, workbenchVisibility_.settingsRow);
+        raiseCached(rawEventRetentionCombo_, workbenchVisibility_.settingsRow);
+    }
+
+    if (canRedrawWorkbench && IsWindowVisible(window_) != FALSE) {
+        RedrawWindow(
+            window_,
+            &workbenchRedrawRect_,
+            nullptr,
+            RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+    }
+}
+
 void NativeMainWindow::updateSideHelp(int tabIndex) {
     if (sideHelpTitle_ == nullptr || sideHelpText_ == nullptr) {
         return;
@@ -213,7 +341,11 @@ void NativeMainWindow::applyWorkbenchTabVisibility(int tabIndex) {
     };
 
     updateSideHelp(tabIndex);
-    hideWorkbenchTabControls();
+    if (plan.hideAllControls || plan.previousTabIndex < 0) {
+        hideWorkbenchTabControls();
+    } else if (plan.hidePreviousTab) {
+        setWorkbenchTabControlsVisible(plan.previousTabIndex, false);
+    }
 
     if (!plan.showRequestedTab) {
         workbenchTabState_.finishApply(tabIndex);
@@ -225,6 +357,7 @@ void NativeMainWindow::applyWorkbenchTabVisibility(int tabIndex) {
 
     workbenchTabState_.finishApply(tabIndex);
     resumeRedraw();
+    scheduleWorkbenchTabRepaint();
 }
 
 void NativeMainWindow::updateWorkbenchTab() {

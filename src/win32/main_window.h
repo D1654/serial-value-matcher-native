@@ -38,6 +38,8 @@
 
 namespace svm::win32 {
 
+inline constexpr UINT kNativeWorkbenchTabRepaintMessage = WM_APP + 20;
+
 class NativeMainWindow final {
 public:
     bool create(HINSTANCE instance);
@@ -105,6 +107,8 @@ private:
     void saveUiPreferences();
     void updateWorkbenchTab();
     void applyWorkbenchTabVisibility(int tabIndex);
+    void scheduleWorkbenchTabRepaint();
+    void repaintWorkbenchTabControls();
     void toggleConnection();
     void connectSerial();
     void disconnectSerial();
@@ -321,6 +325,7 @@ private:
     WorkbenchVisibility workbenchVisibility_;
     bool workbenchVisibilityReady_ = false;
     RECT workbenchRedrawRect_ = {};
+    bool workbenchTabRepaintPending_ = false;
     NativeWorkbenchTabState workbenchTabState_;
     std::uint64_t layoutPassCount_ = 0;
     int logThemeIndex_ = 0;
