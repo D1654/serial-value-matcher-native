@@ -74,6 +74,10 @@ bool setLastErrorText(std::string& lastErrorText, unsigned long errorCode, std::
     return false;
 }
 
+bool unsupportedDisabledControlLine(unsigned long errorCode, bool enabled) noexcept {
+    return !enabled && errorCode == ERROR_NOT_SUPPORTED;
+}
+
 std::string commStatusErrorText(DWORD errors) {
     std::string message = "串口接收状态异常：";
     bool first = true;
@@ -146,12 +150,18 @@ bool configureSerialState(HANDLE handle, const SerialOpenOptions& options, std::
 
 bool applyControlLines(HANDLE handle, const SerialOpenOptions& options, std::string& lastErrorText) {
     if (!EscapeCommFunction(handle, options.dataTerminalReady ? SETDTR : CLRDTR)) {
-        return setLastErrorText(lastErrorText, GetLastError(), "设置 DTR 信号");
+        const unsigned long errorCode = GetLastError();
+        if (!unsupportedDisabledControlLine(errorCode, options.dataTerminalReady)) {
+            return setLastErrorText(lastErrorText, errorCode, "设置 DTR 信号");
+        }
     }
 
     if (options.flowControl != SerialFlowControl::HardwareRtsCts
         && !EscapeCommFunction(handle, options.requestToSend ? SETRTS : CLRRTS)) {
-        return setLastErrorText(lastErrorText, GetLastError(), "设置 RTS 信号");
+        const unsigned long errorCode = GetLastError();
+        if (!unsupportedDisabledControlLine(errorCode, options.requestToSend)) {
+            return setLastErrorText(lastErrorText, errorCode, "设置 RTS 信号");
+        }
     }
 
     return true;

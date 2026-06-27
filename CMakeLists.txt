@@ -497,6 +497,19 @@ set_target_properties(native_win32_serial_tests PROPERTIES
 target_link_libraries(native_win32_serial_tests PRIVATE svm_win32_serial)
 add_test(NAME native_win32_serial_tests COMMAND native_win32_serial_tests)
 
+if(WIN32)
+    add_executable(native_win32_serial_loopback_tests
+        tests/native_win32_serial_loopback_tests.cpp
+    )
+    set_target_properties(native_win32_serial_loopback_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    target_link_libraries(native_win32_serial_loopback_tests PRIVATE svm_win32_serial)
+    add_test(NAME native_win32_serial_loopback_tests COMMAND native_win32_serial_loopback_tests)
+endif()
+
 add_executable(native_storage_tests
     tests/native_storage_tests.cpp
 )
