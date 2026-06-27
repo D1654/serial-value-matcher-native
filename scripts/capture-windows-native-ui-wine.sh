@@ -16,6 +16,7 @@ capture_tabs="${SVM_WINE_UI_CAPTURE_TABS:-1}"
 capture_compact="${SVM_WINE_UI_CAPTURE_COMPACT:-1}"
 capture_fast_frames="${SVM_WINE_UI_CAPTURE_FAST_FRAMES:-1}"
 fast_frame_delay="${SVM_WINE_UI_FAST_FRAME_DELAY:-0.15}"
+capture_resize_sweep="${SVM_WINE_UI_CAPTURE_RESIZE_SWEEP:-1}"
 
 require_command() {
     local name="$1"
@@ -44,6 +45,7 @@ rm -f \
     "$output_dir"/root.png \
     "$output_dir"/tab-*.png \
     "$output_dir"/compact-tab-*.png \
+    "$output_dir"/resize-*.png \
     "$output_dir"/self-test.log \
     "$output_dir"/ui-perf-test.log \
     "$output_dir"/app.stdout \
@@ -88,6 +90,7 @@ capture_compact="$6"
 capture_fast_frames="$7"
 fast_frame_delay="$8"
 ui_perf_log_windows="$9"
+capture_resize_sweep="${10}"
 
 SVM_NATIVE_SELF_TEST_LOG="$ui_perf_log_windows" wine "$exe_path" --ui-perf-test
 
@@ -178,6 +181,30 @@ fi
 assert_screenshot_region_detail "$output_dir/root.png" "日志工具条" "${toolbar_width}x80+$X+$((Y + 12))" "0.05"
 assert_screenshot_region_detail "$output_dir/root.png" "串口侧栏" "260x330+$((X + WIDTH - 260))+$((Y + 12))" "0.045"
 
+capture_resize_sweep_set() {
+    local window_id="$1"
+    local sizes=("980 690" "760 520" "1180 740" "900 620" "1212 753")
+    local index=0
+    for size in "${sizes[@]}"; do
+        local resize_width resize_height
+        read -r resize_width resize_height <<< "$size"
+        xdotool windowsize --sync "$window_id" "$resize_width" "$resize_height" >/dev/null 2>&1 || true
+        sleep 1
+        capture_checked_screen "$output_dir/resize-${index}.png"
+        index=$((index + 1))
+    done
+
+    local geometry
+    geometry="$(xdotool getwindowgeometry --shell "$window_id")"
+    eval "$geometry"
+    local resize_toolbar_width=$((WIDTH - 180))
+    if [[ "$resize_toolbar_width" -lt 240 ]]; then
+        resize_toolbar_width=240
+    fi
+    assert_screenshot_region_detail "$output_dir/resize-$((index - 1)).png" "缩放后日志工具条" "${resize_toolbar_width}x80+$X+$((Y + 12))" "0.05"
+    assert_screenshot_region_detail "$output_dir/resize-$((index - 1)).png" "缩放后串口侧栏" "260x330+$((X + WIDTH - 260))+$((Y + 12))" "0.045"
+}
+
 capture_tab_set() {
     local window_id="$1"
     local prefix="$2"
@@ -230,7 +257,11 @@ if [[ "$capture_tabs" != "0" ]]; then
         capture_tab_set "$first_window_id" "compact-tab-" "$capture_fast_frames" "$fast_frame_delay"
     fi
 fi
-' bash "$exe_path" "$output_dir" "$window_name" "$stabilize_seconds" "$capture_tabs" "$capture_compact" "$capture_fast_frames" "$fast_frame_delay" "$ui_perf_log_windows"
+
+if [[ "$capture_resize_sweep" != "0" ]]; then
+    capture_resize_sweep_set "$first_window_id"
+fi
+' bash "$exe_path" "$output_dir" "$window_name" "$stabilize_seconds" "$capture_tabs" "$capture_compact" "$capture_fast_frames" "$fast_frame_delay" "$ui_perf_log_windows" "$capture_resize_sweep"
 
 echo "Wine UI 截图完成：$output_dir/root.png"
 echo "窗口信息：$output_dir/window-info.txt"

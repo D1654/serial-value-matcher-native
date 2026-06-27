@@ -18,6 +18,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         return handleCreateMessage();
     case WM_SIZE:
         layoutControls(LOWORD(lParam), HIWORD(lParam));
+        RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
         return 0;
     case WM_NOTIFY: {
         if (const auto result = handleNotifyMessage(lParam); result.has_value()) {

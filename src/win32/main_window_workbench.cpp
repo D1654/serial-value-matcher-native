@@ -208,16 +208,12 @@ void NativeMainWindow::applyWorkbenchTabVisibility(int tabIndex) {
     const auto resumeRedraw = [&]() {
         if (suspendRedraw) {
             SendMessageW(window_, WM_SETREDRAW, TRUE, 0);
-            RedrawWindow(window_, &workbenchRedrawRect_, nullptr, RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN);
+            RedrawWindow(window_, &workbenchRedrawRect_, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
         }
     };
 
     updateSideHelp(tabIndex);
-    if (plan.hideAllControls) {
-        hideWorkbenchTabControls();
-    } else if (plan.hidePreviousTab) {
-        setWorkbenchTabControlsVisible(plan.previousTabIndex, false);
-    }
+    hideWorkbenchTabControls();
 
     if (!plan.showRequestedTab) {
         workbenchTabState_.finishApply(tabIndex);
@@ -227,9 +223,6 @@ void NativeMainWindow::applyWorkbenchTabVisibility(int tabIndex) {
 
     setWorkbenchTabControlsVisible(tabIndex, true);
 
-    if (plan.redrawAfterApply) {
-        RedrawWindow(window_, &workbenchRedrawRect_, nullptr, RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN);
-    }
     workbenchTabState_.finishApply(tabIndex);
     resumeRedraw();
 }

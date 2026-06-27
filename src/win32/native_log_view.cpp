@@ -79,7 +79,7 @@ NativeLogRedrawGuard::NativeLogRedrawGuard(HWND window)
 NativeLogRedrawGuard::~NativeLogRedrawGuard() {
     if (window_ != nullptr) {
         SendMessageW(window_, WM_SETREDRAW, TRUE, 0);
-        RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN);
+        RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
     }
 }
 
@@ -180,7 +180,7 @@ void nativeLogApplyTheme(HWND logControl, bool usesRichEdit, int themeIndex) {
     format.dwMask = CFM_COLOR;
     format.crTextColor = palette.normal;
     SendMessageW(logControl, EM_SETCHARFORMAT, SCF_DEFAULT, reinterpret_cast<LPARAM>(&format));
-    InvalidateRect(logControl, nullptr, FALSE);
+    InvalidateRect(logControl, nullptr, TRUE);
 }
 
 void nativeLogSetTextLimit(HWND logControl, std::size_t limit) {

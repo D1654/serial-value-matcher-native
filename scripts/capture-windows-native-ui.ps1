@@ -372,6 +372,49 @@ function Capture-TabSet {
     }
 }
 
+function Capture-ResizeSweep {
+    param([IntPtr]$WindowHandle)
+
+    [NativeUiCapture]::ShowWindow($WindowHandle, [NativeUiCapture]::SW_RESTORE) | Out-Null
+    [NativeUiCapture]::SetForegroundWindow($WindowHandle) | Out-Null
+    $setWindowFlags = [NativeUiCapture]::SWP_NOZORDER -bor [NativeUiCapture]::SWP_SHOWWINDOW
+    $sizes = @(
+        @{ Width = 980; Height = 690 },
+        @{ Width = 760; Height = 520 },
+        @{ Width = 1180; Height = 740 },
+        @{ Width = 900; Height = 620 },
+        @{ Width = $DefaultWidth; Height = $DefaultHeight }
+    )
+
+    for ($index = 0; $index -lt $sizes.Count; $index += 1) {
+        $size = $sizes[$index]
+        [NativeUiCapture]::SetWindowPos(
+            $WindowHandle,
+            [IntPtr]::Zero,
+            0,
+            0,
+            [int]$size["Width"],
+            [int]$size["Height"],
+            $setWindowFlags) | Out-Null
+        Start-Sleep -Milliseconds 1000
+        $file = Join-Path $outputPath "resize-$index.png"
+        Capture-WindowImage -WindowHandle $WindowHandle -Path $file
+        Assert-ImageVisible -Path $file
+        Write-Host "缩放截图完成：$file"
+    }
+
+    $finalFile = Join-Path $outputPath ("resize-{0}.png" -f ($sizes.Count - 1))
+    $finalImage = [System.Drawing.Bitmap]::FromFile($finalFile)
+    try {
+        $finalWidth = $finalImage.Width
+    } finally {
+        $finalImage.Dispose()
+    }
+    $toolbarWidth = [Math]::Max(240, $finalWidth - 180)
+    Assert-ImageRegionDetail -Path $finalFile -Label "缩放后日志工具条" -X 0 -Y 12 -Width $toolbarWidth -Height 80 -MinDarkRatio 0.05
+    Assert-ImageRegionDetail -Path $finalFile -Label "缩放后串口侧栏" -X ([Math]::Max(0, $finalWidth - 260)) -Y 12 -Width 260 -Height 330 -MinDarkRatio 0.045
+}
+
 Write-Host "启动：$ExePath"
 $process = Start-Process -FilePath $ExePath -PassThru
 try {
@@ -404,6 +447,7 @@ try {
 
     Capture-TabSet -WindowHandle $windowHandle -Prefix "tab-" -Width $DefaultWidth -Height $DefaultHeight
     Capture-TabSet -WindowHandle $windowHandle -Prefix "compact-tab-" -Width $CompactWidth -Height $CompactHeight
+    Capture-ResizeSweep -WindowHandle $windowHandle
 
     "ok" | Set-Content -Path (Join-Path $outputPath "capture-status.txt") -Encoding UTF8
 } finally {
