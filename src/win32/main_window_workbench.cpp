@@ -314,6 +314,9 @@ void NativeMainWindow::updateSideHelp(int tabIndex) {
     setControlText(sideHelpTitle_, tx(T::SideHelpTitle));
     setControlText(sideHelpText_, tx(helpId));
     workbenchTabState_.markHelpUpdated(tabIndex);
+    RedrawWindow(sideHelpFrame_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
+    RedrawWindow(sideHelpTitle_, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
+    RedrawWindow(sideHelpText_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
 }
 
 void NativeMainWindow::applyWorkbenchTabVisibility(int tabIndex) {
@@ -326,6 +329,7 @@ void NativeMainWindow::applyWorkbenchTabVisibility(int tabIndex) {
         workbenchVisibility_.pageVisible,
         canRedrawWorkbench,
         suspendRedraw);
+    updateSideHelp(tabIndex);
     if (plan.skip) {
         return;
     }
@@ -340,7 +344,6 @@ void NativeMainWindow::applyWorkbenchTabVisibility(int tabIndex) {
         }
     };
 
-    updateSideHelp(tabIndex);
     if (plan.hideAllControls || plan.previousTabIndex < 0) {
         hideWorkbenchTabControls();
     } else if (plan.hidePreviousTab) {

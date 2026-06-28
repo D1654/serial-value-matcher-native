@@ -12,12 +12,14 @@
 
 #include <chrono>
 #include <commctrl.h>
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
 #include <string>
+#include <utility>
 
 namespace svm::win32 {
 namespace {
@@ -290,6 +292,21 @@ bool NativeMainWindow::runUiPerformanceTest() {
                 window.rawEventRetentionCombo_,
             });
     };
+    const auto sideHelpTracksWorkbenchTabs = [&]() {
+        const std::array<std::pair<int, T>, 5> expected = {{
+            {0, T::SideHelpSingle},
+            {1, T::SideHelpQuick},
+            {2, T::SideHelpFile},
+            {3, T::SideHelpScan},
+            {4, T::SideHelpSettings},
+        }};
+        for (const auto& [tabIndex, helpText] : expected) {
+            if (!selectWorkbenchTab(tabIndex) || window.controlText(window.sideHelpText_) != tx(helpText)) {
+                return false;
+            }
+        }
+        return true;
+    };
     if (!controlsAreVisible({
             window.serialPanelTitle_,
             window.portCombo_,
@@ -318,6 +335,9 @@ bool NativeMainWindow::runUiPerformanceTest() {
     }
     if (!keyWorkbenchControlsVisible()) {
         return fail("ui-visible-workbench-controls");
+    }
+    if (!sideHelpTracksWorkbenchTabs()) {
+        return fail("ui-side-help-tab-text");
     }
 
     constexpr int kIterations = 300;

@@ -180,8 +180,9 @@ void NativeMainWindow::layoutControls(int width, int height) {
         const int helpY = sideHelpY;
         const int helpPad = compact ? 6 : 7;
         const int helpTitleHeight = compact ? 17 : 18;
+        const int helpTitleWidth = compact ? 66 : 74;
         moveControl(sideHelpFrame_, x, helpY, sideInnerWidth, helpHeight, TRUE);
-        moveControl(sideHelpTitle_, x + helpPad, helpY + helpPad, std::max(1, sideInnerWidth - helpPad * 2), helpTitleHeight, TRUE);
+        moveControl(sideHelpTitle_, x + helpPad, helpY + helpPad, std::min(std::max(1, sideInnerWidth - helpPad * 2), helpTitleWidth), helpTitleHeight, TRUE);
         moveControl(
             sideHelpText_,
             x + helpPad,
