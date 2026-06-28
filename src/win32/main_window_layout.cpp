@@ -57,15 +57,36 @@ void NativeMainWindow::paintLayoutChrome() {
 
         const int splitterHeight = static_cast<int>(splitterRect.bottom - splitterRect.top);
         const int centerY = static_cast<int>(splitterRect.top) + std::max(1, splitterHeight) / 2;
-        HPEN linePen = CreatePen(PS_SOLID, 1, RGB(170, 170, 170));
-        HGDIOBJ oldPen = linePen != nullptr ? SelectObject(dc, linePen) : nullptr;
-        MoveToEx(dc, splitterRect.left + 3, centerY, nullptr);
-        LineTo(dc, splitterRect.right - 3, centerY);
+        const int centerX = static_cast<int>(splitterRect.left + splitterRect.right) / 2;
+        const int gripHalfWidth = std::min(42, std::max(14, static_cast<int>(splitterRect.right - splitterRect.left) / 12));
+
+        HPEN borderPen = CreatePen(PS_SOLID, 1, RGB(178, 178, 178));
+        HGDIOBJ oldPen = borderPen != nullptr ? SelectObject(dc, borderPen) : nullptr;
+        MoveToEx(dc, splitterRect.left + 3, splitterRect.top + 1, nullptr);
+        LineTo(dc, splitterRect.right - 3, splitterRect.top + 1);
+        MoveToEx(dc, splitterRect.left + 3, splitterRect.bottom - 2, nullptr);
+        LineTo(dc, splitterRect.right - 3, splitterRect.bottom - 2);
+
+        HPEN gripPen = CreatePen(PS_SOLID, 1, RGB(118, 118, 118));
+        if (gripPen != nullptr) {
+            if (oldPen == nullptr) {
+                oldPen = SelectObject(dc, gripPen);
+            } else {
+                SelectObject(dc, gripPen);
+            }
+        }
+        MoveToEx(dc, centerX - gripHalfWidth, centerY - 2, nullptr);
+        LineTo(dc, centerX + gripHalfWidth, centerY - 2);
+        MoveToEx(dc, centerX - gripHalfWidth, centerY + 2, nullptr);
+        LineTo(dc, centerX + gripHalfWidth, centerY + 2);
         if (oldPen != nullptr) {
             SelectObject(dc, oldPen);
         }
-        if (linePen != nullptr) {
-            DeleteObject(linePen);
+        if (gripPen != nullptr) {
+            DeleteObject(gripPen);
+        }
+        if (borderPen != nullptr) {
+            DeleteObject(borderPen);
         }
     }
 

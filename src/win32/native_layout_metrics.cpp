@@ -37,7 +37,7 @@ NativeUiMetrics nativeUiMetricsForSize(int width, int height) {
     metrics.desiredWorkHeight = metrics.compact ? 230 : 236;
     metrics.minimumWorkHeight = metrics.compact ? 176 : 188;
     metrics.minimumLogHeight = metrics.compact ? 150 : 210;
-    metrics.splitterHeight = metrics.tight ? 5 : 6;
+    metrics.splitterHeight = 12;
     metrics.logActionWidth = metrics.compact ? 38 : 42;
     return metrics;
 }

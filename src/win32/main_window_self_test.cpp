@@ -339,6 +339,12 @@ bool NativeMainWindow::runUiPerformanceTest() {
     if (!sideHelpTracksWorkbenchTabs()) {
         return fail("ui-side-help-tab-text");
     }
+    if (window.workbenchSplitterRect_.bottom - window.workbenchSplitterRect_.top < 10
+        || !window.splitterHitTest(
+            (window.workbenchSplitterRect_.left + window.workbenchSplitterRect_.right) / 2,
+            (window.workbenchSplitterRect_.top + window.workbenchSplitterRect_.bottom) / 2)) {
+        return fail("ui-workbench-splitter-hit-target");
+    }
 
     constexpr int kIterations = 300;
     constexpr auto kMaxElapsed = std::chrono::milliseconds(12000);

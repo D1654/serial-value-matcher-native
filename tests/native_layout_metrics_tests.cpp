@@ -14,7 +14,7 @@ void compactDesktopMetricsStayUsable() {
     assert(metrics.desiredWorkHeight == 230);
     assert(metrics.minimumWorkHeight == 176);
     assert(metrics.minimumLogHeight == 150);
-    assert(metrics.splitterHeight == 5);
+    assert(metrics.splitterHeight == 12);
     assert(svm::win32::sendControlLayoutIsSane(320));
     assert(svm::win32::logToolbarLayoutIsSane(360));
     assert(svm::win32::scanTabLayoutIsSane(554, 132));
@@ -27,7 +27,7 @@ void standardDesktopMetricsStayUsable() {
     assert(metrics.desiredWorkHeight == 236);
     assert(metrics.minimumWorkHeight == 188);
     assert(metrics.minimumLogHeight == 210);
-    assert(metrics.splitterHeight == 6);
+    assert(metrics.splitterHeight == 12);
     assert(svm::win32::mainLayoutProbeIsFullyUsableAtSize(760, 520));
     assert(svm::win32::mainLayoutProbeIsFullyUsableAtSize(1040, 720));
     assert(svm::win32::mainLayoutProbeIsFullyUsableAtSize(1366, 768));
