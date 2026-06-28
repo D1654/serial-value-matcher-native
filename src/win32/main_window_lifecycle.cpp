@@ -22,6 +22,7 @@ bool NativeMainWindow::create(HINSTANCE instance) {
 
     WNDCLASSEXW windowClass = {};
     windowClass.cbSize = sizeof(windowClass);
+    windowClass.style = CS_DBLCLKS;
     windowClass.lpfnWndProc = NativeMainWindow::windowProc;
     windowClass.hInstance = instance_;
     windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);

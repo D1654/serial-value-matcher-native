@@ -88,11 +88,14 @@ struct NativeUiMetrics {
     int desiredSideWidth = 0;
     int minSideWidth = 0;
     int desiredWorkHeight = 0;
+    int minimumWorkHeight = 0;
     int minimumLogHeight = 0;
+    int splitterHeight = 0;
     int logActionWidth = 0;
 };
 
 NativeUiMetrics nativeUiMetricsForSize(int width, int height);
+int clampedWorkbenchHeightForContent(int requestedHeight, const NativeUiMetrics& metrics, int contentHeight);
 SendControlLayout calculateSendControlLayout(int x, int y, int innerWidth, int row, int gap, int labelHeight);
 LogToolbarLayout calculateLogToolbarLayout(int x, int y, int innerWidth, int row, int gap, int preferredActionWidth);
 bool logToolbarLayoutIsSane(int innerWidth);

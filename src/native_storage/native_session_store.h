@@ -60,6 +60,7 @@ struct UiPreferences {
     int fileSendDelayMs = 0;
     int logVisibleCharLimit = 350000;
     int rawEventRetentionLimitMb = 100;
+    int workbenchHeight = 0;
     std::vector<std::string> quickSendSlots;
     int windowLeft = -1;
     int windowTop = -1;

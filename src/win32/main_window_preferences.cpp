@@ -46,6 +46,7 @@ void NativeMainWindow::applyUiPreferences() {
     selectComboData(logCacheCombo_, static_cast<LPARAM>(logVisibleCharLimit_));
     applyRawEventRetentionLimit(preferences.rawEventRetentionLimitMb);
     selectComboData(rawEventRetentionCombo_, preferences.rawEventRetentionLimitMb);
+    preferredWorkbenchHeight_ = preferences.workbenchHeight;
     for (std::size_t index = 0; index < quickSendEdits_.size() && index < preferences.quickSendSlots.size(); ++index) {
         setControlText(quickSendEdits_[index], utf8ToWide(preferences.quickSendSlots[index]));
     }
@@ -90,6 +91,7 @@ void NativeMainWindow::saveUiPreferences() {
     preferences.logVisibleCharLimit = static_cast<int>(nativeNormalizeLogVisibleCharLimit(logVisibleCharLimit_));
     preferences.rawEventRetentionLimitMb = nativeNormalizeRawEventRetentionMb(
         static_cast<int>(selectedComboData(rawEventRetentionCombo_, kNativeDefaultRawEventRetentionMb)));
+    preferences.workbenchHeight = nativeNormalizeWorkbenchHeight(preferredWorkbenchHeight_);
     preferences.quickSendSlots.clear();
     preferences.quickSendSlots.reserve(quickSendEdits_.size());
     for (HWND edit : quickSendEdits_) {

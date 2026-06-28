@@ -18,11 +18,15 @@ inline constexpr std::size_t kNativeQuickSendSlotCount = 10;
 inline constexpr std::size_t kNativeMinLogVisibleChars = 200000;
 inline constexpr std::size_t kNativeMaxLogVisibleChars = 100000000;
 inline constexpr std::size_t kNativeDefaultLogVisibleChars = 350000;
+inline constexpr int kNativeDefaultWorkbenchHeight = 0;
+inline constexpr int kNativeMinWorkbenchHeight = 120;
+inline constexpr int kNativeMaxWorkbenchHeight = 900;
 
 int nativeNormalizeTimedSendPeriodMs(int periodMs) noexcept;
 int nativeNormalizeFileSendDelayMs(int delayMs) noexcept;
 int nativeNormalizeRawEventRetentionMb(int value) noexcept;
 std::size_t nativeNormalizeLogVisibleCharLimit(std::size_t charLimit) noexcept;
+int nativeNormalizeWorkbenchHeight(int workbenchHeight) noexcept;
 std::vector<std::string> nativeNormalizeQuickSendSlots(std::vector<std::string> slots, std::size_t slotCount = kNativeQuickSendSlotCount);
 native_storage::UiPreferences nativeNormalizeUiPreferences(native_storage::UiPreferences preferences, std::size_t quickSendSlotCount = kNativeQuickSendSlotCount);
 bool nativeUiPreferencesSameSettings(const native_storage::UiPreferences& left, const native_storage::UiPreferences& right);

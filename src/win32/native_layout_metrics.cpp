@@ -35,9 +35,18 @@ NativeUiMetrics nativeUiMetricsForSize(int width, int height) {
     metrics.desiredSideWidth = metrics.tight ? 150 : (metrics.compact ? 154 : 170);
     metrics.minSideWidth = metrics.tight ? 112 : 140;
     metrics.desiredWorkHeight = metrics.compact ? 230 : 236;
+    metrics.minimumWorkHeight = metrics.compact ? 176 : 188;
     metrics.minimumLogHeight = metrics.compact ? 150 : 210;
+    metrics.splitterHeight = metrics.tight ? 5 : 6;
     metrics.logActionWidth = metrics.compact ? 38 : 42;
     return metrics;
+}
+
+int clampedWorkbenchHeightForContent(int requestedHeight, const NativeUiMetrics& metrics, int contentHeight) {
+    const int maximumHeight = std::max(84, contentHeight - metrics.minimumLogHeight - metrics.splitterHeight);
+    const int minimumHeight = std::min(std::max(84, metrics.minimumWorkHeight), maximumHeight);
+    const int desiredHeight = requestedHeight > 0 ? requestedHeight : metrics.desiredWorkHeight;
+    return std::clamp(desiredHeight, minimumHeight, maximumHeight);
 }
 
 SendControlLayout calculateSendControlLayout(int x, int y, int innerWidth, int row, int gap, int labelHeight) {
@@ -230,9 +239,9 @@ MainLayoutProbe calculateMainLayoutProbe(int requestedWidth, int requestedHeight
     probe.contentY = probe.margin;
     probe.contentHeight = std::max(280, probe.statusY - probe.margin);
 
-    probe.sendHeight = metrics.desiredWorkHeight;
+    probe.sendHeight = clampedWorkbenchHeightForContent(metrics.desiredWorkHeight, metrics, probe.contentHeight);
     probe.workflowY = probe.margin;
-    probe.workflowHeight = std::max(150, probe.contentHeight - probe.sendHeight - metrics.sideGap);
+    probe.workflowHeight = std::max(150, probe.contentHeight - probe.sendHeight - metrics.splitterHeight);
     probe.sendInnerWidth = probe.leftWidth - probe.groupPad * 2;
     probe.logInnerWidth = probe.leftWidth - probe.groupPad * 2;
 

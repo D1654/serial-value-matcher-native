@@ -29,6 +29,13 @@ std::size_t nativeNormalizeLogVisibleCharLimit(std::size_t charLimit) noexcept {
     return std::clamp<std::size_t>(charLimit, kNativeMinLogVisibleChars, kNativeMaxLogVisibleChars);
 }
 
+int nativeNormalizeWorkbenchHeight(int workbenchHeight) noexcept {
+    if (workbenchHeight <= 0) {
+        return kNativeDefaultWorkbenchHeight;
+    }
+    return std::clamp(workbenchHeight, kNativeMinWorkbenchHeight, kNativeMaxWorkbenchHeight);
+}
+
 std::vector<std::string> nativeNormalizeQuickSendSlots(std::vector<std::string> slots, std::size_t slotCount) {
     slots.resize(slotCount);
     return slots;
@@ -42,6 +49,7 @@ native_storage::UiPreferences nativeNormalizeUiPreferences(native_storage::UiPre
         : static_cast<std::size_t>(preferences.logVisibleCharLimit);
     preferences.logVisibleCharLimit = static_cast<int>(nativeNormalizeLogVisibleCharLimit(visibleCharLimit));
     preferences.rawEventRetentionLimitMb = nativeNormalizeRawEventRetentionMb(preferences.rawEventRetentionLimitMb);
+    preferences.workbenchHeight = nativeNormalizeWorkbenchHeight(preferences.workbenchHeight);
     preferences.quickSendSlots = nativeNormalizeQuickSendSlots(std::move(preferences.quickSendSlots), quickSendSlotCount);
     return preferences;
 }
@@ -61,6 +69,7 @@ bool nativeUiPreferencesSameSettings(const native_storage::UiPreferences& left, 
         && left.fileSendDelayMs == right.fileSendDelayMs
         && left.logVisibleCharLimit == right.logVisibleCharLimit
         && left.rawEventRetentionLimitMb == right.rawEventRetentionLimitMb
+        && left.workbenchHeight == right.workbenchHeight
         && left.quickSendSlots == right.quickSendSlots
         && left.windowLeft == right.windowLeft
         && left.windowTop == right.windowTop

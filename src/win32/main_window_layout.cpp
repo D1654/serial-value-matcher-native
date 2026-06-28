@@ -4,12 +4,73 @@
 
 #include "win32/native_control_utils.h"
 #include "win32/native_layout_metrics.h"
+#include "win32/native_ui_preferences.h"
 
 #include <algorithm>
 #include <array>
 #include <commctrl.h>
 
 namespace svm::win32 {
+
+bool NativeMainWindow::splitterHitTest(int x, int y) const noexcept {
+    return workbenchSplitterRect_.right > workbenchSplitterRect_.left
+        && workbenchSplitterRect_.bottom > workbenchSplitterRect_.top
+        && x >= workbenchSplitterRect_.left
+        && x < workbenchSplitterRect_.right
+        && y >= workbenchSplitterRect_.top
+        && y < workbenchSplitterRect_.bottom;
+}
+
+int NativeMainWindow::clampedWorkbenchHeightForClient(int requestedHeight, int width, int height) const {
+    width = std::max(width, 1);
+    height = std::max(height, 1);
+    const NativeUiMetrics metrics = nativeUiMetricsForSize(width, height);
+    const int statusY = std::max(metrics.margin, height - metrics.statusHeight - 4);
+    const int contentHeight = std::max(1, statusY - metrics.margin);
+    return clampedWorkbenchHeightForContent(
+        nativeNormalizeWorkbenchHeight(requestedHeight),
+        metrics,
+        contentHeight);
+}
+
+void NativeMainWindow::relayoutCurrentClient() {
+    if (window_ == nullptr) {
+        return;
+    }
+    RECT clientRect = {};
+    GetClientRect(window_, &clientRect);
+    layoutControls(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top);
+    RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+}
+
+void NativeMainWindow::paintLayoutChrome() {
+    PAINTSTRUCT paint = {};
+    HDC dc = BeginPaint(window_, &paint);
+    if (dc == nullptr) {
+        return;
+    }
+
+    if (workbenchSplitterRect_.right > workbenchSplitterRect_.left
+        && workbenchSplitterRect_.bottom > workbenchSplitterRect_.top) {
+        RECT splitterRect = workbenchSplitterRect_;
+        FillRect(dc, &splitterRect, GetSysColorBrush(COLOR_BTNFACE));
+
+        const int splitterHeight = static_cast<int>(splitterRect.bottom - splitterRect.top);
+        const int centerY = static_cast<int>(splitterRect.top) + std::max(1, splitterHeight) / 2;
+        HPEN linePen = CreatePen(PS_SOLID, 1, RGB(170, 170, 170));
+        HGDIOBJ oldPen = linePen != nullptr ? SelectObject(dc, linePen) : nullptr;
+        MoveToEx(dc, splitterRect.left + 3, centerY, nullptr);
+        LineTo(dc, splitterRect.right - 3, centerY);
+        if (oldPen != nullptr) {
+            SelectObject(dc, oldPen);
+        }
+        if (linePen != nullptr) {
+            DeleteObject(linePen);
+        }
+    }
+
+    EndPaint(window_, &paint);
+}
 
 void NativeMainWindow::layoutControls(int width, int height) {
     ++layoutPassCount_;
@@ -40,13 +101,16 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int mainWidth = std::max(1, sideX - sideGap - mainX);
     const int contentHeight = std::max(1, statusY - margin);
 
-    const int desiredWorkHeight = metrics.desiredWorkHeight;
     const int minimumLogHeight = metrics.minimumLogHeight;
-    const int maximumWorkHeight = std::max(84, contentHeight - minimumLogHeight - sideGap);
-    const int workHeight = std::max(84, std::min(desiredWorkHeight, maximumWorkHeight));
+    const int splitterHeight = metrics.splitterHeight;
+    const int requestedWorkHeight = preferredWorkbenchHeight_ > 0 ? preferredWorkbenchHeight_ : metrics.desiredWorkHeight;
+    const int workHeight = clampedWorkbenchHeightForContent(requestedWorkHeight, metrics, contentHeight);
+    currentWorkbenchHeight_ = workHeight;
     const int logY = margin;
-    const int logHeight = std::max(1, statusY - logY - workHeight - sideGap);
-    const int sendY = logY + logHeight + sideGap;
+    const int logHeight = std::max(1, statusY - logY - workHeight - splitterHeight);
+    const int splitterY = logY + logHeight;
+    workbenchSplitterRect_ = {mainX, splitterY, mainX + mainWidth, splitterY + splitterHeight};
+    const int sendY = splitterY + splitterHeight;
     const int sendHeight = std::max(1, statusY - sendY - 2);
     const int tabsY = sendY;
     const int tabsHeight = std::max(84, sendHeight);

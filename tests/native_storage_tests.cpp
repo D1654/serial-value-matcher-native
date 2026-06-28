@@ -399,6 +399,7 @@ void uiPreferencesRoundTrip() {
     preferences.fileSendDelayMs = 20;
     preferences.logVisibleCharLimit = 500000;
     preferences.rawEventRetentionLimitMb = 500;
+    preferences.workbenchHeight = 260;
     preferences.quickSendSlots = {"01 03 00 00 00 01", "AT+RST", "", "", "", "", "", "", "", "AA 55"};
     preferences.windowLeft = 20;
     preferences.windowTop = 30;
@@ -416,6 +417,7 @@ void uiPreferencesRoundTrip() {
     svm::native_storage::UiPreferences replacementPreferences = preferences;
     replacementPreferences.logThemeIndex = 3;
     replacementPreferences.logVisibleCharLimit = 750000;
+    replacementPreferences.workbenchHeight = 300;
     replacementPreferences.updatedAtUtc = "2026-06-13T00:20:00Z";
     assert(store.saveUiPreferences(replacementPreferences));
 
@@ -436,6 +438,7 @@ void uiPreferencesRoundTrip() {
     assert(loaded->fileSendDelayMs == 20);
     assert(loaded->logVisibleCharLimit == 750000);
     assert(loaded->rawEventRetentionLimitMb == 500);
+    assert(loaded->workbenchHeight == 300);
     assert(loaded->quickSendSlots.size() == 10);
     assert(loaded->quickSendSlots[0] == "01 03 00 00 00 01");
     assert(loaded->quickSendSlots[1] == "AT+RST");

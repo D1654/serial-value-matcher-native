@@ -233,6 +233,9 @@ UiPreferences uiPreferencesFromRecord(const NativeSessionStore::Record& record) 
     if (record.size() >= 30) {
         preferences.rawEventRetentionLimitMb = toInt(record[29], 100);
     }
+    if (record.size() >= 31) {
+        preferences.workbenchHeight = toInt(record[30]);
+    }
     return preferences;
 }
 
@@ -262,6 +265,7 @@ NativeSessionStore::Record recordFromUiPreferences(const UiPreferences& preferen
         record.push_back(index < preferences.quickSendSlots.size() ? preferences.quickSendSlots[index] : std::string{});
     }
     record.push_back(toString(preferences.rawEventRetentionLimitMb));
+    record.push_back(toString(preferences.workbenchHeight));
     return record;
 }
 

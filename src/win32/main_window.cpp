@@ -4,7 +4,20 @@
 
 #include "win32/native_layout_metrics.h"
 
+#include <algorithm>
+
 namespace svm::win32 {
+namespace {
+
+int signedLowWord(LPARAM value) noexcept {
+    return static_cast<int>(static_cast<short>(LOWORD(value)));
+}
+
+int signedHighWord(LPARAM value) noexcept {
+    return static_cast<int>(static_cast<short>(HIWORD(value)));
+}
+
+} // namespace
 
 LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
@@ -20,6 +33,76 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         layoutControls(LOWORD(lParam), HIWORD(lParam));
         RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
         return 0;
+    case WM_PAINT:
+        paintLayoutChrome();
+        return 0;
+    case WM_SETCURSOR: {
+        if (LOWORD(lParam) == HTCLIENT) {
+            POINT point = {};
+            GetCursorPos(&point);
+            ScreenToClient(window_, &point);
+            if (draggingWorkbenchSplitter_ || splitterHitTest(point.x, point.y)) {
+                SetCursor(LoadCursorW(nullptr, IDC_SIZENS));
+                return TRUE;
+            }
+        }
+        break;
+    }
+    case WM_LBUTTONDBLCLK: {
+        const int x = signedLowWord(lParam);
+        const int y = signedHighWord(lParam);
+        if (splitterHitTest(x, y)) {
+            preferredWorkbenchHeight_ = 0;
+            relayoutCurrentClient();
+            saveUiPreferences();
+            return 0;
+        }
+        break;
+    }
+    case WM_LBUTTONDOWN: {
+        const int x = signedLowWord(lParam);
+        const int y = signedHighWord(lParam);
+        if (splitterHitTest(x, y)) {
+            draggingWorkbenchSplitter_ = true;
+            splitterDragStartY_ = y;
+            splitterDragStartWorkbenchHeight_ = currentWorkbenchHeight_ > 0
+                ? currentWorkbenchHeight_
+                : preferredWorkbenchHeight_;
+            SetCapture(window_);
+            SetCursor(LoadCursorW(nullptr, IDC_SIZENS));
+            return 0;
+        }
+        break;
+    }
+    case WM_MOUSEMOVE:
+        if (draggingWorkbenchSplitter_) {
+            RECT clientRect = {};
+            GetClientRect(window_, &clientRect);
+            const int y = signedHighWord(lParam);
+            const int requestedHeight = splitterDragStartWorkbenchHeight_ - (y - splitterDragStartY_);
+            preferredWorkbenchHeight_ = clampedWorkbenchHeightForClient(
+                requestedHeight,
+                clientRect.right - clientRect.left,
+                clientRect.bottom - clientRect.top);
+            relayoutCurrentClient();
+            return 0;
+        }
+        break;
+    case WM_LBUTTONUP:
+        if (draggingWorkbenchSplitter_) {
+            draggingWorkbenchSplitter_ = false;
+            if (GetCapture() == window_) {
+                ReleaseCapture();
+            }
+            saveUiPreferences();
+            return 0;
+        }
+        break;
+    case WM_CAPTURECHANGED:
+        if (reinterpret_cast<HWND>(lParam) != window_) {
+            draggingWorkbenchSplitter_ = false;
+        }
+        break;
     case WM_NOTIFY: {
         if (const auto result = handleNotifyMessage(lParam); result.has_value()) {
             return *result;

@@ -17,6 +17,12 @@ void scalarLimitsAreStable() {
     assert(svm::win32::nativeNormalizeLogVisibleCharLimit(10) == svm::win32::kNativeMinLogVisibleChars);
     assert(svm::win32::nativeNormalizeLogVisibleCharLimit(350000) == 350000);
     assert(svm::win32::nativeNormalizeLogVisibleCharLimit(200000000) == svm::win32::kNativeMaxLogVisibleChars);
+
+    assert(svm::win32::nativeNormalizeWorkbenchHeight(-1) == svm::win32::kNativeDefaultWorkbenchHeight);
+    assert(svm::win32::nativeNormalizeWorkbenchHeight(0) == svm::win32::kNativeDefaultWorkbenchHeight);
+    assert(svm::win32::nativeNormalizeWorkbenchHeight(20) == svm::win32::kNativeMinWorkbenchHeight);
+    assert(svm::win32::nativeNormalizeWorkbenchHeight(320) == 320);
+    assert(svm::win32::nativeNormalizeWorkbenchHeight(2000) == svm::win32::kNativeMaxWorkbenchHeight);
 }
 
 void rawEventRetentionOnlyAllowsKnownChoices() {
@@ -48,6 +54,7 @@ void wholePreferencesAreNormalizedTogether() {
     preferences.fileSendDelayMs = 9999;
     preferences.logVisibleCharLimit = -5;
     preferences.rawEventRetentionLimitMb = 250;
+    preferences.workbenchHeight = 20;
     preferences.quickSendSlots = {"AT"};
 
     const auto normalized = svm::win32::nativeNormalizeUiPreferences(preferences, 3);
@@ -55,6 +62,7 @@ void wholePreferencesAreNormalizedTogether() {
     assert(normalized.fileSendDelayMs == svm::win32::kNativeMaxFileSendDelayMs);
     assert(normalized.logVisibleCharLimit == static_cast<int>(svm::win32::kNativeMinLogVisibleChars));
     assert(normalized.rawEventRetentionLimitMb == svm::win32::kNativeDefaultRawEventRetentionMb);
+    assert(normalized.workbenchHeight == svm::win32::kNativeMinWorkbenchHeight);
     assert(normalized.quickSendSlots.size() == 3);
     assert(normalized.quickSendSlots[0] == "AT");
     assert(normalized.quickSendSlots[1].empty());
@@ -72,6 +80,10 @@ void sameSettingsIgnoreStorageMetadata() {
     assert(svm::win32::nativeUiPreferencesSameSettings(left, right));
 
     right.windowWidth += 1;
+    assert(!svm::win32::nativeUiPreferencesSameSettings(left, right));
+
+    right = left;
+    right.workbenchHeight = 260;
     assert(!svm::win32::nativeUiPreferencesSameSettings(left, right));
 
     right = left;

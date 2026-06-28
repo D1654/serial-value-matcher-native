@@ -97,6 +97,10 @@ private:
     void createControls();
     void populateSerialOptionControls();
     void layoutControls(int width, int height);
+    void paintLayoutChrome();
+    bool splitterHitTest(int x, int y) const noexcept;
+    int clampedWorkbenchHeightForClient(int requestedHeight, int width, int height) const;
+    void relayoutCurrentClient();
     void setDefaultFonts();
     void refreshPorts();
     void refreshSendHistory();
@@ -325,7 +329,13 @@ private:
     WorkbenchVisibility workbenchVisibility_;
     bool workbenchVisibilityReady_ = false;
     RECT workbenchRedrawRect_ = {};
+    RECT workbenchSplitterRect_ = {};
     bool workbenchTabRepaintPending_ = false;
+    bool draggingWorkbenchSplitter_ = false;
+    int splitterDragStartY_ = 0;
+    int splitterDragStartWorkbenchHeight_ = 0;
+    int preferredWorkbenchHeight_ = 0;
+    int currentWorkbenchHeight_ = 0;
     NativeWorkbenchTabState workbenchTabState_;
     std::uint64_t layoutPassCount_ = 0;
     int logThemeIndex_ = 0;
