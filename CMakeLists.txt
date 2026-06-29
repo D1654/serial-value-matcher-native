@@ -107,6 +107,7 @@ if(SVM_BUILD_WIN32_APP)
         src/win32/native_connection_ui_state.cpp
         src/win32/native_control_utils.cpp
         src/win32/native_file_send_state.cpp
+        src/win32/native_layout_model.cpp
         src/win32/native_layout_metrics.cpp
         src/win32/native_log_model.cpp
         src/win32/native_log_scroll_state.cpp
@@ -533,6 +534,19 @@ if(SVM_BUILD_WIN32_APP)
     )
     target_include_directories(native_layout_metrics_tests PRIVATE src)
     add_test(NAME native_layout_metrics_tests COMMAND native_layout_metrics_tests)
+
+    add_executable(native_ui_layout_model_tests
+        tests/native_ui_layout_model_tests.cpp
+        src/win32/native_layout_model.cpp
+        src/win32/native_layout_metrics.cpp
+    )
+    set_target_properties(native_ui_layout_model_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    target_include_directories(native_ui_layout_model_tests PRIVATE src)
+    add_test(NAME native_ui_layout_model_tests COMMAND native_ui_layout_model_tests)
 
     add_executable(native_win32_analysis_workflow_tests
         tests/native_win32_analysis_workflow_tests.cpp
