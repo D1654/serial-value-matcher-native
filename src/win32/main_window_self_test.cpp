@@ -64,6 +64,14 @@ int controlHeight(HWND control) {
     return std::max(0L, rect.bottom - rect.top);
 }
 
+int controlTop(HWND control) {
+    RECT rect = {};
+    if (control == nullptr || GetWindowRect(control, &rect) == FALSE) {
+        return 0;
+    }
+    return static_cast<int>(rect.top);
+}
+
 bool controlsAreVisible(std::initializer_list<HWND> controls) {
     for (HWND control : controls) {
         if (!controlIsVisible(control)) {
@@ -316,6 +324,16 @@ bool NativeMainWindow::runUiPerformanceTest() {
         }
         return true;
     };
+    const auto singleSendHasComfortableGap = [&]() {
+        window.layoutControls(1212, 753);
+        if (!selectWorkbenchTab(0)) {
+            window.layoutControls(kMinTrackWidth, kMinTrackHeight);
+            return false;
+        }
+        const bool hasGap = controlTop(window.sendEdit_) - controlTop(window.sendModeCombo_) >= 34;
+        window.layoutControls(kMinTrackWidth, kMinTrackHeight);
+        return hasGap;
+    };
     const auto splitterDragSkipsRedundantLayouts = [&]() {
         const int originalPreferredHeight = window.preferredWorkbenchHeight_;
         const int startX = (window.workbenchSplitterRect_.left + window.workbenchSplitterRect_.right) / 2;
@@ -369,6 +387,9 @@ bool NativeMainWindow::runUiPerformanceTest() {
     }
     if (!sideHelpTracksWorkbenchTabs()) {
         return fail("ui-side-help-tab-text");
+    }
+    if (!singleSendHasComfortableGap()) {
+        return fail("ui-single-send-comfortable-gap");
     }
     if (!controlIsVisible(window.sideHelpText_) || controlHeight(window.sideHelpText_) < 108) {
         return fail("ui-side-help-readable-height");

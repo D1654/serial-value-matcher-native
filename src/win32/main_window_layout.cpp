@@ -310,7 +310,10 @@ void NativeMainWindow::layoutControls(int width, int height) {
     x += lineEndingWidth + gap;
     moveControl(historyCombo_, x, y, historyWidth, 160, layoutRepaint);
 
-    const int singleContentY = showSingleSendFormatRow ? (pageY + row + gap) : pageY;
+    const int singleSendExtraGap = pageBottom - pageY >= row * 4
+        ? (compact ? 4 : 8)
+        : 0;
+    const int singleContentY = showSingleSendFormatRow ? (pageY + row + gap + singleSendExtraGap) : pageY;
 
     x = pageX;
     y = singleContentY;

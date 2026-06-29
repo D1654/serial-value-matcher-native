@@ -83,6 +83,10 @@ void moveControl(HWND control, int x, int y, int width, int height, BOOL repaint
         return;
     }
 
+    if (controlGeometryMatches(control, x, y, width, height)) {
+        return;
+    }
+
     MoveWindow(control, x, y, width, height, repaint);
 }
 
@@ -91,12 +95,16 @@ void moveTopControl(HWND control, int x, int y, int width, int height, BOOL repa
         return;
     }
 
+    const bool geometryUnchanged = controlGeometryMatches(control, x, y, width, height);
     UINT flags = SWP_NOACTIVATE | SWP_SHOWWINDOW;
     if (repaint == FALSE) {
         flags |= SWP_NOREDRAW;
     }
+    if (geometryUnchanged) {
+        flags |= SWP_NOMOVE | SWP_NOSIZE;
+    }
     SetWindowPos(control, HWND_TOP, x, y, width, height, flags);
-    if (repaint != FALSE) {
+    if (repaint != FALSE && !geometryUnchanged) {
         InvalidateRect(control, nullptr, TRUE);
     }
 }
