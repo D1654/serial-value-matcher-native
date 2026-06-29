@@ -34,7 +34,7 @@ Primary context files:
 | developer-guide | `docs/developer-guide.md` | Developer/test engineer | CMake targets, local MinGW helper, native tests, local Wine smoke paths | Covers local build, debugging, test loops, and code ownership. |
 | architecture | `docs/win32-native-architecture.md` | Maintainers | Source inventory, Phase 2 UI architecture tasks, current module map | Must describe Win32 native ownership exactly and separate Qt legacy paths. |
 | testing | `docs/testing-validation.md` | Developer/test engineer | CTest inventory, self-test, ui-perf, UI capture, DPI, PTY matrix | Must distinguish automated gates, smoke tests, and optional manual checks. |
-| release | `docs/release-artifacts.md` | Release operator and reviewers | GitHub Actions run URL, package summary, SHA256, artifact path, package audit | Must be regenerated from final Actions artifacts, not hand-written size claims. |
+| release | `docs/release-artifacts.md` | Release operator and reviewers | GitHub Actions run URL, package summary, zip SHA256, executable SHA256, artifact path, package audit | Must be regenerated from final Actions artifacts, not hand-written size claims. |
 | troubleshooting | `docs/troubleshooting.md` | Users and developers | Known failure signatures from gates and scripts | Covers serial access, Wine/local debug issues, screenshot/UI capture failures, package audit failures. |
 | legacy | `docs/legacy-qt-notes.md` | Maintainers | Qt workflows, Qt CMake targets, Qt helper test list | Historical and parallel Qt notes only; never Win32 native release proof. |
 
@@ -118,9 +118,9 @@ kept as compatibility stubs if external links are likely.
 ### `docs/release-artifacts.md`
 
 - Must be regenerated after final GitHub Actions runs.
-- Must include run id, run URL, commit, artifact name, zip path, SHA256, package
-  summary path, extracted executable path, zip bytes, extracted bytes, file
-  count, gate status, and forbidden runtime outcome.
+- Must include run id, run URL, commit, artifact name, zip path, zip SHA256,
+  package summary path, extracted executable path, executable SHA256, zip bytes,
+  extracted bytes, file count, gate status, and forbidden runtime outcome.
 - Must not contain hand-maintained "current size" claims without an artifact
   summary reference.
 
@@ -175,4 +175,3 @@ Use these labels consistently in public docs and internal evidence tables.
   or mark it as legacy/illustrative.
 - Add a documentation consistency gate that fails on forbidden stale phrases,
   unsupported "latest" claims, and Qt evidence presented as Win32 native proof.
-

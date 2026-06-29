@@ -58,7 +58,8 @@ All recorded job steps completed successfully:
 | Extracted bytes | `971592` |
 | File count | `6` |
 | exe bytes | `957440` |
-| SHA256 | `19ACECE40D716C92FD65BB4EC832D84975C09EA09B3B9A838C25F333F08A9EA9` |
+| Zip SHA256 | `19ACECE40D716C92FD65BB4EC832D84975C09EA09B3B9A838C25F333F08A9EA9` |
+| Extracted exe SHA256 | `BC8050E29AA8C72A4C1AE8269A8576972FB5BD46AFD87C1271432CFDB54BED05` |
 | Gate status | `passed` |
 | Forbidden Qt/SQLite runtime files | `none` |
 | Unicode text probe | `passed` |
@@ -169,7 +170,7 @@ Local MinGW is diagnostic only. It does not replace the Windows Actions MSVC pac
 Phase 6 must regenerate and download final evidence after all code/docs changes:
 
 - Current Windows native package artifact from GitHub Actions.
-- Current package summary and SHA256.
+- Current package summary, zip SHA256, and extracted executable SHA256.
 - Current extracted `svm-native-win32.exe`.
 - Current Windows UI screenshots from the same or later commit than the package artifact.
 - `--self-test` and `--ui-perf-test` logs for the final executable.
@@ -180,4 +181,3 @@ Phase 6 must regenerate and download final evidence after all code/docs changes:
 ## Baseline Conclusion
 
 The latest package artifact for product commit `c4c8b272bf824ef027d5f042dfd736d09aa6231c` is a successful Windows native package baseline with passing native tests, self-test, ui-perf, and package audit. The latest successful Windows UI screenshot baseline is older (`e7a249a...`) and must not be treated as proof that the current package UI is correct. PTY edge-case evidence is currently `unknown` at the artifact level and must be made explicit later.
-
