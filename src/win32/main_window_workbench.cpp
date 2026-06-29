@@ -36,7 +36,7 @@ void raiseVisibleControl(HWND control) {
         0,
         0,
         0,
-        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOREDRAW);
 }
 
 } // namespace
@@ -193,10 +193,18 @@ void NativeMainWindow::repaintWorkbenchTabControls() {
     }
     const bool canRedrawWorkbench = workbenchRedrawRect_.right > workbenchRedrawRect_.left
         && workbenchRedrawRect_.bottom > workbenchRedrawRect_.top;
+    const bool dragging = draggingWorkbenchSplitter_;
     if (workTabs_ != nullptr) {
-        RedrawWindow(workTabs_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
+        const UINT tabRedrawFlags = dragging
+            ? (RDW_INVALIDATE | RDW_NOERASE)
+            : (RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
+        RedrawWindow(workTabs_, nullptr, nullptr, tabRedrawFlags);
     }
     if (workPageBackground_ != nullptr) {
+        UINT backgroundFlags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
+        if (dragging) {
+            backgroundFlags |= SWP_NOREDRAW;
+        }
         SetWindowPos(
             workPageBackground_,
             HWND_BOTTOM,
@@ -204,7 +212,7 @@ void NativeMainWindow::repaintWorkbenchTabControls() {
             0,
             0,
             0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+            backgroundFlags);
     }
 
     const auto raiseCached = [](HWND control, bool cachedVisible) {
@@ -274,11 +282,14 @@ void NativeMainWindow::repaintWorkbenchTabControls() {
     }
 
     if (canRedrawWorkbench && IsWindowVisible(window_) != FALSE) {
+        const UINT workbenchRedrawFlags = dragging
+            ? (RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_NOERASE)
+            : (RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
         RedrawWindow(
             window_,
             &workbenchRedrawRect_,
             nullptr,
-            RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+            workbenchRedrawFlags);
     }
 }
 

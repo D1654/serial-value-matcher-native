@@ -11,6 +11,39 @@
 #include <commctrl.h>
 
 namespace svm::win32 {
+namespace {
+
+bool rectIsValid(const RECT& rect) noexcept {
+    return rect.right > rect.left && rect.bottom > rect.top;
+}
+
+void includeRect(RECT& target, const RECT& rect) noexcept {
+    if (!rectIsValid(rect)) {
+        return;
+    }
+    if (!rectIsValid(target)) {
+        target = rect;
+        return;
+    }
+    target.left = std::min(target.left, rect.left);
+    target.top = std::min(target.top, rect.top);
+    target.right = std::max(target.right, rect.right);
+    target.bottom = std::max(target.bottom, rect.bottom);
+}
+
+void includeControlRect(HWND parent, HWND control, RECT& target) {
+    if (parent == nullptr || control == nullptr) {
+        return;
+    }
+    RECT rect = {};
+    if (GetWindowRect(control, &rect) == FALSE) {
+        return;
+    }
+    MapWindowPoints(nullptr, parent, reinterpret_cast<POINT*>(&rect), 2);
+    includeRect(target, rect);
+}
+
+} // namespace
 
 bool NativeMainWindow::splitterHitTest(int x, int y) const noexcept {
     return workbenchSplitterRect_.right > workbenchSplitterRect_.left
@@ -39,13 +72,26 @@ void NativeMainWindow::relayoutCurrentClient(bool immediate) {
     }
     RECT clientRect = {};
     GetClientRect(window_, &clientRect);
+    RECT dragRedrawRect = {};
     if (!immediate) {
+        includeControlRect(window_, receiveLog_, dragRedrawRect);
+        includeControlRect(window_, workTabs_, dragRedrawRect);
+        includeControlRect(window_, workPageBackground_, dragRedrawRect);
+        includeRect(dragRedrawRect, workbenchRedrawRect_);
+        includeRect(dragRedrawRect, workbenchSplitterRect_);
         SendMessageW(window_, WM_SETREDRAW, FALSE, 0);
     }
     layoutControls(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top);
     if (!immediate) {
+        includeControlRect(window_, receiveLog_, dragRedrawRect);
+        includeControlRect(window_, workTabs_, dragRedrawRect);
+        includeControlRect(window_, workPageBackground_, dragRedrawRect);
+        includeRect(dragRedrawRect, workbenchRedrawRect_);
+        includeRect(dragRedrawRect, workbenchSplitterRect_);
         SendMessageW(window_, WM_SETREDRAW, TRUE, 0);
-        RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
+        if (rectIsValid(dragRedrawRect)) {
+            RedrawWindow(window_, &dragRedrawRect, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_NOERASE);
+        }
         return;
     }
     RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
@@ -185,12 +231,11 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int sideControlBottom = y + row;
     const int sideSeparatorHeight = 2;
     const int sideActionGap = compact ? 2 : 4;
-    const int sideHelpMinimumHeight = compact ? 152 : 170;
+    const int sideHelpMinimumHeight = compact ? 132 : 150;
+    const int sideHelpDesiredHeight = compact ? 152 : 180;
     const int sideActionSeparatorY = sideControlBottom + sideActionGap;
     const int sideActionButtonY = sideActionSeparatorY + sideSeparatorHeight + sideActionGap;
-    const int sideHelpSeparatorY = sideActionButtonY + row + sideActionGap;
-    const int sideHelpY = sideHelpSeparatorY + sideSeparatorHeight + sideActionGap;
-    const int sideHelpHeight = std::max(1, statusY - sideHelpY - 2);
+    const int sideActionBottom = sideActionButtonY + row;
     const bool sideActionVisible = sideInnerWidth >= 108
         && sideActionButtonY + row <= statusY - margin;
     moveControl(sideActionSeparator_, x, sideActionSeparatorY, sideInnerWidth, sideSeparatorHeight, layoutRepaint);
@@ -200,8 +245,14 @@ void NativeMainWindow::layoutControls(int width, int height) {
     moveControl(clearButton_, x + sideActionButtonWidth + gap, sideActionButtonY, sideActionButtonWidth, row, layoutRepaint);
     showControl(pauseScrollButton_, sideActionVisible);
     showControl(clearButton_, sideActionVisible);
+    const int sideHelpBottom = statusY - 2;
+    const int earliestSideHelpY = sideActionBottom + sideActionGap + sideSeparatorHeight + sideActionGap;
+    const int sideHelpY = std::max(earliestSideHelpY, sideHelpBottom - sideHelpDesiredHeight);
+    const int sideHelpSeparatorY = sideHelpY - sideActionGap - sideSeparatorHeight;
+    const int sideHelpHeight = std::max(1, sideHelpBottom - sideHelpY);
     const bool sideHelpVisible = sideActionVisible
         && sideHelpHeight >= sideHelpMinimumHeight
+        && sideHelpSeparatorY >= sideActionBottom + sideActionGap
         && sideHelpY + sideHelpHeight <= statusY;
     moveControl(sideHelpSeparator_, x, sideHelpSeparatorY, sideInnerWidth, sideSeparatorHeight, layoutRepaint);
     showControl(sideHelpSeparator_, sideHelpVisible);

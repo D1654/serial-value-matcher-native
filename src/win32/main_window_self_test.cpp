@@ -72,6 +72,14 @@ int controlTop(HWND control) {
     return static_cast<int>(rect.top);
 }
 
+int controlBottom(HWND control) {
+    RECT rect = {};
+    if (control == nullptr || GetWindowRect(control, &rect) == FALSE) {
+        return 0;
+    }
+    return static_cast<int>(rect.bottom);
+}
+
 bool controlsAreVisible(std::initializer_list<HWND> controls) {
     for (HWND control : controls) {
         if (!controlIsVisible(control)) {
@@ -334,6 +342,19 @@ bool NativeMainWindow::runUiPerformanceTest() {
         window.layoutControls(kMinTrackWidth, kMinTrackHeight);
         return hasGap;
     };
+    const auto sideHelpIsBottomAnchored = [&]() {
+        window.layoutControls(1212, 753);
+        if (!selectWorkbenchTab(3)) {
+            window.layoutControls(kMinTrackWidth, kMinTrackHeight);
+            return false;
+        }
+        const bool anchoredAboveStatus = controlTop(window.statusText_) - controlBottom(window.sideHelpFrame_) >= 0
+            && controlTop(window.statusText_) - controlBottom(window.sideHelpFrame_) <= 8;
+        const bool separatedFromActions = controlTop(window.sideHelpFrame_) - controlBottom(window.clearButton_) >= 80;
+        const bool readable = controlIsVisible(window.sideHelpText_) && controlHeight(window.sideHelpText_) >= 96;
+        window.layoutControls(kMinTrackWidth, kMinTrackHeight);
+        return anchoredAboveStatus && separatedFromActions && readable;
+    };
     const auto splitterDragSkipsRedundantLayouts = [&]() {
         const int originalPreferredHeight = window.preferredWorkbenchHeight_;
         const int startX = (window.workbenchSplitterRect_.left + window.workbenchSplitterRect_.right) / 2;
@@ -390,6 +411,9 @@ bool NativeMainWindow::runUiPerformanceTest() {
     }
     if (!singleSendHasComfortableGap()) {
         return fail("ui-single-send-comfortable-gap");
+    }
+    if (!sideHelpIsBottomAnchored()) {
+        return fail("ui-side-help-bottom-anchored");
     }
     if (!controlIsVisible(window.sideHelpText_) || controlHeight(window.sideHelpText_) < 108) {
         return fail("ui-side-help-readable-height");
