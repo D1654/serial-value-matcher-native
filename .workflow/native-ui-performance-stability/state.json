@@ -1,0 +1,459 @@
+{
+  "version": "1.0",
+  "project_name": "SerialValueMatcher Native — Native UI Performance Stability",
+  "created_at": "2026-06-30T01:07:59+08:00",
+  "updated_at": "2026-06-30T06:43:48+08:00",
+  "current_phase": "execution",
+  "phase_history": [
+    {
+      "phase": "pre_research",
+      "entered_at": "2026-06-30T01:07:59+08:00",
+      "exited_at": "2026-06-30T01:29:38+08:00",
+      "exit_reason": "approved"
+    },
+    {
+      "phase": "requirements",
+      "entered_at": "2026-06-30T01:29:38+08:00",
+      "exited_at": "2026-06-30T01:52:57+08:00",
+      "exit_reason": "approved"
+    },
+    {
+      "phase": "draft",
+      "entered_at": "2026-06-30T01:52:57+08:00",
+      "exited_at": "2026-06-30T02:16:57+08:00",
+      "exit_reason": "approved"
+    },
+    {
+      "phase": "planning",
+      "entered_at": "2026-06-30T02:16:57+08:00",
+      "exited_at": "2026-06-30T02:40:36+08:00",
+      "exit_reason": "approved"
+    },
+    {
+      "phase": "execution",
+      "entered_at": "2026-06-30T02:40:36+08:00",
+      "exited_at": null,
+      "exit_reason": null
+    }
+  ],
+  "pre_research": {
+    "status": "completed",
+    "agents": {
+      "domain_research": {
+        "status": "completed",
+        "output_file": ".workflow/native-ui-performance-stability/agent-outputs/agent-a-domain.md"
+      },
+      "competitive_analysis": {
+        "status": "completed",
+        "output_file": ".workflow/native-ui-performance-stability/agent-outputs/agent-b-competitive.md"
+      },
+      "tech_ecosystem": {
+        "status": "completed",
+        "output_file": ".workflow/native-ui-performance-stability/agent-outputs/agent-c-tech.md",
+        "deepwiki_called": true
+      }
+    },
+    "consolidation_status": "completed",
+    "completed_at": "2026-06-30T01:20:28+08:00"
+  },
+  "context_bus": {
+    "project_brief": ".workflow/native-ui-performance-stability/context/project-brief.md",
+    "domain_knowledge": ".workflow/native-ui-performance-stability/context/domain-knowledge.md",
+    "interview_transcript": ".workflow/native-ui-performance-stability/context/interview-transcript.md",
+    "hypothesis_tracker": ".workflow/native-ui-performance-stability/context/hypothesis-tracker.md",
+    "last_updated": "2026-06-30T02:30:42+08:00"
+  },
+  "requirements": {
+    "status": "completed",
+    "coverage_map": {
+      "project_vision": "clear",
+      "functional_scope": "clear",
+      "user_personas": "clear",
+      "domain_data_model": "clear",
+      "tech_stack": "clear",
+      "performance_scalability": "clear",
+      "security_compliance": "clear",
+      "integration": "clear",
+      "observability_operations": "clear",
+      "ux_design": "clear",
+      "development_quality": "clear",
+      "edge_cases_risk": "clear"
+    },
+    "questions_asked": 10,
+    "answers": [
+      {
+        "category": "functional_scope",
+        "question": "请确认本轮整改的交付边界：不新增产品功能，不重做外观风格；只围绕当前 Win32 native release 版本，把已有功能、现有 UI、性能稳定性、验证门禁和文档事实基线全部收敛到可交付状态。是否符合预期？",
+        "answer": "是的",
+        "timestamp": "2026-06-30T01:31:57+08:00"
+      },
+      {
+        "category": "performance_scalability",
+        "question": "本轮性能稳定性的最低交付标准：A 体感优先；B 体感 + 硬门禁；C 严格量化。推荐 B。请选择。",
+        "answer": "B：真实 Windows 体感必须流畅，同时要求 UI perf、拖动帧扫描、串口 PTY 压力、截图回归、包体依赖审计全部通过。",
+        "timestamp": "2026-06-30T01:33:16+08:00"
+      },
+      {
+        "category": "security_compliance",
+        "question": "请确认安全/合规边界：A 最小安全基线；B 增强安全基线；C 企业合规基线。推荐 A 为本轮必须达标，B 作为发布前增强项。",
+        "answer": "A：本地桌面工具最小安全基线。不联网、不遥测、不上传数据；普通用户权限运行；不要求管理员；只访问用户明确选择的串口和文件；导入导出路径明确；CI 检查依赖、包体、可执行文件来源和 forbidden runtime。",
+        "timestamp": "2026-06-30T01:35:28+08:00"
+      },
+      {
+        "category": "project_vision",
+        "question": "请确认本轮“成功交付”的最终判定口径：A 工程交付通过；B 用户验收通过；C 发布级通过。",
+        "answer": "A：工程交付通过。用户没有时间做手工测试，使用 GitHub Actions 编译的可执行程序文件作为最终测试目标；不把用户真实 Windows 手工验收设为阻塞条件。",
+        "timestamp": "2026-06-30T01:37:29+08:00"
+      },
+      {
+        "category": "tech_stack",
+        "question": "请确认技术/架构整改边界：A 保守修补；B 内部架构整顿；C 大规模重构。推荐 B。",
+        "answer": "B：保持 Win32 native 和现有功能/UI 风格不变，但允许新增或重组内部 UI 层，例如 NativeUiState、NativeLayoutModel、NativeLayoutTransaction、NativeFrameScheduler、DirtyRegion/PaintPolicy，用来根治热路径耦合。",
+        "timestamp": "2026-06-30T01:39:35+08:00"
+      },
+      {
+        "category": "user_personas",
+        "question": "请确认主要用户和主流程：A 单人本地工程师/调试人员为主；B 现场交付/运维人员；C 开发/测试自动化人员。推荐 A 为主，C 为验证支撑。",
+        "answer": "A 为主，C 为验证支撑。后续其他功能开发也以开发测试工程师使用为主。",
+        "timestamp": "2026-06-30T01:42:42+08:00"
+      },
+      {
+        "category": "domain_data_model",
+        "question": "请确认本轮数据/证据边界：A 现有数据闭环；B 增强证据闭环；C 长期数据资产化。推荐 A。",
+        "answer": "确认 A：只保证当前已有数据对象正确，包括串口配置、发送内容、接收/发送日志、日志筛选搜索导出、文件发送输入、Modbus 扫描参数/结果、候选分析结果、报告导出、UI 状态。重点验证能保存、显示、导出、不丢、不卡、不乱序。",
+        "timestamp": "2026-06-30T01:44:01+08:00"
+      },
+      {
+        "category": "performance_scalability",
+        "question": "请确认性能压力门槛：A 当前门槛；B 强化工程门槛；C 发布压力门槛。推荐 B。",
+        "answer": "B：以 Actions 编译产物为最终对象；要求 UI perf、拖动/缩放/切页截图回归、串口 PTY 压力、功能自检、包体依赖审计全部稳定通过；必要时增加 resize sweep 和长日志压力，但不强制 8/24 小时长跑。",
+        "timestamp": "2026-06-30T01:45:33+08:00"
+      },
+      {
+        "category": "development_quality,observability_operations",
+        "question": "请确认文档/CI/产物说明的整改范围：A 只修关键路径；B 事实基线整改；C 完整文档重写。推荐 B。",
+        "answer": "C：彻底重构文档。用户文档、开发文档、架构文档、测试文档、发布文档都要以当前 Win32 native 实际状态重建，而不是只修关键路径。",
+        "timestamp": "2026-06-30T01:48:22+08:00"
+      },
+      {
+        "category": "integration,ux_design,edge_cases_risk",
+        "question": "请确认最终测试矩阵：A 基础矩阵；B 工程矩阵；C 扩展矩阵。推荐 B。",
+        "answer": "B：以 GitHub Actions 编译 exe 为对象；覆盖默认窗口、小窗口/缩放拖动、标签切换、日志区拖动；覆盖 100%/125% DPI 冒烟；覆盖串口 PTY 正常收发、重开、超时/取消；覆盖包体依赖和文档一致性。",
+        "timestamp": "2026-06-30T01:51:25+08:00"
+      }
+    ]
+  },
+  "draft": {
+    "status": "approved",
+    "revision_count": 0,
+    "approved_at": "2026-06-30T02:16:57+08:00",
+    "completed_sections": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "cache_file": ".workflow/native-ui-performance-stability/draft-cache.md"
+  },
+  "brainstorm": {
+    "bs1": {
+      "status": "completed",
+      "completed_at": "2026-06-30T01:49:34+08:00",
+      "artifact": ".workflow/native-ui-performance-stability/brainstorm/bs-1.md"
+    },
+    "bs2": {
+      "status": "completed",
+      "completed_at": "2026-06-30T01:54:43+08:00",
+      "audit_score": null,
+      "artifact": ".workflow/native-ui-performance-stability/brainstorm/bs-2.md"
+    },
+    "bs3": {
+      "status": "completed",
+      "completed_at": "2026-06-30T01:56:13+08:00",
+      "audit_score": null,
+      "artifact": ".workflow/native-ui-performance-stability/brainstorm/bs-3.md"
+    },
+    "bs4": {
+      "status": "completed",
+      "completed_at": "2026-06-30T01:59:45+08:00",
+      "audit_score": null,
+      "artifact": ".workflow/native-ui-performance-stability/brainstorm/bs-4.md"
+    },
+    "bs5": {
+      "status": "completed",
+      "completed_at": "2026-06-30T02:07:12+08:00",
+      "artifact": ".workflow/native-ui-performance-stability/brainstorm/bs-5.md"
+    },
+    "bs6": {
+      "status": "completed",
+      "completed_at": "2026-06-30T02:22:10+08:00",
+      "artifact": ".workflow/native-ui-performance-stability/brainstorm/bs-6.md"
+    },
+    "bs8": {
+      "status": "completed",
+      "completed_at": "2026-06-30T02:02:21+08:00",
+      "artifact": ".workflow/native-ui-performance-stability/brainstorm/bs-8.md"
+    },
+    "bs7_count": 0
+  },
+  "planning": {
+    "status": "completed",
+    "total_phases": 6,
+    "total_tasks": 30,
+    "plans_written": {
+      "level_1": true,
+      "level_2_count": 6,
+      "level_3_count": 30
+    }
+  },
+  "execution": {
+    "status": "in_progress",
+    "current_phase_index": 1,
+    "current_task_index": 1,
+    "total_phases": 6,
+    "phases": {
+      "1": {
+        "name": "Fact Baseline And Documentation Audit",
+        "total_tasks": 5,
+        "completed_tasks": 1,
+        "status": "in_progress",
+        "tasks": {
+          "1": {
+            "name": "Source and CI inventory",
+            "status": "completed",
+            "started_at": "2026-06-30T02:40:36+08:00",
+            "completed_at": "2026-06-30T06:43:48+08:00"
+          },
+          "2": {
+            "name": "Documentation claim audit",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "3": {
+            "name": "Artifact baseline capture",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "4": {
+            "name": "Documentation information architecture",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "5": {
+            "name": "Consistency checker design",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          }
+        }
+      },
+      "2": {
+        "name": "UI Architecture Core",
+        "total_tasks": 5,
+        "completed_tasks": 0,
+        "status": "pending",
+        "tasks": {
+          "1": {
+            "name": "UI hot-path ownership audit",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "2": {
+            "name": "Native layout model",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "3": {
+            "name": "Native layout transaction",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "4": {
+            "name": "Native frame scheduler",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "5": {
+            "name": "Paint policy integration",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          }
+        }
+      },
+      "3": {
+        "name": "Functional Closure And Regression Gates",
+        "total_tasks": 5,
+        "completed_tasks": 0,
+        "status": "pending",
+        "tasks": {
+          "1": {
+            "name": "Serial connection regression",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "2": {
+            "name": "Log evidence regression",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "3": {
+            "name": "Send workflow regression",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "4": {
+            "name": "Modbus and analysis regression",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "5": {
+            "name": "Self-test expansion",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          }
+        }
+      },
+      "4": {
+        "name": "Engineering Matrix And Production Hardening",
+        "total_tasks": 6,
+        "completed_tasks": 0,
+        "status": "pending",
+        "tasks": {
+          "1": {
+            "name": "UI capture matrix",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "2": {
+            "name": "DPI smoke matrix",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "3": {
+            "name": "Splitter drag frame gate",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "4": {
+            "name": "Serial PTY edge matrix",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "5": {
+            "name": "Package and security audit hardening",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "6": {
+            "name": "Artifact workflow integration",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          }
+        }
+      },
+      "5": {
+        "name": "Full Documentation Rewrite",
+        "total_tasks": 5,
+        "completed_tasks": 0,
+        "status": "pending",
+        "tasks": {
+          "1": {
+            "name": "Documentation IA implementation",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "2": {
+            "name": "User guide rewrite",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "3": {
+            "name": "Developer and architecture guide rewrite",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "4": {
+            "name": "Testing and release guide rewrite",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "5": {
+            "name": "Documentation consistency gate",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          }
+        }
+      },
+      "6": {
+        "name": "Final Artifact Review And Release Readiness",
+        "total_tasks": 4,
+        "completed_tasks": 0,
+        "status": "pending",
+        "tasks": {
+          "1": {
+            "name": "Trigger and monitor final Actions",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "2": {
+            "name": "Download and inspect final artifact",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "3": {
+            "name": "Resolve final gate failures",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          },
+          "4": {
+            "name": "Completion report",
+            "status": "pending",
+            "started_at": null,
+            "completed_at": null
+          }
+        }
+      }
+    },
+    "deepwiki_cache": {
+      "phases_researched": [],
+      "cache_dir": ".workflow/native-ui-performance-stability/deepwiki-cache/"
+    },
+    "error_log": []
+  },
+  "bug_fixer": {
+    "reviews": []
+  },
+  "change_requests": []
+}
