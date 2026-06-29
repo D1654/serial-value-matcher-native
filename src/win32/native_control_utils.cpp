@@ -69,13 +69,19 @@ void moveControl(HWND control, int x, int y, int width, int height, BOOL repaint
     MoveWindow(control, x, y, width, height, repaint);
 }
 
-void moveTopControl(HWND control, int x, int y, int width, int height) {
+void moveTopControl(HWND control, int x, int y, int width, int height, BOOL repaint) {
     if (control == nullptr) {
         return;
     }
 
-    SetWindowPos(control, HWND_TOP, x, y, width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-    InvalidateRect(control, nullptr, TRUE);
+    UINT flags = SWP_NOACTIVATE | SWP_SHOWWINDOW;
+    if (repaint == FALSE) {
+        flags |= SWP_NOREDRAW;
+    }
+    SetWindowPos(control, HWND_TOP, x, y, width, height, flags);
+    if (repaint != FALSE) {
+        InvalidateRect(control, nullptr, TRUE);
+    }
 }
 
 void addControlFont(HWND control, HFONT font) {

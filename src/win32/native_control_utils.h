@@ -19,7 +19,7 @@ void showControl(HWND control, bool visible);
 void showControlFast(HWND control, bool visible);
 void enableControl(HWND control, bool enabled);
 void moveControl(HWND control, int x, int y, int width, int height, BOOL repaint);
-void moveTopControl(HWND control, int x, int y, int width, int height);
+void moveTopControl(HWND control, int x, int y, int width, int height, BOOL repaint);
 void addControlFont(HWND control, HFONT font);
 void applyClassicControlChrome(HWND control);
 int singleLineEditHeight(HFONT font, int row);

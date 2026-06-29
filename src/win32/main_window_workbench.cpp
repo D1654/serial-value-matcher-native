@@ -311,12 +311,18 @@ void NativeMainWindow::updateSideHelp(int tabIndex) {
         break;
     }
 
-    setControlText(sideHelpTitle_, tx(T::SideHelpTitle));
-    setControlText(sideHelpText_, tx(helpId));
+    const std::wstring titleText = tx(T::SideHelpTitle);
+    const std::wstring helpText = tx(helpId);
+    const bool titleChanged = controlText(sideHelpTitle_) != titleText;
+    const bool textChanged = controlText(sideHelpText_) != helpText;
+    setControlText(sideHelpTitle_, titleText);
+    setControlText(sideHelpText_, helpText);
     workbenchTabState_.markHelpUpdated(tabIndex);
-    RedrawWindow(sideHelpFrame_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
-    RedrawWindow(sideHelpTitle_, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
-    RedrawWindow(sideHelpText_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
+    if (titleChanged || textChanged) {
+        RedrawWindow(sideHelpFrame_, nullptr, nullptr, RDW_INVALIDATE);
+        RedrawWindow(sideHelpTitle_, nullptr, nullptr, RDW_INVALIDATE);
+        RedrawWindow(sideHelpText_, nullptr, nullptr, RDW_INVALIDATE);
+    }
 }
 
 void NativeMainWindow::applyWorkbenchTabVisibility(int tabIndex) {

@@ -100,7 +100,7 @@ private:
     void paintLayoutChrome();
     bool splitterHitTest(int x, int y) const noexcept;
     int clampedWorkbenchHeightForClient(int requestedHeight, int width, int height) const;
-    void relayoutCurrentClient();
+    void relayoutCurrentClient(bool immediate = true);
     void setDefaultFonts();
     void refreshPorts();
     void refreshSendHistory();

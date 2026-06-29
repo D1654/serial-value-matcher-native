@@ -10,9 +10,10 @@
 #include "win32/utf8_win32.h"
 #include "win32/win32_serial_types.h"
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <commctrl.h>
-#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -53,6 +54,14 @@ bool controlIsVisible(HWND control) {
         return false;
     }
     return rect.right > rect.left && rect.bottom > rect.top;
+}
+
+int controlHeight(HWND control) {
+    RECT rect = {};
+    if (control == nullptr || GetWindowRect(control, &rect) == FALSE) {
+        return 0;
+    }
+    return std::max(0L, rect.bottom - rect.top);
 }
 
 bool controlsAreVisible(std::initializer_list<HWND> controls) {
@@ -307,6 +316,28 @@ bool NativeMainWindow::runUiPerformanceTest() {
         }
         return true;
     };
+    const auto splitterDragSkipsRedundantLayouts = [&]() {
+        const int originalPreferredHeight = window.preferredWorkbenchHeight_;
+        const int startX = (window.workbenchSplitterRect_.left + window.workbenchSplitterRect_.right) / 2;
+        const int startY = (window.workbenchSplitterRect_.top + window.workbenchSplitterRect_.bottom) / 2;
+        const std::uint64_t beforeLayouts = window.layoutPassCount_;
+
+        window.draggingWorkbenchSplitter_ = true;
+        window.splitterDragStartY_ = startY;
+        window.splitterDragStartWorkbenchHeight_ = window.currentWorkbenchHeight_;
+        SendMessageW(window.window_, WM_MOUSEMOVE, 0, MAKELPARAM(startX, startY));
+        if (window.layoutPassCount_ != beforeLayouts) {
+            window.draggingWorkbenchSplitter_ = false;
+            return false;
+        }
+
+        SendMessageW(window.window_, WM_MOUSEMOVE, 0, MAKELPARAM(startX, startY - 24));
+        const bool changedOnce = window.layoutPassCount_ == beforeLayouts + 1;
+        window.draggingWorkbenchSplitter_ = false;
+        window.preferredWorkbenchHeight_ = originalPreferredHeight;
+        window.relayoutCurrentClient();
+        return changedOnce;
+    };
     if (!controlsAreVisible({
             window.serialPanelTitle_,
             window.portCombo_,
@@ -339,11 +370,17 @@ bool NativeMainWindow::runUiPerformanceTest() {
     if (!sideHelpTracksWorkbenchTabs()) {
         return fail("ui-side-help-tab-text");
     }
+    if (!controlIsVisible(window.sideHelpText_) || controlHeight(window.sideHelpText_) < 108) {
+        return fail("ui-side-help-readable-height");
+    }
     if (window.workbenchSplitterRect_.bottom - window.workbenchSplitterRect_.top < 10
         || !window.splitterHitTest(
             (window.workbenchSplitterRect_.left + window.workbenchSplitterRect_.right) / 2,
             (window.workbenchSplitterRect_.top + window.workbenchSplitterRect_.bottom) / 2)) {
         return fail("ui-workbench-splitter-hit-target");
+    }
+    if (!splitterDragSkipsRedundantLayouts()) {
+        return fail("ui-workbench-splitter-drag-layout");
     }
 
     constexpr int kIterations = 300;

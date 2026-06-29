@@ -80,11 +80,14 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             GetClientRect(window_, &clientRect);
             const int y = signedHighWord(lParam);
             const int requestedHeight = splitterDragStartWorkbenchHeight_ - (y - splitterDragStartY_);
-            preferredWorkbenchHeight_ = clampedWorkbenchHeightForClient(
+            const int nextWorkbenchHeight = clampedWorkbenchHeightForClient(
                 requestedHeight,
                 clientRect.right - clientRect.left,
                 clientRect.bottom - clientRect.top);
-            relayoutCurrentClient();
+            if (nextWorkbenchHeight != currentWorkbenchHeight_) {
+                preferredWorkbenchHeight_ = nextWorkbenchHeight;
+                relayoutCurrentClient(false);
+            }
             return 0;
         }
         break;
@@ -94,6 +97,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
             if (GetCapture() == window_) {
                 ReleaseCapture();
             }
+            relayoutCurrentClient();
             saveUiPreferences();
             return 0;
         }
