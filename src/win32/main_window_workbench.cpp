@@ -328,27 +328,16 @@ void NativeMainWindow::updateSideHelp(int tabIndex) {
 void NativeMainWindow::applyWorkbenchTabVisibility(int tabIndex) {
     const bool canRedrawWorkbench = workbenchRedrawRect_.right > workbenchRedrawRect_.left
         && workbenchRedrawRect_.bottom > workbenchRedrawRect_.top;
-    const bool suspendRedraw = canRedrawWorkbench && IsWindowVisible(window_) != FALSE;
     const NativeWorkbenchTabApplyPlan plan = workbenchTabState_.beginApply(
         tabIndex,
         workbenchVisibilityReady_,
         workbenchVisibility_.pageVisible,
         canRedrawWorkbench,
-        suspendRedraw);
+        false);
     updateSideHelp(tabIndex);
     if (plan.skip) {
         return;
     }
-
-    if (suspendRedraw) {
-        SendMessageW(window_, WM_SETREDRAW, FALSE, 0);
-    }
-    const auto resumeRedraw = [&]() {
-        if (suspendRedraw) {
-            SendMessageW(window_, WM_SETREDRAW, TRUE, 0);
-            RedrawWindow(window_, &workbenchRedrawRect_, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
-        }
-    };
 
     if (plan.hideAllControls || plan.previousTabIndex < 0) {
         hideWorkbenchTabControls();
@@ -358,14 +347,12 @@ void NativeMainWindow::applyWorkbenchTabVisibility(int tabIndex) {
 
     if (!plan.showRequestedTab) {
         workbenchTabState_.finishApply(tabIndex);
-        resumeRedraw();
         return;
     }
 
     setWorkbenchTabControlsVisible(tabIndex, true);
 
     workbenchTabState_.finishApply(tabIndex);
-    resumeRedraw();
     scheduleWorkbenchTabRepaint();
 }
 

@@ -48,7 +48,24 @@ void showControl(HWND control, bool visible) {
 }
 
 void showControlFast(HWND control, bool visible) {
-    showControl(control, visible);
+    if (control == nullptr) {
+        return;
+    }
+    const auto style = static_cast<LONG_PTR>(GetWindowLongPtrW(control, GWL_STYLE));
+    const bool currentlyVisible = (style & WS_VISIBLE) != 0;
+    if (currentlyVisible == visible) {
+        return;
+    }
+
+    const UINT visibilityFlag = visible ? SWP_SHOWWINDOW : SWP_HIDEWINDOW;
+    SetWindowPos(
+        control,
+        nullptr,
+        0,
+        0,
+        0,
+        0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE | SWP_NOREDRAW | visibilityFlag);
 }
 
 void enableControl(HWND control, bool enabled) {
