@@ -98,6 +98,64 @@ void NativeMainWindow::relayoutCurrentClient(bool immediate) {
     RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 }
 
+void NativeMainWindow::scheduleResizeFrame(int width, int height) {
+    postNativeFrameMessage(frameScheduler_.requestResize(width, height));
+}
+
+void NativeMainWindow::scheduleSplitterDragFrame(int width, int height, int workbenchHeight) {
+    postNativeFrameMessage(frameScheduler_.requestSplitterDrag(width, height, workbenchHeight));
+}
+
+void NativeMainWindow::scheduleWorkbenchTabFrame() {
+    postNativeFrameMessage(frameScheduler_.requestTabSwitch());
+}
+
+void NativeMainWindow::scheduleLogFlushFrame() {
+    postNativeFrameMessage(frameScheduler_.requestLogFlush());
+}
+
+void NativeMainWindow::scheduleStatusFrame() {
+    postNativeFrameMessage(frameScheduler_.requestStatus());
+}
+
+void NativeMainWindow::postNativeFrameMessage(bool shouldPost) {
+    if (!shouldPost) {
+        return;
+    }
+    if (window_ == nullptr || PostMessageW(window_, kNativeUiFrameMessage, 0, 0) == FALSE) {
+        frameScheduler_.markPostFailed();
+        processNativeFrame();
+    }
+}
+
+void NativeMainWindow::processNativeFrame() {
+    const NativeFrameSnapshot frame = frameScheduler_.consumeFrame();
+    if (frame.empty()) {
+        return;
+    }
+
+    if (frame.hasWorkbenchHeight) {
+        preferredWorkbenchHeight_ = frame.workbenchHeight;
+    }
+
+    if (nativeFrameHasReason(frame.reasons, NativeFrameReason::SplitterDrag)) {
+        relayoutCurrentClient(false);
+    } else if (nativeFrameHasReason(frame.reasons, NativeFrameReason::Resize) && frame.hasClientSize) {
+        layoutControls(frame.clientWidth, frame.clientHeight);
+        RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+    }
+
+    if (nativeFrameHasReason(frame.reasons, NativeFrameReason::TabSwitch) && workbenchTabRepaintPending_) {
+        repaintWorkbenchTabControls();
+    }
+    if (nativeFrameHasReason(frame.reasons, NativeFrameReason::LogFlush)) {
+        flushPendingLogEntries();
+    }
+    if (nativeFrameHasReason(frame.reasons, NativeFrameReason::Status)) {
+        updateStatusSegments();
+    }
+}
+
 void NativeMainWindow::paintLayoutChrome() {
     PAINTSTRUCT paint = {};
     HDC dc = BeginPaint(window_, &paint);

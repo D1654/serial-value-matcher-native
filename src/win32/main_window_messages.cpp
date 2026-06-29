@@ -102,11 +102,11 @@ std::optional<LRESULT> NativeMainWindow::handleTimerMessage(WPARAM wParam) {
     if (wParam == IDT_LOG_FLUSH) {
         KillTimer(window_, IDT_LOG_FLUSH);
         logFlushTimerActive_ = false;
-        flushPendingLogEntries();
+        scheduleLogFlushFrame();
         return 0;
     }
     if (wParam == IDT_STATUS_CLOCK) {
-        updateStatusSegments();
+        scheduleStatusFrame();
         return 0;
     }
     return std::nullopt;

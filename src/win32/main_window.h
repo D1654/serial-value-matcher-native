@@ -14,6 +14,7 @@
 #include "win32/native_candidate_cache_state.h"
 #include "win32/native_connection_ui_state.h"
 #include "win32/native_file_send_state.h"
+#include "win32/native_frame_scheduler.h"
 #include "win32/native_log_model.h"
 #include "win32/native_log_scroll_state.h"
 #include "win32/native_modbus_scan_ui_state.h"
@@ -38,6 +39,7 @@
 
 namespace svm::win32 {
 
+inline constexpr UINT kNativeUiFrameMessage = WM_APP + 17;
 inline constexpr UINT kNativeWorkbenchTabRepaintMessage = WM_APP + 20;
 
 class NativeMainWindow final {
@@ -98,6 +100,13 @@ private:
     void populateSerialOptionControls();
     void layoutControls(int width, int height);
     void paintLayoutChrome();
+    void scheduleResizeFrame(int width, int height);
+    void scheduleSplitterDragFrame(int width, int height, int workbenchHeight);
+    void scheduleWorkbenchTabFrame();
+    void scheduleLogFlushFrame();
+    void scheduleStatusFrame();
+    void postNativeFrameMessage(bool shouldPost);
+    void processNativeFrame();
     bool splitterHitTest(int x, int y) const noexcept;
     int clampedWorkbenchHeightForClient(int requestedHeight, int width, int height) const;
     void relayoutCurrentClient(bool immediate = true);
@@ -337,6 +346,7 @@ private:
     int preferredWorkbenchHeight_ = 0;
     int currentWorkbenchHeight_ = 0;
     NativeWorkbenchTabState workbenchTabState_;
+    NativeFrameScheduler frameScheduler_;
     std::uint64_t layoutPassCount_ = 0;
     int logThemeIndex_ = 0;
     std::size_t logVisibleCharLimit_ = kNativeDefaultLogVisibleChars;

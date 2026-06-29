@@ -182,7 +182,7 @@ void NativeMainWindow::scheduleWorkbenchTabRepaint() {
         return;
     }
     workbenchTabRepaintPending_ = true;
-    PostMessageW(window_, kNativeWorkbenchTabRepaintMessage, 0, 0);
+    scheduleWorkbenchTabFrame();
 }
 
 void NativeMainWindow::repaintWorkbenchTabControls() {

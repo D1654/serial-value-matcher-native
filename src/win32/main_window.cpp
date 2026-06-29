@@ -30,8 +30,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
     case WM_CREATE:
         return handleCreateMessage();
     case WM_SIZE:
-        layoutControls(LOWORD(lParam), HIWORD(lParam));
-        RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+        scheduleResizeFrame(LOWORD(lParam), HIWORD(lParam));
         return 0;
     case WM_PAINT:
         paintLayoutChrome();
@@ -86,7 +85,10 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
                 clientRect.bottom - clientRect.top);
             if (nextWorkbenchHeight != currentWorkbenchHeight_) {
                 preferredWorkbenchHeight_ = nextWorkbenchHeight;
-                relayoutCurrentClient(false);
+                scheduleSplitterDragFrame(
+                    clientRect.right - clientRect.left,
+                    clientRect.bottom - clientRect.top,
+                    nextWorkbenchHeight);
             }
             return 0;
         }
@@ -135,6 +137,9 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         }
         break;
     }
+    case kNativeUiFrameMessage:
+        processNativeFrame();
+        return 0;
     case kNativeWorkbenchTabRepaintMessage:
         repaintWorkbenchTabControls();
         return 0;

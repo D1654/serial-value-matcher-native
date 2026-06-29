@@ -356,9 +356,14 @@ bool NativeMainWindow::runUiPerformanceTest() {
         return anchoredAboveStatus && separatedFromActions && readable;
     };
     const auto splitterDragSkipsRedundantLayouts = [&]() {
+        window.processNativeFrame();
         const int originalPreferredHeight = window.preferredWorkbenchHeight_;
         const int startX = (window.workbenchSplitterRect_.left + window.workbenchSplitterRect_.right) / 2;
         const int startY = (window.workbenchSplitterRect_.top + window.workbenchSplitterRect_.bottom) / 2;
+        RECT clientRect = {};
+        GetClientRect(window.window_, &clientRect);
+        const int clientWidth = clientRect.right - clientRect.left;
+        const int clientHeight = clientRect.bottom - clientRect.top;
         const std::uint64_t beforeLayouts = window.layoutPassCount_;
 
         window.draggingWorkbenchSplitter_ = true;
@@ -370,8 +375,22 @@ bool NativeMainWindow::runUiPerformanceTest() {
             return false;
         }
 
-        SendMessageW(window.window_, WM_MOUSEMOVE, 0, MAKELPARAM(startX, startY - 24));
-        const bool changedOnce = window.layoutPassCount_ == beforeLayouts + 1;
+        const int intermediateY = startY - 18;
+        const int latestY = startY - 24;
+        SendMessageW(window.window_, WM_MOUSEMOVE, 0, MAKELPARAM(startX, intermediateY));
+        SendMessageW(window.window_, WM_MOUSEMOVE, 0, MAKELPARAM(startX, latestY));
+        if (window.layoutPassCount_ != beforeLayouts) {
+            window.draggingWorkbenchSplitter_ = false;
+            return false;
+        }
+        const int expectedLatestHeight = window.clampedWorkbenchHeightForClient(
+            window.splitterDragStartWorkbenchHeight_ - (latestY - window.splitterDragStartY_),
+            clientWidth,
+            clientHeight);
+        window.processNativeFrame();
+        const bool changedOnce = window.layoutPassCount_ == beforeLayouts + 1
+            && window.currentWorkbenchHeight_ == expectedLatestHeight
+            && window.preferredWorkbenchHeight_ == expectedLatestHeight;
         window.draggingWorkbenchSplitter_ = false;
         window.preferredWorkbenchHeight_ = originalPreferredHeight;
         window.relayoutCurrentClient();
