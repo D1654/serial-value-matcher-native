@@ -3,6 +3,7 @@
 #if defined(_WIN32)
 
 #include "win32/native_control_utils.h"
+#include "win32/native_layout_transaction.h"
 #include "win32/native_layout_metrics.h"
 #include "win32/native_ui_preferences.h"
 
@@ -163,6 +164,17 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int editHeight = singleLineEditHeight(uiFont_, row);
     const int editOffsetY = std::max(0, (row - editHeight) / 2);
     const BOOL layoutRepaint = draggingWorkbenchSplitter_ ? FALSE : TRUE;
+    NativeLayoutTransaction layoutTransaction(layoutRepaint);
+    NativeLayoutTransaction* activeLayoutTransaction = &layoutTransaction;
+    const auto showControl = [&](HWND control, bool visible) {
+        activeLayoutTransaction->show(control, visible);
+    };
+    const auto moveControl = [&](HWND control, int moveX, int moveY, int moveWidth, int moveHeight, BOOL) {
+        activeLayoutTransaction->move(control, moveX, moveY, moveWidth, moveHeight);
+    };
+    const auto moveTopControl = [&](HWND control, int moveX, int moveY, int moveWidth, int moveHeight, BOOL) {
+        activeLayoutTransaction->moveTop(control, moveX, moveY, moveWidth, moveHeight);
+    };
 
     const int statusHeight = metrics.statusHeight;
     const int statusY = std::max(margin, height - statusHeight - 4);
@@ -436,7 +448,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     x += fileProgressLabelWidth + formFieldGap;
     moveTopControl(fileProgress_, x, y + progressOffsetY, std::max(1, pageX + pageW - x), progressHeight, layoutRepaint);
 
-    ShowWindow(workflowHint_, SW_HIDE);
+    showControl(workflowHint_, false);
     y = pageY;
     const int scanSectionGap = compact ? 2 : 3;
     const int scanBlockGap = compact ? 3 : 4;
@@ -585,6 +597,9 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const bool pageVisible = pageBottom > pageY;
     showControl(workTabs_, pageVisible);
     showControl(workPageBackground_, pageVisible);
+    layoutTransaction.commit();
+    NativeLayoutTransaction statusTransaction(layoutRepaint);
+    activeLayoutTransaction = &statusTransaction;
     workbenchVisibility_ = {};
     workbenchVisibility_.pageVisible = pageVisible;
     workbenchVisibility_.singleFormatRow = showSingleSendFormatRow;
@@ -628,6 +643,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
         statusRight -= counterWidth + gap;
     }
     moveControl(statusText_, margin, statusY, std::max(1, statusRight - margin), statusHeight, layoutRepaint);
+    statusTransaction.commit();
 }
 
 } // namespace svm::win32

@@ -8,11 +8,25 @@
 #include <cwctype>
 
 namespace svm::win32 {
-namespace {
+bool nativeControlHasClass(HWND control, const wchar_t* expectedClassName) {
+    wchar_t className[32] = {};
+    if (control == nullptr || GetClassNameW(control, className, static_cast<int>(sizeof(className) / sizeof(className[0]))) == 0) {
+        return false;
+    }
+    return lstrcmpiW(className, expectedClassName) == 0;
+}
 
-bool controlGeometryMatches(HWND control, int x, int y, int width, int height) {
+bool nativeControlIsVisible(HWND control) {
+    if (control == nullptr) {
+        return false;
+    }
+    const auto style = static_cast<LONG_PTR>(GetWindowLongPtrW(control, GWL_STYLE));
+    return (style & WS_VISIBLE) != 0;
+}
+
+bool nativeControlGeometryMatches(HWND control, int x, int y, int width, int height) {
     RECT rect = {};
-    if (GetWindowRect(control, &rect) == FALSE) {
+    if (control == nullptr || GetWindowRect(control, &rect) == FALSE) {
         return false;
     }
     POINT topLeft = {rect.left, rect.top};
@@ -26,23 +40,11 @@ bool controlGeometryMatches(HWND control, int x, int y, int width, int height) {
     return topLeft.x == x && topLeft.y == y && currentWidth == width && currentHeight == height;
 }
 
-} // namespace
-
-bool nativeControlHasClass(HWND control, const wchar_t* expectedClassName) {
-    wchar_t className[32] = {};
-    if (control == nullptr || GetClassNameW(control, className, static_cast<int>(sizeof(className) / sizeof(className[0]))) == 0) {
-        return false;
-    }
-    return lstrcmpiW(className, expectedClassName) == 0;
-}
-
 void showControl(HWND control, bool visible) {
     if (control == nullptr) {
         return;
     }
-    const auto style = static_cast<LONG_PTR>(GetWindowLongPtrW(control, GWL_STYLE));
-    const bool currentlyVisible = (style & WS_VISIBLE) != 0;
-    if (currentlyVisible != visible) {
+    if (nativeControlIsVisible(control) != visible) {
         ShowWindow(control, visible ? SW_SHOWNA : SW_HIDE);
     }
 }
@@ -51,9 +53,7 @@ void showControlFast(HWND control, bool visible) {
     if (control == nullptr) {
         return;
     }
-    const auto style = static_cast<LONG_PTR>(GetWindowLongPtrW(control, GWL_STYLE));
-    const bool currentlyVisible = (style & WS_VISIBLE) != 0;
-    if (currentlyVisible == visible) {
+    if (nativeControlIsVisible(control) == visible) {
         return;
     }
 
@@ -83,7 +83,7 @@ void moveControl(HWND control, int x, int y, int width, int height, BOOL repaint
         return;
     }
 
-    if (controlGeometryMatches(control, x, y, width, height)) {
+    if (nativeControlGeometryMatches(control, x, y, width, height)) {
         return;
     }
 
@@ -95,7 +95,7 @@ void moveTopControl(HWND control, int x, int y, int width, int height, BOOL repa
         return;
     }
 
-    const bool geometryUnchanged = controlGeometryMatches(control, x, y, width, height);
+    const bool geometryUnchanged = nativeControlGeometryMatches(control, x, y, width, height);
     UINT flags = SWP_NOACTIVATE | SWP_SHOWWINDOW;
     if (repaint == FALSE) {
         flags |= SWP_NOREDRAW;

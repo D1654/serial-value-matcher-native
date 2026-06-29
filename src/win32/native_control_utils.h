@@ -15,6 +15,8 @@
 namespace svm::win32 {
 
 bool nativeControlHasClass(HWND control, const wchar_t* expectedClassName);
+bool nativeControlIsVisible(HWND control);
+bool nativeControlGeometryMatches(HWND control, int x, int y, int width, int height);
 void showControl(HWND control, bool visible);
 void showControlFast(HWND control, bool visible);
 void enableControl(HWND control, bool enabled);
