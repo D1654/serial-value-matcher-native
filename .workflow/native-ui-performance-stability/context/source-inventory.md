@@ -63,9 +63,9 @@ This inventory is based on current repository files, not README or stale documen
 | `src/win32` | 78 | `current-win32-native` | Win32 application entry point, main window, controls, layout, serial, send, log, Modbus, analysis, self-test, resources, UTF-8/UTF-16 helpers. |
 | `src/core` | 10 | `current-supporting` | Small dependency-free core for protocol, Modbus, analysis, reporting, and text helpers. |
 | `src/native_storage` | 11 | `current-supporting` | File-backed native storage, record codec, record I/O, session store, cache. |
-| `src/modbus` | 14 | `current-supporting` | Modbus RTU request/response/codec/transport/scan planning and execution. Shared with Qt-era tests. |
-| `src/matching` | 14 | `current-supporting` | Candidate generation, numeric decoding, scan observation, stability analysis, protocol rule verification. |
-| `src/report` | 4 | `current-supporting` | Rule verification report and text file writer. |
+| `src/modbus` | 14 | `parallel-qt` | Qt-era Modbus request/response/codec/transport/scan planning and execution. Current Win32 native links the Qt-free `src/core/modbus_core.*` path. |
+| `src/matching` | 14 | `parallel-qt` | Qt-era candidate generation, numeric decoding, scan observation, stability analysis, protocol rule verification. Current Win32 native links the Qt-free `src/core/analysis_core.*` path. |
+| `src/report` | 4 | `parallel-qt` | Qt-era rule verification report and text file writer. Current Win32 native links the Qt-free `src/core/report_core.*` path. |
 | `src/app` | 9 | `parallel-qt` | Qt app entry, main window, Modbus worker/adapters, Qt serial byte channel. |
 | `src/analysis` | 2 | `parallel-qt` | Qt-era stability analysis workflow target source. |
 | `src/capture` | 4 | `parallel-qt` | Qt-era capture bus and raw I/O event types. |
@@ -85,7 +85,7 @@ This inventory is based on current repository files, not README or stale documen
 | Send workflows | `main_window_send.cpp`, `native_send_codec.*`, `native_send_control_state.*`, `native_send_history_state.*`, `native_file_send_state.*` | `native_send_*_tests`, `native_file_send_state_tests`. |
 | Logs | `main_window_log.cpp`, `native_log_model.*`, `native_log_scroll_state.*`, `native_log_view.*` | `native_log_filter_state_tests`, `native_log_scroll_state_tests`, UI perf log gate. |
 | Modbus scan | `main_window_modbus.cpp`, `native_modbus_scan_*` | `native_protocol_modbus_tests`, `native_modbus_scan_*_tests`. |
-| Candidate analysis/report | `main_window_analysis.cpp`, `native_analysis_workflow.*`, `src/core/analysis_core.*`, `src/report/*` | `native_win32_analysis_workflow_tests`, `native_analysis_report_tests`. |
+| Candidate analysis/report | `main_window_analysis.cpp`, `native_analysis_workflow.*`, `src/core/analysis_core.*`, `src/core/report_core.*` | `native_win32_analysis_workflow_tests`, `native_analysis_report_tests`. |
 | Preferences/storage | `main_window_preferences.cpp`, `main_window_storage.cpp`, `native_ui_preferences.*`, `src/native_storage/*` | `native_ui_preferences_tests`, `native_storage_tests`. |
 
 ## CTest Inventory
@@ -204,4 +204,3 @@ This supports the Phase 0 hypothesis that current risk is concentrated in Win32 
 ## Task 01 Conclusion
 
 The active final delivery path is the Win32 native executable `svm-native-win32` built by `.github/workflows/windows-native-package.yml` and visually smoked by `.github/workflows/windows-native-ui-capture.yml`. Qt workflows and Qt source/test paths remain present and active as parallel/historical coverage, but they must not be used as evidence that the Win32 native release UI is correct.
-
