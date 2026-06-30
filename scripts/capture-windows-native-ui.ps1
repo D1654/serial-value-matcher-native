@@ -93,6 +93,8 @@ public static class NativeUiCapture {
     public const uint SWP_SHOWWINDOW = 0x0040;
     public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     public const uint MOUSEEVENTF_LEFTUP = 0x0004;
+    public const int LOGPIXELSX = 88;
+    public const int LOGPIXELSY = 90;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT {
@@ -125,6 +127,18 @@ public static class NativeUiCapture {
 
     [DllImport("user32.dll")]
     public static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetDpiForWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetDC(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+    [DllImport("gdi32.dll")]
+    public static extern int GetDeviceCaps(IntPtr hdc, int nIndex);
 
     [DllImport("user32.dll")]
     public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint nFlags);
@@ -286,6 +300,44 @@ function Wait-MainWindow {
         Start-Sleep -Milliseconds 300
     }
     throw "等待主窗口超时：$WindowTitle"
+}
+
+function Get-NativeDpiMetrics {
+    param([IntPtr]$WindowHandle)
+
+    [uint32]$windowDpi = 0
+    try {
+        $windowDpi = [NativeUiCapture]::GetDpiForWindow($WindowHandle)
+    } catch {
+        $windowDpi = 0
+    }
+
+    [int]$screenDpiX = 0
+    [int]$screenDpiY = 0
+    $screenDc = [NativeUiCapture]::GetDC([IntPtr]::Zero)
+    if ($screenDc -ne [IntPtr]::Zero) {
+        try {
+            $screenDpiX = [NativeUiCapture]::GetDeviceCaps($screenDc, [NativeUiCapture]::LOGPIXELSX)
+            $screenDpiY = [NativeUiCapture]::GetDeviceCaps($screenDc, [NativeUiCapture]::LOGPIXELSY)
+        } finally {
+            [NativeUiCapture]::ReleaseDC([IntPtr]::Zero, $screenDc) | Out-Null
+        }
+    }
+
+    $scalePercent = if ($windowDpi -gt 0) {
+        [int][Math]::Round(([double]$windowDpi * 100.0) / 96.0)
+    } elseif ($screenDpiX -gt 0) {
+        [int][Math]::Round(([double]$screenDpiX * 100.0) / 96.0)
+    } else {
+        0
+    }
+
+    [pscustomobject]@{
+        WindowDpi = $windowDpi
+        ScreenDpiX = $screenDpiX
+        ScreenDpiY = $screenDpiY
+        ScalePercent = $scalePercent
+    }
 }
 
 function Select-NativeTab {
@@ -500,6 +552,39 @@ function Capture-LogSplitterMovement {
     Add-CaptureStatus -Scenario "log-splitter-movement" -Detail "files=log-splitter-before.png,log-splitter-after.png"
 }
 
+function Capture-DpiSmoke {
+    param(
+        [IntPtr]$WindowHandle,
+        $DpiMetrics
+    )
+
+    [NativeUiCapture]::ShowWindow($WindowHandle, [NativeUiCapture]::SW_RESTORE) | Out-Null
+    [NativeUiCapture]::SetForegroundWindow($WindowHandle) | Out-Null
+    $setWindowFlags = [NativeUiCapture]::SWP_NOZORDER -bor [NativeUiCapture]::SWP_SHOWWINDOW
+
+    foreach ($scale in @(100, 125)) {
+        $width = [Math]::Max(1, [int][Math]::Round($DefaultWidth * $scale / 100.0))
+        $height = [Math]::Max(1, [int][Math]::Round($DefaultHeight * $scale / 100.0))
+        [NativeUiCapture]::SetWindowPos(
+            $WindowHandle,
+            [IntPtr]::Zero,
+            0,
+            0,
+            $width,
+            $height,
+            $setWindowFlags) | Out-Null
+        Start-Sleep -Milliseconds 900
+
+        $fileName = "dpi-$scale-window.png"
+        $file = Join-Path $outputPath $fileName
+        Capture-WindowImage -WindowHandle $WindowHandle -Path $file
+        Assert-ImageVisible -Path $file
+        Add-CaptureStatus `
+            -Scenario "dpi-smoke-$scale" `
+            -Detail "file=$fileName requested-scale=$scale actual-window-dpi=$($DpiMetrics.WindowDpi) actual-scale=$($DpiMetrics.ScalePercent) direct-dpi-switch=unavailable"
+    }
+}
+
 Write-Host "启动：$ExePath"
 $process = Start-Process -FilePath $ExePath -PassThru
 try {
@@ -508,12 +593,18 @@ try {
     [NativeUiCapture]::SetForegroundWindow($windowHandle) | Out-Null
     Start-Sleep -Milliseconds 1000
 
+    $dpiMetrics = Get-NativeDpiMetrics -WindowHandle $windowHandle
     @(
         "WindowTitle=$WindowTitle",
         "ExePath=$ExePath",
         "WindowHandle=$windowHandle",
         "DefaultSize=${DefaultWidth}x${DefaultHeight}",
         "CompactSize=${CompactWidth}x${CompactHeight}",
+        "WindowDpi=$($dpiMetrics.WindowDpi)",
+        "ScreenDpiX=$($dpiMetrics.ScreenDpiX)",
+        "ScreenDpiY=$($dpiMetrics.ScreenDpiY)",
+        "ScalePercent=$($dpiMetrics.ScalePercent)",
+        "DpiSwitching=not-attempted-runner-scale-recorded-scaled-window-smoke-used",
         "CapturedAt=$((Get-Date).ToString("o"))"
     ) | Set-Content -Path (Join-Path $outputPath "window-info.txt") -Encoding UTF8
 
@@ -531,6 +622,7 @@ try {
     Assert-ImageRegionDetail -Path $rootFile -Label "日志工具条" -X 0 -Y 12 -Width $toolbarWidth -Height 80 -MinDarkRatio 0.05
     Assert-ImageRegionDetail -Path $rootFile -Label "串口侧栏" -X ([Math]::Max(0, $rootWidth - 260)) -Y 12 -Width 260 -Height 330 -MinDarkRatio 0.045
 
+    Capture-DpiSmoke -WindowHandle $windowHandle -DpiMetrics $dpiMetrics
     Capture-TabSet -WindowHandle $windowHandle -Prefix "tab-" -Width $DefaultWidth -Height $DefaultHeight
     Capture-TabSet -WindowHandle $windowHandle -Prefix "compact-tab-" -Width $CompactWidth -Height $CompactHeight
     Capture-ResizeSweep -WindowHandle $windowHandle

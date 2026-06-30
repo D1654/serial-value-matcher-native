@@ -322,6 +322,15 @@ bool NativeMainWindow::runSelfTest() {
     if (!mainLayoutProbeIsFullyUsableAtSize(1366, 768)) {
         return fail("main-layout-1366x768");
     }
+    if (!mainLayoutProbeIsFullyUsableAtSize(1212, 753)) {
+        return fail("dpi-layout-100-default");
+    }
+    if (!mainLayoutProbeIsFullyUsableAtSize(1515, 941)) {
+        return fail("dpi-layout-125-default");
+    }
+    if (!mainLayoutProbeIsStableAtSize(950, 650)) {
+        return fail("dpi-layout-125-compact");
+    }
     if (!mainLayoutProbeIsStableAtSize(640, 400)) {
         return fail("main-layout-640x400");
     }
