@@ -63,6 +63,32 @@ void emptyNeedleClearsSearch() {
     assert(state.searchOffset() == 0);
 }
 
+void visibleLogTextEscapesControlCharacters() {
+    std::wstring text;
+    text.push_back(L'A');
+    text.push_back(L'\r');
+    text.push_back(L'\n');
+    text.push_back(L'\t');
+    text.push_back(static_cast<wchar_t>(0x01));
+    text.push_back(L'B');
+
+    assert(svm::win32::sanitizeLogText(text) == L"A\\r\\n\\t.B");
+}
+
+void containsNeedleIsCaseInsensitive() {
+    assert(svm::win32::containsCaseInsensitive(L"[RX] Temperature=42", L"rx"));
+    assert(svm::win32::containsCaseInsensitive(L"[TX] 温度=42", L"tx"));
+    assert(!svm::win32::containsCaseInsensitive(L"[系统] connected", L"error"));
+}
+
+void longVisibleLogLinesAreClippedWithSuffix() {
+    const std::wstring clipped = svm::win32::clipRenderedLogLine(L"ABCDEFGHIJ", 7, L"...");
+    assert(clipped == L"ABCD...");
+
+    const std::wstring unchanged = svm::win32::clipRenderedLogLine(L"ABC", 7, L"...");
+    assert(unchanged == L"ABC");
+}
+
 } // namespace
 
 int main() {
@@ -70,6 +96,9 @@ int main() {
     changedFilterResetsSearchState();
     findNextIsCaseInsensitiveAndWraps();
     emptyNeedleClearsSearch();
+    visibleLogTextEscapesControlCharacters();
+    containsNeedleIsCaseInsensitive();
+    longVisibleLogLinesAreClippedWithSuffix();
 
     std::cout << "native_log_filter_state_tests passed\n";
     return 0;
