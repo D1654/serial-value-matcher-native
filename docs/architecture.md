@@ -1,5 +1,7 @@
 # 架构说明
 
+状态：过渡参考。当前 Win32 native 架构入口请优先阅读 [architecture-win32-native.md](architecture-win32-native.md)。Qt 历史路线请阅读 [legacy-qt-notes.md](legacy-qt-notes.md)。
+
 当前仓库保留两条实现路线：Win32 native 轻量发布路线和 Qt 历史基线路线。v1.0.0 面向用户发布的是 Win32 native 包。
 
 ## Win32 native 发布路线

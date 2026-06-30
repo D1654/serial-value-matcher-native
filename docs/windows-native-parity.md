@@ -1,5 +1,7 @@
 # Win32 Native 与 Qt 基线对照
 
+状态：历史/过渡参考。当前主发布路线请优先阅读 [user-guide.md](user-guide.md)、[architecture-win32-native.md](architecture-win32-native.md) 和 [release-artifacts.md](release-artifacts.md)。
+
 当前面向用户的发布包是 Win32 native v1.0.0。Qt 版本仍保留在源码中，主要作为历史基线、测试参考和后续迁移参考。
 
 ## 发布决策

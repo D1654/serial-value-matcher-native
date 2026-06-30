@@ -99,11 +99,22 @@ scripts/package-windows-native-mingw.sh
 
 ## 文档
 
-- `native-spec.md`：当前产品规格和边界。
-- `docs/architecture.md`：代码结构和模块关系。
-- `docs/windows-deployment.md`：GitHub Actions 出包和 Release 流程。
-- `docs/windows-native-local-debug.md`：本地交叉构建、Wine 自测和 UI 截图。
-- `docs/windows-native-slimming.md`：体积目标和瘦身结果。
-- `docs/windows-native-parity.md`：Win32 native 与 Qt 历史基线对照。
-- `docs/windows-native-ui-validation.md`：UI 验收清单。
-- `docs/windows-serial-validation.md`：Windows 真机串口验收清单。
+当前文档将按 Win32 native 发布路线重写。优先阅读：
+
+- `docs/user-guide.md`：当前用户指南入口。
+- `docs/developer-guide.md`：当前开发者指南入口。
+- `docs/architecture-win32-native.md`：Win32 native 架构入口。
+- `docs/testing-validation.md`：测试、截图、PTY、包体审计和验证入口。
+- `docs/release-artifacts.md`：Actions artifact 和发布产物入口。
+- `docs/troubleshooting.md`：常见问题和排查入口。
+- `docs/legacy-qt-notes.md`：Qt 历史路线说明。
+
+过渡期参考文档：
+
+- `docs/windows-deployment.md`
+- `docs/windows-native-local-debug.md`
+- `docs/windows-native-slimming.md`
+- `docs/windows-native-parity.md`
+- `docs/windows-native-ui-validation.md`
+- `docs/windows-serial-validation.md`
+- `docs/architecture.md`
