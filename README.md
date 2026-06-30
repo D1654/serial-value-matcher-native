@@ -22,6 +22,8 @@ SerialValueMatcherNative-win32-native-x64.zip
 svm-native-win32.exe
 ```
 
+首次使用、串口连接、日志导出、发送、Modbus 扫描和报告流程见 [用户指南](docs/user-guide.md)。
+
 v1.0.0 包信息：
 
 - GitHub Actions Windows runner 构建；
