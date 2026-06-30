@@ -2,8 +2,11 @@
 
 #if defined(_WIN32)
 
+#include "win32/native_analysis_workflow.h"
 #include "win32/native_layout_metrics.h"
+#include "win32/native_modbus_scan_request.h"
 #include "win32/native_progress_control.h"
+#include "win32/native_send_codec.h"
 #include "win32/native_time_utils.h"
 #include "win32/resource.h"
 #include "win32/ui_text.h"
@@ -89,6 +92,179 @@ bool controlsAreVisible(std::initializer_list<HWND> controls) {
     return true;
 }
 
+bool serialStateSelfTestProbe() {
+    NativeSerialIoState state;
+    if (!state.allowsManualSend() || !state.allowsFileSend() || !state.allowsModbusScan()) {
+        return false;
+    }
+    if (!state.tryAcquire(NativeSerialIoOwner::ModbusScan)) {
+        return false;
+    }
+    if (state.allowsManualSend() || state.allowsFileSend() || state.allowsSerialPoll() || !state.shouldDeferDisconnect()) {
+        return false;
+    }
+    if (state.release(NativeSerialIoOwner::ManualSend)) {
+        return false;
+    }
+    return state.release(NativeSerialIoOwner::ModbusScan)
+        && state.allowsManualSend()
+        && state.allowsSerialPoll();
+}
+
+bool logEvidenceSelfTestProbe() {
+    NativeLogFilterState filter;
+    const NativeLogFilterUpdate update = filter.setFilterText(L"Rx");
+    if (!update.changed || filter.loweredFilterText() != L"rx") {
+        return false;
+    }
+    if (!containsCaseInsensitive(L"[RX] 01 03", L"rx")) {
+        return false;
+    }
+    if (sanitizeLogText(L"A\r\n\tB") != L"A\\r\\n\\tB") {
+        return false;
+    }
+    if (clipRenderedLogLine(L"abcdef", 4, L"...") != L"a...") {
+        return false;
+    }
+    const NativeLogSearchResult first = filter.findNext(L"[TX] one\n[RX] two", L"rx");
+    return first.found && first.length == 2;
+}
+
+NativeSendCodecErrors selfTestSendCodecErrors() {
+    NativeSendCodecErrors errors;
+    errors.hexInvalidChar = L"hex invalid";
+    errors.hexOddNibble = L"hex odd";
+    errors.invalidDecimal = L"decimal invalid";
+    errors.invalidBinary = L"binary invalid";
+    errors.textEncodingFailed = L"encoding failed";
+    return errors;
+}
+
+bool sendWorkflowSelfTestProbe(const std::filesystem::path& tempDirectory) {
+    NativeSendPayloadOptions options;
+    options.mode = 1;
+    options.lineEnding = 3;
+    const NativeSendPayloadResult payload = nativeBuildSendPayload(L"AA", options, selfTestSendCodecErrors());
+    if (!payload.errorText.empty() || payload.payload != std::vector<std::uint8_t>({0xAA, '\r', '\n'})) {
+        return false;
+    }
+
+    NativeSendControlState controls;
+    controls.setTimedSendEnabled(true);
+    const NativeTimedSendTimerDecision timer = controls.timerDecision(true, true, 1);
+    if (!timer.shouldRun || timer.periodMs != kNativeMinTimedSendPeriodMs) {
+        return false;
+    }
+    if (!controls.isQuickSendIndexValid(9, 10) || controls.isQuickSendIndexValid(10, 10) || controls.isQuickSendTextUsable(L"")) {
+        return false;
+    }
+
+    const std::filesystem::path filePath = tempDirectory / L"svm-native-self-test-file-send.bin";
+    {
+        std::ofstream output(filePath, std::ios::binary | std::ios::trunc);
+        output.put('\x01');
+        output.put('\x02');
+        output.put('\x03');
+    }
+
+    NativeFileSendState fileSend;
+    const NativeFileSendOpenResult open = fileSend.open(filePath);
+    if (!open.ok() || open.totalBytes != 3 || !fileSend.active()) {
+        std::filesystem::remove(filePath);
+        return false;
+    }
+    const NativeFileSendChunk chunk = fileSend.readNextChunk(8);
+    if (!chunk.ready() || chunk.bytes != std::vector<std::uint8_t>({1, 2, 3}) || fileSend.done()) {
+        std::filesystem::remove(filePath);
+        return false;
+    }
+    fileSend.markBytesWritten(chunk.bytes.size());
+    const bool done = fileSend.done() && fileSend.progressPermille() == 1000;
+    fileSend.close();
+    std::filesystem::remove(filePath);
+    return done;
+}
+
+bool modbusAnalysisReportSelfTestProbe() {
+    NativeModbusScanRequestInput input;
+    input.slaveId = 2;
+    input.functionCode = static_cast<core::Byte>(core::modbus::ModbusReadFunction::InputRegisters);
+    input.startAddress = 100;
+    input.endAddress = 103;
+    input.blockSize = 2;
+    input.scanSessionId = "scan-self-test";
+    input.startedAtUtc = "created-at";
+    const NativeModbusScanRequestResult request = nativeBuildModbusScanRequest(input);
+    if (!request.ok || request.request.plan.requestCount() != 2 || request.request.execution.session.status != "running") {
+        return false;
+    }
+
+    native_storage::ScanSessionRecord session;
+    session.sessionId = "scan-self-test";
+    session.slaveId = 2;
+    session.functionCode = 4;
+    session.startAddress = 100;
+    session.endAddress = 103;
+    session.blockSize = 2;
+    session.status = "completed";
+
+    std::vector<native_storage::ScanObservationRecord> observations;
+    native_storage::ScanObservationRecord observation;
+    observation.id = 41;
+    observation.sessionId = session.sessionId;
+    observation.slaveId = session.slaveId;
+    observation.functionCode = session.functionCode;
+    observation.address = 100;
+    observation.value = 1;
+    observation.observedAtUtc = "observed-at";
+    observations.push_back(observation);
+
+    const NativeCandidateAnalysisBuildResult analysis = nativeBuildCandidateAnalysisRun(
+        session,
+        observations,
+        "mode",
+        1.0,
+        "",
+        0.0,
+        "match-self-test",
+        "sampled-at",
+        "created-at",
+        "observed-at");
+    if (!analysis.success || analysis.candidates.empty()) {
+        return false;
+    }
+
+    native_storage::ProtocolFieldRuleRecord rule;
+    rule.ruleId = "rule-self-test";
+    rule.fieldName = "mode";
+    rule.candidateType = "EnumMap";
+    rule.wordOrder = "HighWordFirst";
+    rule.byteOrder = "BigEndian";
+    rule.slaveId = session.slaveId;
+    rule.functionCode = session.functionCode;
+    rule.startAddress = 100;
+    rule.registerCount = 1;
+    rule.scaleMultiplier = 1.0;
+    rule.interpretationMap = "0=停止\n1=运行";
+    const NativeRuleVerificationBuildResult verification = nativeBuildRuleVerificationResult(
+        session,
+        {rule},
+        observations,
+        "verify-self-test",
+        "created-at");
+    if (verification.run.verifiedCount != 1 || verification.results.size() != 1) {
+        return false;
+    }
+    if (verification.results.front().interpretationText != "枚举解释：运行。") {
+        return false;
+    }
+
+    const std::string markdown = nativeRenderRuleVerificationMarkdownReport(verification.run, verification.results);
+    return markdown.find("# 协议规则验证报告") == 0
+        && markdown.find("verify-self-test") != std::string::npos
+        && markdown.find("枚举解释：运行。") != std::string::npos;
+}
+
 } // namespace
 
 bool NativeMainWindow::runSelfTest() {
@@ -163,8 +339,22 @@ bool NativeMainWindow::runSelfTest() {
     if (GetTempPathW(MAX_PATH, tempPathBuffer) == 0) {
         return fail("temp-path");
     }
+    const std::filesystem::path tempDirectory(tempPathBuffer);
 
-    const auto storePath = std::filesystem::path(tempPathBuffer) / L"svm-native-win32-self-test";
+    if (!serialStateSelfTestProbe()) {
+        return fail("functional-serial-state");
+    }
+    if (!logEvidenceSelfTestProbe()) {
+        return fail("functional-log-evidence");
+    }
+    if (!sendWorkflowSelfTestProbe(tempDirectory)) {
+        return fail("functional-send-workflow");
+    }
+    if (!modbusAnalysisReportSelfTestProbe()) {
+        return fail("functional-modbus-analysis-report");
+    }
+
+    const auto storePath = tempDirectory / L"svm-native-win32-self-test";
     std::filesystem::remove_all(storePath);
     native_storage::NativeSessionStore store;
     if (!store.open(storePath)) {
