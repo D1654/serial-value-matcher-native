@@ -1,25 +1,182 @@
 # 开发者指南
 
-状态：当前 Win32 native 文档骨架。详细开发流程将在 Phase 5 Task 03 补全。
-
-适用对象：继续维护 Win32 native 路线的开发者和测试工程师。
+状态：当前 Win32 native 开发指南。本文面向继续维护 `svm-native-win32.exe` 的开发者和测试工程师。
 
 ## 当前开发口径
 
-- 当前交付重点是 Win32 native 桌面程序。
-- Qt 代码仍在仓库中，但属于历史基线和部分测试参考。
-- 新增用户可见能力应优先沉到 Qt-free core 或 Win32 native 模块。
+- 当前用户发布路线是 Win32 native。
+- 主可执行目标是 `svm-native-win32`，发布文件名是 `svm-native-win32.exe`。
+- 构建系统是 CMake，语言标准是 C++20。
+- 用户可见能力优先落在 Qt-free core、`src/native_storage/` 和 `src/win32/`。
+- Qt Widgets 路线保留为 legacy 基线和部分测试参考，不是当前轻量发布目标。
 
-## 计划覆盖
+## 目录边界
 
-- 仓库目录和构建目标。
-- CMake 选项、MSVC 构建和 MinGW 交叉构建。
-- 本地自测、UI 性能门禁、PTY 串口矩阵和包体审计。
-- 代码所有权边界和热路径注意事项。
-- 提交、验证、Actions artifact 下载和问题定位流程。
+- `src/core/`：协议、Modbus、候选分析和报告的 Qt-free 核心逻辑，目标库是 `svm_slim_core`。
+- `src/native_storage/`：native 文件存储，不依赖 SQLite 插件，目标库是 `svm_native_storage`。
+- `src/win32/`：Win32 原生 UI、串口、布局、日志、发送、Modbus worker、偏好和状态模块。
+- `tests/`：native 单元测试、Win32 串口测试、UI 布局/调度/绘制策略测试、legacy Qt 测试。
+- `scripts/`：本地 MinGW 构建、打包、Wine UI capture、PTY 串口仿真、包体审计脚本。
+- `.github/workflows/`：Windows native package、Windows native UI capture、legacy Qt package/stress 工作流。
+- `docs/`：当前文档以 Win32 native 为主，旧 Qt 说明集中到 `docs/legacy-qt-notes.md`。
+
+## Windows native 构建
+
+正式 CI 使用 Windows runner、Visual Studio 2022、x64、Release 配置：
+
+```powershell
+cmake -S . -B build-windows-native `
+  -G "Visual Studio 17 2022" `
+  -A x64 `
+  -DSVM_BUILD_QT_APP=OFF `
+  -DSVM_BUILD_QT_TESTS=OFF `
+  -DSVM_BUILD_WIN32_APP=ON
+
+cmake --build build-windows-native --config Release --parallel 1
+```
+
+运行 CTest：
+
+```powershell
+ctest --test-dir build-windows-native --output-on-failure -C Release
+```
+
+运行 exe 自检和 UI 性能门禁：
+
+```powershell
+build-windows-native\Release\svm-native-win32.exe --self-test
+build-windows-native\Release\svm-native-win32.exe --ui-perf-test
+```
+
+打包：
+
+```powershell
+.\scripts\package-windows-native.ps1 `
+  -BuildDir build-windows-native `
+  -Config Release
+```
+
+## Linux/MinGW 本地构建
+
+Linux 开发环境可用 MinGW 交叉构建 Windows native exe：
+
+```bash
+scripts/build-windows-native-mingw.sh
+```
+
+默认输出：
+
+```text
+build-windows-native-mingw/svm-native-win32.exe
+```
+
+本地打包和静态审计：
+
+```bash
+scripts/package-windows-native-mingw.sh
+```
+
+本地打包脚本会调用 `scripts/inspect-windows-package.py` 检查 zip、SHA256、exe、导入表、Unicode probe、forbidden runtime 和体积门禁。Wine/Xvfb 可用时还会执行 `--self-test` 和 `--ui-perf-test`。
+
+## 本地验证入口
+
+常用验证命令：
+
+```bash
+ctest --test-dir build-windows-native-mingw --output-on-failure
+```
+
+```bash
+SVM_SERIAL_LOOPBACK_SCENARIOS=normal,reopen,timeout,cancel,stress \
+python3 scripts/run-windows-native-serial-pty-loopback.py
+```
+
+```bash
+scripts/capture-windows-native-ui-wine.sh
+```
+
+关键 exe 参数：
+
+- `--self-test`：覆盖核心状态、日志、发送、文件发送、Modbus/分析/报告、存储和基础 UI 状态。
+- `--ui-perf-test`：覆盖标签切换、布局应用、日志 flush、日志重建和拖动帧性能门禁。
+
+## 主要测试目标
+
+Native core 和状态测试：
+
+- `native_protocol_modbus_tests`
+- `native_analysis_report_tests`
+- `native_storage_tests`
+- `native_send_codec_tests`
+- `native_send_control_state_tests`
+- `native_send_history_state_tests`
+- `native_file_send_state_tests`
+- `native_log_filter_state_tests`
+- `native_log_scroll_state_tests`
+- `native_reconnect_state_tests`
+- `native_ui_preferences_tests`
+- `native_workbench_tab_state_tests`
+- `native_modbus_scan_request_tests`
+- `native_modbus_scan_ui_state_tests`
+
+Win32/UI 架构测试：
+
+- `native_layout_metrics_tests`
+- `native_ui_layout_model_tests`
+- `native_ui_layout_transaction_tests`
+- `native_frame_scheduler_tests`
+- `native_paint_policy_tests`
+- `native_win32_analysis_workflow_tests`
+- `native_win32_serial_tests`
+- `native_win32_serial_loopback_tests`
+
+`native_win32_serial_loopback_tests` 需要串口端点，通常由 `scripts/run-windows-native-serial-pty-loopback.py` 在 Linux/Wine 环境用 PTY 提供。
+
+## 开发原则
+
+功能改动应先判断归属：
+
+- 协议、数值、报告格式：优先放到 `src/core/`。
+- 持久化格式和记录读写：放到 `src/native_storage/`。
+- Windows 串口打开、读写、DTR/RTS、端口枚举：放到 `src/win32/win32_serial_*`。
+- UI 状态、布局、日志、发送、扫描和交互：放到 `src/win32/native_*` 或对应 `main_window_*.cpp`。
+- 用户可见中文文案：集中到 `src/win32/ui_text.cpp`。
+
+热路径改动要求：
+
+- 不在 `WM_SIZE`、分割条拖动、标签切换、日志 flush 中做无界重建。
+- 布局计算走 `NativeLayoutModel`，控件移动走 `NativeLayoutTransaction`。
+- 高频 UI 更新走 `NativeFrameScheduler` 合并，不直接散落 `InvalidateRect`/`MoveWindow`。
+- 绘制刷新策略走 `NativePaintPolicy`，避免大面积 erase background 导致闪烁。
+- 日志追加优先批量 flush，保留暂停滚动、可见缓存和 native 原始记录边界。
+
+## 提交流程
+
+1. 明确改动归属，避免把 Qt legacy 路线重新引入 Win32 native 发布包。
+2. 为新增状态或算法补 native 单元测试。
+3. 涉及 UI 热路径时补布局、调度、绘制或 UI capture 证据。
+4. 涉及串口时补 `native_win32_serial_tests` 或 PTY loopback 场景。
+5. 涉及发布物时补包体审计、hash、forbidden runtime 和 artifact 说明。
+6. 提交前运行目标测试和 `git diff --check`。
+
+## CI 和 artifact
+
+正式发布验证入口：
+
+- `.github/workflows/windows-native-package.yml`：构建、CTest、自检、UI perf、包体审计、上传 native artifact。
+- `.github/workflows/windows-native-ui-capture.yml`：默认窗口、小窗口、标签切换、分割条拖动、UI perf 和截图证据。
+
+当前主 artifact 名称：
+
+```text
+SerialValueMatcherNative-win32-native-x64
+```
+
+artifact 应包含 zip、SHA256、package summary、`native-self-test.log`、`native-ui-perf-test.log` 和 `serial-pty-matrix.txt`。
 
 ## 相关文档
 
-- [Win32 native 架构](architecture-win32-native.md)
+- [Win32 Native 架构](architecture-win32-native.md)
 - [测试与验证](testing-validation.md)
+- [发布产物](release-artifacts.md)
 - [历史 Qt 说明](legacy-qt-notes.md)
