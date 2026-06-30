@@ -46,8 +46,10 @@ rm -f \
     "$output_dir"/tab-*.png \
     "$output_dir"/compact-tab-*.png \
     "$output_dir"/resize-*.png \
+    "$output_dir"/log-splitter-*.png \
     "$output_dir"/self-test.log \
     "$output_dir"/ui-perf-test.log \
+    "$output_dir"/capture-status.txt \
     "$output_dir"/app.stdout \
     "$output_dir"/app.stderr \
     "$output_dir"/window-info.txt \
@@ -58,6 +60,19 @@ rm -f \
 export XDG_RUNTIME_DIR="$xdg_runtime_dir"
 export WINEPREFIX="$wine_prefix"
 export WINEARCH=win64
+
+: >"$output_dir/capture-status.txt"
+
+add_capture_status() {
+    local scenario="$1"
+    local status="${2:-PASS}"
+    local detail="${3:-}"
+    if [[ -n "$detail" ]]; then
+        printf "%s %s %s\n" "$status" "$scenario" "$detail" >>"$output_dir/capture-status.txt"
+    else
+        printf "%s %s\n" "$status" "$scenario" >>"$output_dir/capture-status.txt"
+    fi
+}
 
 wineboot -u >"$output_dir/wineboot.log" 2>&1
 {
@@ -76,6 +91,7 @@ wineboot -u >"$output_dir/wineboot.log" 2>&1
 
 self_test_log_windows="$(winepath -w "$output_dir/self-test.log" | tr -d '\r')"
 SVM_NATIVE_SELF_TEST_LOG="$self_test_log_windows" wine "$exe_path" --self-test
+add_capture_status "self-test" "PASS" "log=self-test.log"
 ui_perf_log_windows="$(winepath -w "$output_dir/ui-perf-test.log" | tr -d '\r')"
 
 xvfb-run -a -s "-screen 0 $screen_spec" bash -c '
@@ -93,6 +109,7 @@ ui_perf_log_windows="$9"
 capture_resize_sweep="${10}"
 
 SVM_NATIVE_SELF_TEST_LOG="$ui_perf_log_windows" wine "$exe_path" --ui-perf-test
+printf "%s\n" "PASS ui-perf-test log=ui-perf-test.log" >> "$output_dir/capture-status.txt"
 
 wine "$exe_path" >"$output_dir/app.stdout" 2>"$output_dir/app.stderr" &
 app_pid=$!
@@ -119,6 +136,7 @@ fi
 
 sleep "$stabilize_seconds"
 xwd -root -silent | convert xwd:- "$output_dir/root.png"
+printf "%s\n" "PASS default-window file=root.png" >> "$output_dir/capture-status.txt"
 
 while read -r window_id; do
     xdotool getwindowname "$window_id"
@@ -191,6 +209,7 @@ capture_resize_sweep_set() {
         xdotool windowsize --sync "$window_id" "$resize_width" "$resize_height" >/dev/null 2>&1 || true
         sleep 1
         capture_checked_screen "$output_dir/resize-${index}.png"
+        printf "PASS resize-%s file=resize-%s.png size=%sx%s\n" "$index" "$index" "$resize_width" "$resize_height" >> "$output_dir/capture-status.txt"
         index=$((index + 1))
     done
 
@@ -203,6 +222,7 @@ capture_resize_sweep_set() {
     fi
     assert_screenshot_region_detail "$output_dir/resize-$((index - 1)).png" "缩放后日志工具条" "${resize_toolbar_width}x80+$X+$((Y + 12))" "0.05"
     assert_screenshot_region_detail "$output_dir/resize-$((index - 1)).png" "缩放后串口侧栏" "260x330+$((X + WIDTH - 260))+$((Y + 12))" "0.045"
+    printf "PASS resize-sweep screenshots=%s\n" "$index" >> "$output_dir/capture-status.txt"
 }
 
 capture_tab_set() {
@@ -234,9 +254,11 @@ capture_tab_set() {
         if [[ "$fast_frames" != "0" ]]; then
             sleep "$fast_delay"
             capture_checked_screen "$output_dir/${prefix}${tab_names[$index]}-fast.png"
+            printf "PASS %s%s-fast file=%s%s-fast.png\n" "$prefix" "${tab_names[$index]}" "$prefix" "${tab_names[$index]}" >> "$output_dir/capture-status.txt"
         fi
         sleep 0.55
         capture_checked_screen "$output_dir/${prefix}${tab_names[$index]}.png"
+        printf "PASS %s%s file=%s%s.png\n" "$prefix" "${tab_names[$index]}" "$prefix" "${tab_names[$index]}" >> "$output_dir/capture-status.txt"
     done
 
     local single_size
@@ -247,6 +269,80 @@ capture_tab_set() {
         echo "标签页截图疑似未切换到扫描页：${prefix}single.png=${single_size} ${prefix}scan.png=${scan_size}" >&2
         exit 7
     fi
+    printf "PASS %stab-set screenshots=%s\n" "$prefix" "${#tab_names[@]}" >> "$output_dir/capture-status.txt"
+}
+
+capture_log_splitter_movement() {
+    local window_id="$1"
+    xdotool windowsize --sync "$window_id" 1212 753 >/dev/null 2>&1 || true
+    sleep 1
+    capture_checked_screen "$output_dir/log-splitter-before.png"
+
+    local geometry
+    geometry="$(xdotool getwindowgeometry --shell "$window_id")"
+    eval "$geometry"
+
+    local compact=0
+    if (( WIDTH < 1040 || HEIGHT < 720 )); then
+        compact=1
+    fi
+    local tight=0
+    if (( WIDTH < 860 )); then
+        tight=1
+    fi
+    local margin=6
+    local status_height=22
+    local side_gap=6
+    local desired_work_height=236
+    local minimum_log_height=210
+    if (( tight == 1 )); then
+        margin=3
+        side_gap=4
+    elif (( compact == 1 )); then
+        margin=4
+        side_gap=5
+    fi
+    if (( compact == 1 )); then
+        status_height=20
+        desired_work_height=230
+        minimum_log_height=150
+    fi
+
+    local status_y=$((HEIGHT - status_height - 4))
+    if (( status_y < margin )); then
+        status_y="$margin"
+    fi
+    local content_height=$((status_y - margin))
+    if (( content_height < 1 )); then
+        content_height=1
+    fi
+    local maximum_work_height=$((content_height - minimum_log_height - side_gap))
+    if (( maximum_work_height < 84 )); then
+        maximum_work_height=84
+    fi
+    local work_height="$desired_work_height"
+    if (( work_height > maximum_work_height )); then
+        work_height="$maximum_work_height"
+    fi
+    if (( work_height < 84 )); then
+        work_height=84
+    fi
+    local log_height=$((status_y - margin - work_height - side_gap))
+    if (( log_height < 1 )); then
+        log_height=1
+    fi
+    local splitter_y=$((Y + margin + log_height + side_gap / 2))
+    local splitter_x=$((X + WIDTH / 2))
+
+    xdotool windowactivate --sync "$window_id" >/dev/null 2>&1 || true
+    xdotool mousemove --sync "$splitter_x" "$splitter_y" mousedown 1
+    sleep 0.1
+    xdotool mousemove --sync "$splitter_x" "$((splitter_y - 48))"
+    sleep 0.2
+    xdotool mouseup 1
+    sleep 1
+    capture_checked_screen "$output_dir/log-splitter-after.png"
+    printf "PASS log-splitter-movement files=log-splitter-before.png,log-splitter-after.png\n" >> "$output_dir/capture-status.txt"
 }
 
 if [[ "$capture_tabs" != "0" ]]; then
@@ -261,6 +357,9 @@ fi
 if [[ "$capture_resize_sweep" != "0" ]]; then
     capture_resize_sweep_set "$first_window_id"
 fi
+
+capture_log_splitter_movement "$first_window_id"
+printf "%s\n" "PASS capture-complete" >> "$output_dir/capture-status.txt"
 ' bash "$exe_path" "$output_dir" "$window_name" "$stabilize_seconds" "$capture_tabs" "$capture_compact" "$capture_fast_frames" "$fast_frame_delay" "$ui_perf_log_windows" "$capture_resize_sweep"
 
 echo "Wine UI 截图完成：$output_dir/root.png"

@@ -22,6 +22,7 @@ function Resolve-RepoRoot {
 $repoRoot = Resolve-RepoRoot
 $buildPath = Join-Path $repoRoot $BuildDir
 $outputPath = Join-Path $repoRoot $OutputDir
+$captureStatusPath = Join-Path $outputPath "capture-status.txt"
 
 if ([string]::IsNullOrWhiteSpace($ExePath)) {
     $exeCandidates = @(
@@ -39,6 +40,22 @@ if (Test-Path $outputPath) {
     Remove-Item $outputPath -Recurse -Force
 }
 New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
+New-Item -ItemType File -Path $captureStatusPath -Force | Out-Null
+
+function Add-CaptureStatus {
+    param(
+        [string]$Scenario,
+        [string]$Status = "PASS",
+        [string]$Detail = ""
+    )
+
+    $line = if ([string]::IsNullOrWhiteSpace($Detail)) {
+        "$Status $Scenario"
+    } else {
+        "$Status $Scenario $Detail"
+    }
+    Add-Content -Path $captureStatusPath -Value $line -Encoding UTF8
+}
 
 $uiPerfLog = Join-Path $outputPath "ui-perf-test.log"
 if (-not $SkipUiPerfTest) {
@@ -50,6 +67,7 @@ if (-not $SkipUiPerfTest) {
         if ($uiPerfTest.ExitCode -ne 0) {
             throw "UI 性能门禁失败，退出码：$($uiPerfTest.ExitCode)"
         }
+        Add-CaptureStatus -Scenario "ui-perf-test" -Detail "log=ui-perf-test.log"
     } finally {
         [Environment]::SetEnvironmentVariable("SVM_NATIVE_SELF_TEST_LOG", $previousSelfTestLog, "Process")
     }
@@ -57,6 +75,7 @@ if (-not $SkipUiPerfTest) {
     Write-Host "跳过 UI 性能门禁：调用方已完成独立验证。"
     "UI 性能门禁已由 workflow 独立步骤执行，本截图脚本跳过重复执行。" |
         Set-Content -Path $uiPerfLog -Encoding UTF8
+    Add-CaptureStatus -Scenario "ui-perf-test" -Detail "skipped-by-caller"
 }
 
 try {
@@ -360,6 +379,7 @@ function Capture-TabSet {
         $file = Join-Path $outputPath "$Prefix$tabName.png"
         Capture-WindowImage -WindowHandle $WindowHandle -Path $file
         Assert-ImageVisible -Path $file
+        Add-CaptureStatus -Scenario "tab-$tabName" -Detail "file=$Prefix$tabName.png size=${Width}x${Height}"
         Write-Host "截图完成：$file"
     }
 
@@ -370,6 +390,7 @@ function Capture-TabSet {
     if (($scanSize * 10) -le ($singleSize * 12)) {
         throw "标签页截图疑似未切换到扫描页：$singleFile=$singleSize $scanFile=$scanSize"
     }
+    Add-CaptureStatus -Scenario "${Prefix}tab-set" -Detail "screenshots=$($tabs.Count)"
 }
 
 function Capture-ResizeSweep {
@@ -400,6 +421,7 @@ function Capture-ResizeSweep {
         $file = Join-Path $outputPath "resize-$index.png"
         Capture-WindowImage -WindowHandle $WindowHandle -Path $file
         Assert-ImageVisible -Path $file
+        Add-CaptureStatus -Scenario "resize-$index" -Detail ("file=resize-{0}.png size={1}x{2}" -f $index, $size["Width"], $size["Height"])
         Write-Host "缩放截图完成：$file"
     }
 
@@ -413,6 +435,69 @@ function Capture-ResizeSweep {
     $toolbarWidth = [Math]::Max(240, $finalWidth - 180)
     Assert-ImageRegionDetail -Path $finalFile -Label "缩放后日志工具条" -X 0 -Y 12 -Width $toolbarWidth -Height 80 -MinDarkRatio 0.05
     Assert-ImageRegionDetail -Path $finalFile -Label "缩放后串口侧栏" -X ([Math]::Max(0, $finalWidth - 260)) -Y 12 -Width 260 -Height 330 -MinDarkRatio 0.045
+    Add-CaptureStatus -Scenario "resize-sweep" -Detail "screenshots=$($sizes.Count)"
+}
+
+function Capture-LogSplitterMovement {
+    param([IntPtr]$WindowHandle)
+
+    [NativeUiCapture]::ShowWindow($WindowHandle, [NativeUiCapture]::SW_RESTORE) | Out-Null
+    $setWindowFlags = [NativeUiCapture]::SWP_NOZORDER -bor [NativeUiCapture]::SWP_SHOWWINDOW
+    [NativeUiCapture]::SetWindowPos(
+        $WindowHandle,
+        [IntPtr]::Zero,
+        0,
+        0,
+        $DefaultWidth,
+        $DefaultHeight,
+        $setWindowFlags) | Out-Null
+    [NativeUiCapture]::SetForegroundWindow($WindowHandle) | Out-Null
+    Start-Sleep -Milliseconds 800
+
+    $beforeFile = Join-Path $outputPath "log-splitter-before.png"
+    $afterFile = Join-Path $outputPath "log-splitter-after.png"
+    Capture-WindowImage -WindowHandle $WindowHandle -Path $beforeFile
+    Assert-ImageVisible -Path $beforeFile
+
+    $clientRect = New-Object NativeUiCapture+RECT
+    if (-not [NativeUiCapture]::GetClientRect($WindowHandle, [ref]$clientRect)) {
+        throw "GetClientRect 主窗口失败。"
+    }
+    $clientWidth = [Math]::Max(1, $clientRect.Right - $clientRect.Left)
+    $clientHeight = [Math]::Max(1, $clientRect.Bottom - $clientRect.Top)
+    $margin = if ($clientWidth -lt 860) { 3 } elseif ($clientWidth -lt 1040 -or $clientHeight -lt 720) { 4 } else { 6 }
+    $statusHeight = if ($clientWidth -lt 1040 -or $clientHeight -lt 720) { 20 } else { 22 }
+    $sideGap = if ($clientWidth -lt 860) { 4 } elseif ($clientWidth -lt 1040 -or $clientHeight -lt 720) { 5 } else { 6 }
+    $desiredWorkHeight = if ($clientWidth -lt 1040 -or $clientHeight -lt 720) { 230 } else { 236 }
+    $minimumLogHeight = if ($clientWidth -lt 1040 -or $clientHeight -lt 720) { 150 } else { 210 }
+    $statusY = [Math]::Max($margin, $clientHeight - $statusHeight - 4)
+    $contentHeight = [Math]::Max(1, $statusY - $margin)
+    $maximumWorkHeight = [Math]::Max(84, $contentHeight - $minimumLogHeight - $sideGap)
+    $workHeight = [Math]::Max(84, [Math]::Min($desiredWorkHeight, $maximumWorkHeight))
+    $logHeight = [Math]::Max(1, $statusY - $margin - $workHeight - $sideGap)
+    $splitterY = $margin + $logHeight + [Math]::Max(1, [int]($sideGap / 2))
+
+    $origin = New-Object NativeUiCapture+POINT
+    $origin.X = 0
+    $origin.Y = 0
+    if (-not [NativeUiCapture]::ClientToScreen($WindowHandle, [ref]$origin)) {
+        throw "ClientToScreen 主窗口失败。"
+    }
+
+    $screenX = $origin.X + [Math]::Max(80, [int]($clientWidth / 2))
+    $screenY = $origin.Y + $splitterY
+    [NativeUiCapture]::SetCursorPos($screenX, $screenY) | Out-Null
+    Start-Sleep -Milliseconds 80
+    [NativeUiCapture]::mouse_event([NativeUiCapture]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 80
+    [NativeUiCapture]::SetCursorPos($screenX, [Math]::Max($origin.Y + 80, $screenY - 48)) | Out-Null
+    Start-Sleep -Milliseconds 180
+    [NativeUiCapture]::mouse_event([NativeUiCapture]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 900
+
+    Capture-WindowImage -WindowHandle $WindowHandle -Path $afterFile
+    Assert-ImageVisible -Path $afterFile
+    Add-CaptureStatus -Scenario "log-splitter-movement" -Detail "files=log-splitter-before.png,log-splitter-after.png"
 }
 
 Write-Host "启动：$ExePath"
@@ -435,6 +520,7 @@ try {
     $rootFile = Join-Path $outputPath "root.png"
     Capture-WindowImage -WindowHandle $windowHandle -Path $rootFile
     Assert-ImageVisible -Path $rootFile
+    Add-CaptureStatus -Scenario "default-window" -Detail "file=root.png size=${DefaultWidth}x${DefaultHeight}"
     $rootImage = [System.Drawing.Bitmap]::FromFile($rootFile)
     try {
         $rootWidth = $rootImage.Width
@@ -448,8 +534,11 @@ try {
     Capture-TabSet -WindowHandle $windowHandle -Prefix "tab-" -Width $DefaultWidth -Height $DefaultHeight
     Capture-TabSet -WindowHandle $windowHandle -Prefix "compact-tab-" -Width $CompactWidth -Height $CompactHeight
     Capture-ResizeSweep -WindowHandle $windowHandle
-
-    "ok" | Set-Content -Path (Join-Path $outputPath "capture-status.txt") -Encoding UTF8
+    Capture-LogSplitterMovement -WindowHandle $windowHandle
+    Add-CaptureStatus -Scenario "capture-complete"
+} catch {
+    Add-CaptureStatus -Scenario "capture" -Status "FAIL" -Detail $_.Exception.Message
+    throw
 } finally {
     if ($process -and -not $process.HasExited) {
         Stop-Process -Id $process.Id -Force

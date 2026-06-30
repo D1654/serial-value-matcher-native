@@ -70,6 +70,16 @@ jobs:
           Get-ChildItem $env:UI_ARTIFACT_DIR -Filter *.png | Sort-Object Name | ForEach-Object {
             "- $($_.Name) ($($_.Length) bytes)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "## Capture status" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          Get-Content (Join-Path $env:UI_ARTIFACT_DIR "capture-status.txt") | ForEach-Object {
+            "- $_" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          }
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "## Capture logs" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          Get-ChildItem $env:UI_ARTIFACT_DIR -File | Where-Object { $_.Extension -in ".log", ".txt" } | Sort-Object Name | ForEach-Object {
+            "- $($_.Name) ($($_.Length) bytes)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          }
 
       - name: Upload UI screenshots
         # actions/upload-artifact v7
