@@ -105,6 +105,22 @@ bool transact(
     return true;
 }
 
+bool waitForNoData(svm::win32::Win32SerialPort& port, int timeoutMs, const char* scenarioName) {
+    if (port.waitForReadyRead(timeoutMs)) {
+        const std::vector<std::uint8_t> unexpected = port.readAvailable(260);
+        std::cerr << "unexpected ready-read scenario=" << scenarioName << " bytes=";
+        printBytes(std::cerr, unexpected);
+        std::cerr << '\n';
+        return false;
+    }
+    if (!port.lastErrorText().empty()) {
+        std::cerr << "unexpected wait error scenario=" << scenarioName
+                  << " error=" << port.lastErrorText() << '\n';
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -114,11 +130,25 @@ int main() {
         return 0;
     }
     const bool trace = std::getenv("SVM_NATIVE_SERIAL_LOOPBACK_TRACE") != nullptr;
+    const char* scenarioEnv = std::getenv("SVM_NATIVE_SERIAL_LOOPBACK_SCENARIO");
+    const std::string scenario = scenarioEnv == nullptr || std::string(scenarioEnv).empty()
+        ? "normal"
+        : std::string(scenarioEnv);
+    if (scenario != "normal" && scenario != "reopen" && scenario != "timeout"
+        && scenario != "cancel" && scenario != "stress") {
+        std::cerr << "SVM_NATIVE_SERIAL_LOOPBACK_SCENARIO invalid: " << scenario
+                  << " valid=normal,reopen,timeout,cancel,stress\n";
+        return 6;
+    }
 
     int iterations = 1;
     int reopenCount = 1;
+    int timeoutMs = 100;
+    int cancelWaitMs = 150;
     if (!parsePositiveIntEnv("SVM_NATIVE_SERIAL_LOOPBACK_ITERATIONS", 1, 100000, iterations)
-        || !parsePositiveIntEnv("SVM_NATIVE_SERIAL_LOOPBACK_REOPEN_COUNT", 1, 10000, reopenCount)) {
+        || !parsePositiveIntEnv("SVM_NATIVE_SERIAL_LOOPBACK_REOPEN_COUNT", 1, 10000, reopenCount)
+        || !parsePositiveIntEnv("SVM_NATIVE_SERIAL_LOOPBACK_TIMEOUT_MS", 100, 60000, timeoutMs)
+        || !parsePositiveIntEnv("SVM_NATIVE_SERIAL_LOOPBACK_CANCEL_WAIT_MS", 150, 60000, cancelWaitMs)) {
         return 6;
     }
 
@@ -135,8 +165,45 @@ int main() {
     const std::vector<std::uint8_t> request = {0x01, 0x03, 0x00, 0x00, 0x00, 0x02, 0xC4, 0x0B};
     const std::vector<std::uint8_t> expected = {0x01, 0x03, 0x04, 0x41, 0x48, 0x00, 0x00, 0x7B, 0xF3};
     if (trace) {
-        std::cerr << "trace: start port=" << portNameEnv << " reopen=" << reopenCount
+        std::cerr << "trace: start scenario=" << scenario << " port=" << portNameEnv << " reopen=" << reopenCount
                   << " iterations=" << iterations << '\n';
+    }
+
+    if (scenario == "timeout") {
+        svm::win32::Win32SerialPort port;
+        if (!port.open(options)) {
+            std::cerr << "open failed scenario=timeout: " << port.lastErrorText() << '\n';
+            return 2;
+        }
+        if (!waitForNoData(port, timeoutMs, "timeout")) {
+            return 4;
+        }
+        port.close();
+        std::cout << "native_win32_serial_loopback_tests passed scenario=timeout port=" << portNameEnv
+                  << " timeout-ms=" << timeoutMs << " transactions=0 tx=0 rx=0\n";
+        return 0;
+    }
+
+    if (scenario == "cancel") {
+        svm::win32::Win32SerialPort port;
+        if (!port.open(options)) {
+            std::cerr << "open failed scenario=cancel: " << port.lastErrorText() << '\n';
+            return 2;
+        }
+        const auto writeResult = port.writeBytes(request);
+        if (!writeResult.ok || writeResult.byteCount != request.size()) {
+            std::cerr << "cancel write failed error=" << writeResult.errorMessage
+                      << " bytes=" << writeResult.byteCount << '\n';
+            return 3;
+        }
+        if (!waitForNoData(port, cancelWaitMs, "cancel")) {
+            return 4;
+        }
+        port.close();
+        std::cout << "native_win32_serial_loopback_tests passed scenario=cancel port=" << portNameEnv
+                  << " cancel-wait-ms=" << cancelWaitMs
+                  << " transactions=1 tx=" << request.size() << " rx=0\n";
+        return 0;
     }
 
     for (int reopenIndex = 0; reopenIndex < reopenCount; ++reopenIndex) {
@@ -162,7 +229,8 @@ int main() {
     }
 
     const long long transactionCount = static_cast<long long>(iterations) * static_cast<long long>(reopenCount);
-    std::cout << "native_win32_serial_loopback_tests passed port=" << portNameEnv
+    std::cout << "native_win32_serial_loopback_tests passed scenario=" << scenario
+              << " port=" << portNameEnv
               << " reopen=" << reopenCount
               << " iterations=" << iterations
               << " transactions=" << transactionCount

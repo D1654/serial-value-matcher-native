@@ -42,6 +42,16 @@ jobs:
         shell: pwsh
         run: ctest --test-dir $env:BUILD_DIR --output-on-failure -C Release
 
+      - name: Report native serial PTY matrix gate
+        shell: pwsh
+        run: |
+          "## Native serial PTY matrix" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "The serial PTY matrix is a local Wine/POSIX PTY gate because this Windows runner does not expose POSIX PTYs or Wine dosdevices." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "Run locally from a Linux/Wine environment:" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "````bash" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "SVM_SERIAL_LOOPBACK_SCENARIOS=normal,reopen,timeout,cancel,stress python3 scripts/run-windows-native-serial-pty-loopback.py" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
       - name: Run native app self-test
         shell: pwsh
         run: '& (Join-Path $env:BUILD_DIR "Release\svm-native-win32.exe") --self-test'
