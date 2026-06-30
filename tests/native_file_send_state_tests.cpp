@@ -82,6 +82,67 @@ void exactChunkCompletionUsesWrittenBytes() {
     std::filesystem::remove(path);
 }
 
+void finalChunkIsNotDoneUntilBytesAreMarkedWritten() {
+    const std::filesystem::path path = testFilePath("svm-native-file-send-final-chunk.bin");
+    writeBytes(path, {6, 7, 8});
+
+    svm::win32::NativeFileSendState state;
+    assert(state.open(path).ok());
+    auto chunk = state.readNextChunk(16);
+    assert(chunk.ready());
+    assert((chunk.bytes == std::vector<std::uint8_t>{6, 7, 8}));
+    assert(!state.done());
+
+    state.markBytesWritten(2);
+    assert(state.sentBytes() == 2);
+    assert(!state.done());
+
+    state.markBytesWritten(1);
+    assert(state.sentBytes() == 3);
+    assert(state.done());
+
+    std::filesystem::remove(path);
+}
+
+void writtenBytesAreClampedToFileTotal() {
+    const std::filesystem::path path = testFilePath("svm-native-file-send-clamp.bin");
+    writeBytes(path, {4, 5});
+
+    svm::win32::NativeFileSendState state;
+    assert(state.open(path).ok());
+    state.markBytesWritten(1);
+    assert(state.sentBytes() == 1);
+    assert(state.progressPermille() == 500);
+
+    state.markBytesWritten(9999);
+    assert(state.sentBytes() == 2);
+    assert(state.progressPermille() == 1000);
+    assert(state.done());
+
+    state.markBytesWritten(9999);
+    assert(state.sentBytes() == 2);
+
+    std::filesystem::remove(path);
+}
+
+void zeroByteFileCannotAccumulateProgress() {
+    const std::filesystem::path path = testFilePath("svm-native-file-send-empty.bin");
+    writeBytes(path, {});
+
+    svm::win32::NativeFileSendState state;
+    assert(state.open(path).ok());
+    assert(state.active());
+    assert(state.totalBytes() == 0);
+    assert(state.done());
+
+    state.markBytesWritten(64);
+    assert(state.sentBytes() == 0);
+    assert(state.progressPermille() == 0);
+    assert(state.done());
+
+    std::filesystem::remove(path);
+}
+
 void invalidReadRequestsAreRejected() {
     const std::filesystem::path path = testFilePath("svm-native-file-send-invalid.bin");
     writeBytes(path, {1});
@@ -100,6 +161,9 @@ int main() {
     missingFileFailsBeforeActivation();
     readsChunksAndTracksProgress();
     exactChunkCompletionUsesWrittenBytes();
+    finalChunkIsNotDoneUntilBytesAreMarkedWritten();
+    writtenBytesAreClampedToFileTotal();
+    zeroByteFileCannotAccumulateProgress();
     invalidReadRequestsAreRejected();
 
     std::cout << "native_file_send_state_tests passed\n";

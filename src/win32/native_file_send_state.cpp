@@ -85,12 +85,17 @@ NativeFileSendChunk NativeFileSendState::readNextChunk(std::size_t chunkBytes) {
 }
 
 void NativeFileSendState::markBytesWritten(std::size_t byteCount) noexcept {
-    const std::uintmax_t next = sentBytes_ + static_cast<std::uintmax_t>(byteCount);
-    sentBytes_ = totalBytes_ == 0 ? next : std::min<std::uintmax_t>(next, totalBytes_);
+    if (totalBytes_ == 0 || sentBytes_ >= totalBytes_) {
+        sentBytes_ = totalBytes_;
+        return;
+    }
+
+    const std::uintmax_t remaining = totalBytes_ - sentBytes_;
+    sentBytes_ += std::min<std::uintmax_t>(static_cast<std::uintmax_t>(byteCount), remaining);
 }
 
 bool NativeFileSendState::done() const noexcept {
-    return active_ && (sentBytes_ >= totalBytes_ || stream_.eof());
+    return active_ && sentBytes_ >= totalBytes_;
 }
 
 } // namespace svm::win32
