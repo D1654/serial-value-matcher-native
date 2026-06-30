@@ -1,20 +1,232 @@
 # 故障排查
 
-状态：当前 Win32 native 文档骨架。详细排查流程将在 Phase 5 Task 04 补全。
+状态：当前 Win32 native troubleshooting 说明。本文用于定位 `svm-native-win32.exe`、Actions artifact、UI screenshot、PTY 和 package 审计问题。
 
-## 计划覆盖
+## 先收集证据
 
-- 程序无法启动。
-- 串口无法枚举、打开失败、端口占用、热插拔异常。
-- 发送无响应、接收乱码、日志不滚动或筛选结果异常。
-- UI 缩放、DPI、标签页、分割条和截图回归问题。
-- Modbus 超时、取消、错误统计和候选分析结果异常。
-- GitHub Actions 包体审计、UI capture、PTY matrix 和 artifact 下载失败。
+排查前优先准备：
 
-## 首选证据
+- `svm-native-win32.exe` 来源：run id、artifact 名称、zip SHA256。
+- `SerialValueMatcherNative-win32-native-x64.package-summary.txt`。
+- `native-self-test.log`。
+- `native-ui-perf-test.log`。
+- UI capture 的 `capture-status.txt`、`window-info.txt` 和相关 screenshot。
+- 串口问题对应的端口名、设备型号、USB 转串口芯片、串口参数。
+- Modbus 问题对应的从站、功能码、起止地址、超时/取消表现。
 
-- 当前 exe 的 `--self-test` 输出。
-- UI performance log。
-- package summary。
-- capture status。
-- 串口 PTY matrix 输出或真机验收记录。
+没有这些证据时，先回到 [发布产物](release-artifacts.md) 下载对应 artifact。
+
+## 程序无法启动
+
+检查顺序：
+
+1. 确认来自 `SerialValueMatcherNative-win32-native-x64.zip`。
+2. 确认 zip SHA256 和 sidecar 匹配。
+3. 确认解压后存在 `svm-native-win32.exe`。
+4. 查看 package summary，必须是 `Gate status: passed`。
+5. 确认包内没有 Qt、SQLite、.NET runtime 文件。
+6. 在同批 artifact 中查看 `native-self-test.log` 是否存在失败。
+
+当前 native 包不需要安装器、不要求管理员权限、不依赖 Qt/.NET runtime。若启动被安全软件拦截，应保留拦截提示、文件 SHA256 和下载来源，再判断是否需要加入信任。
+
+## 串口无法枚举或打开失败
+
+常见原因：
+
+- 设备未插入或驱动未安装。
+- 端口被其他串口工具占用。
+- 选择了错误 COM 号。
+- USB 转串口热插拔后端口号变化。
+- 设备需要特定 DTR/RTS 或流控设置。
+
+处理：
+
+1. 点击“刷新”重新枚举串口。
+2. 关闭其他占用串口的软件。
+3. 在 Windows 设备管理器确认 COM 号。
+4. 先关闭硬件流控测试基础收发，再按设备要求启用 RTS/CTS。
+5. 需要断线恢复时启用“自动重连”。
+
+本地自动化可用 PTY 矩阵排除基础串口读写回归：
+
+```bash
+SVM_SERIAL_LOOPBACK_SCENARIOS=normal,reopen,timeout,cancel,stress \
+python3 scripts/run-windows-native-serial-pty-loopback.py
+```
+
+## 发送无响应或接收乱码
+
+检查顺序：
+
+1. 确认已经连接串口。
+2. 确认波特率、数据位、校验、停止位、流控和设备一致。
+3. 文本发送时确认发送编码和行尾。
+4. HEX 字节流确认只包含十六进制字节，且半字节数量不是奇数。
+5. 十进制字节流确认每个值在 0 到 255。
+6. 二进制字节流确认每 8 位为一个字节。
+7. 日志乱码时切换“日志编码”，常见为 UTF-8、GBK、ANSI、ASCII。
+8. 查看 TX/RX 计数和通信日志，确认是否有 TX 发出、是否有 RX 返回。
+
+## 日志不滚动、看不到新数据或导出为空
+
+检查顺序：
+
+1. 是否处于“暂停滚动”。
+2. 是否设置了“过滤”导致新行被隐藏。
+3. 搜索框是否只是在定位，不等于过滤；不要混淆二者。
+4. 当前可见日志是否为空；导出只导出当前可见日志。
+5. “清空”只清空接收区显示，不删除 native 存储原始记录。
+6. 高负载场景检查“日志缓存”和“原始记录”设置是否过小。
+
+如果 UI 卡顿，优先运行 `--ui-perf-test`，并检查 `log-lines`、`log-ms`、`log-flush`、`log-rebuild`。
+
+## UI 控件缺失、标签页空白或缩放闪烁
+
+需要证据：
+
+- UI capture artifact：`windows-native-ui-screenshots`。
+- `capture-status.txt`。
+- `ui-perf-test.log`。
+- `window-info.txt`。
+- 对应 screenshot，例如 `tab-single.png`、`compact-tab-file.png`、`resize-*.png`、`log-splitter-frame-01.png`。
+
+检查顺序：
+
+1. `capture-status.txt` 是否有 FAIL。
+2. 是否存在 `PASS tab-set ... switching=clicked-frame-diff-validated-by-ui-perf`。
+3. 是否存在 `PASS compact-tab-set`。
+4. 是否存在 `PASS resize-sweep`。
+5. 是否存在 `PASS splitter-drag-frames ... live=true diff-gated=true`。
+6. `ui-perf-test.log` 是否出现 `ui-perf ok`。
+7. `window-info.txt` 中 DPI 和窗口尺寸是否异常。
+
+常见定位：
+
+- 标签页控件点中才显示：优先看 tab screenshot 和 `NativeLayoutTransaction` 显隐提交。
+- 拖动高度频闪：优先看 `NativeFrameScheduler`、`NativePaintPolicy` 和分割条 screenshot diff。
+- 缩放黑块/白块/灰块：优先看 resize screenshot、DPI smoke 和 full refresh/erase background 路径。
+
+Windows runner 复现：
+
+```powershell
+.\scripts\capture-windows-native-ui.ps1 `
+  -BuildDir build-windows-native-ui `
+  -Config Release `
+  -OutputDir artifacts\windows-native-ui
+```
+
+Linux/Wine 辅助复现：
+
+```bash
+scripts/capture-windows-native-ui-wine.sh
+```
+
+## Modbus 超时、取消或候选为空
+
+检查顺序：
+
+1. 必须先连接串口。
+2. 确认从站地址正确。
+3. 确认功能码是设备支持的 FC03 或 FC04。
+4. 缩小起止地址范围，排除大范围扫描导致的连续超时。
+5. 查看进度、成功块、失败块和观测数量。
+6. 取消扫描是请求式取消，当前请求结束后生效。
+7. 候选为空时确认最近扫描有寄存器观测。
+8. 确认已知值、单位和误差输入合理。
+
+规则验证和报告导出依赖候选和扫描结果；如果没有候选或没有规则，导出报告会被拒绝。
+
+## package 审计失败
+
+先看 package summary 末尾的 `Gate status` 和失败条目。
+
+常见失败：
+
+- 缺少 `svm-native-win32.exe`。
+- zip SHA256 文件缺失或内容不匹配。
+- 缺少 `python3-pefile`，无法验证导入表。
+- 包内出现 Qt、SQLite 或 .NET runtime 文件。
+- exe 缺少关键中文 UTF-16LE 文本，Unicode probe 失败。
+- zip 或解压体积超过门禁。
+
+处理：
+
+- 缺 exe：检查构建目标和打包目录。
+- SHA256 不匹配：重新打包，不要手工替换 zip。
+- pefile 缺失：安装 `python3-pefile` 后重跑本地包审计。
+- forbidden runtime：检查是否误用了 Qt 打包路径或复制了 runtime 目录。
+- Unicode probe 失败：检查 `ui_text.cpp`、资源编译和字符集设置。
+- 体积超限：检查是否引入了额外 DLL、调试符号或无关 docs/assets。
+
+## PTY 矩阵失败
+
+常见原因：
+
+- `native_win32_serial_loopback_tests.exe` 未构建。
+- `wine` 不可用。
+- Wine prefix 初始化失败。
+- `dosdevices/com5` 链接异常。
+- 场景超时，进程被 kill。
+- 请求/响应字节不匹配。
+
+处理：
+
+1. 先构建 MinGW 目标和测试。
+2. 指定干净 Wine prefix。
+3. 单独跑 `normal` 场景。
+4. 再逐步加入 `reopen`、`timeout`、`cancel`、`stress`。
+
+示例：
+
+```bash
+SVM_WINEPREFIX=/tmp/svm-serial-pty \
+SVM_SERIAL_LOOPBACK_SCENARIOS=normal \
+python3 scripts/run-windows-native-serial-pty-loopback.py
+```
+
+## artifact 下载失败
+
+检查：
+
+- `gh auth status` 是否正常。
+- run id 是否属于当前仓库。
+- artifact 名称是否精确匹配。
+- artifact 是否已经超过 14 天保留期。
+- workflow 是否实际上传成功。
+
+常用命令：
+
+```bash
+gh run list --workflow windows-native-package.yml --branch main --limit 10
+gh run view <run-id>
+gh run download <run-id> --name SerialValueMatcherNative-win32-native-x64 --dir artifacts/github-actions/windows-native-<run-id>
+```
+
+UI capture：
+
+```bash
+gh run list --workflow windows-native-ui-capture.yml --limit 10
+gh run download <run-id> --name windows-native-ui-screenshots --dir artifacts/github-actions/windows-native-ui-<run-id>
+```
+
+## 文档过期或说法冲突
+
+优先级：
+
+1. 当前代码、workflow、脚本。
+2. `docs/user-guide.md`、`docs/developer-guide.md`、`docs/architecture-win32-native.md`、`docs/testing-validation.md`、`docs/release-artifacts.md`。
+3. 标注为 legacy / 过渡参考的旧文档。
+
+如果旧文档仍描述 Qt、`svm-native.exe`、windeployqt 或 SQLite 插件为当前发布路线，应视为过期。Phase 5 Task 05 会加入 docs consistency gate，防止 artifact 名称、路径和当前发布口径继续漂移。
+
+## 当前未覆盖的排查增强
+
+以下不属于当前已实现证据：
+
+- 代码签名问题定位。
+- 发布 attestation 验证。
+- WPR/WPA 采样分析。
+- 8 小时或 24 小时长跑报告。
+- 多型号真实硬件兼容性矩阵。
+
+遇到这些问题时，需要新增专项任务，不能把当前 self-test、ui-perf、screenshot 或 PTY 证据解释成已经覆盖。
