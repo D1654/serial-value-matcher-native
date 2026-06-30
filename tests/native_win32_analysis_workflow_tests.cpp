@@ -152,6 +152,55 @@ void ruleVerificationClassifiesVerifiedMissingAndUnsupported() {
     assert(unsupported.statusText.find("解码失败") != std::string::npos);
 }
 
+void ruleVerificationDecodesMultiRegisterAndInterpretationMaps() {
+    const std::vector<storage::ScanObservationRecord> observations = {
+        observation(31, 100, 0x4148, "float-high"),
+        observation(32, 101, 0x0000, "float-low"),
+        observation(33, 102, 0x0001, "bits"),
+        observation(34, 103, 0x0010, "enum"),
+    };
+
+    storage::ProtocolFieldRuleRecord floatRule = rule("rule-float", "temperature", "Float32", 100, 2);
+    floatRule.scaleMultiplier = 1.0;
+
+    storage::ProtocolFieldRuleRecord bitRule = rule("rule-bits", "status", "BitFlags", 102, 1);
+    bitRule.scaleMultiplier = 1.0;
+    bitRule.interpretationMap = "0=运行允许|未允许|已允许\nbit1=报警|正常|报警触发";
+
+    storage::ProtocolFieldRuleRecord enumRule = rule("rule-enum", "mode", "EnumMap", 103, 1);
+    enumRule.scaleMultiplier = 1.0;
+    enumRule.interpretationMap = "0=停止\n1=运行\n0x10=维护";
+
+    const win32::NativeRuleVerificationBuildResult build = win32::nativeBuildRuleVerificationResult(
+        scanSession(),
+        {floatRule, bitRule, enumRule},
+        observations,
+        "verify-typed",
+        "created-at");
+
+    assert(build.run.ruleCount == 3);
+    assert(build.run.verifiedCount == 3);
+    assert(build.run.missingCount == 0);
+    assert(build.run.unsupportedCount == 0);
+    assert(build.results.size() == 3);
+
+    const storage::RuleVerificationResultRecord& floatResult = build.results[0];
+    assert(floatResult.verified);
+    assert(floatResult.observationIds == std::vector<std::int64_t>({31, 32}));
+    assert(floatResult.rawRegisters == std::vector<int>({0x4148, 0x0000}));
+    assert(std::abs(floatResult.engineeringValue - 12.5) < 0.000001);
+    assert(floatResult.observedAtUtc == "float-low");
+
+    const storage::RuleVerificationResultRecord& bitResult = build.results[1];
+    assert(bitResult.verified);
+    assert(bitResult.interpretationText.find("bit0 运行允许=已允许") != std::string::npos);
+    assert(bitResult.interpretationText.find("bit1 报警=正常") != std::string::npos);
+
+    const storage::RuleVerificationResultRecord& enumResult = build.results[2];
+    assert(enumResult.verified);
+    assert(enumResult.interpretationText == "枚举解释：维护。");
+}
+
 void markdownReportRendersFromNativeRecords() {
     storage::RuleVerificationRunRecord run;
     run.verificationRunId = "verify-1";
@@ -190,6 +239,7 @@ void markdownReportRendersFromNativeRecords() {
 int main() {
     candidateAnalysisBuildsRunAndCandidates();
     ruleVerificationClassifiesVerifiedMissingAndUnsupported();
+    ruleVerificationDecodesMultiRegisterAndInterpretationMaps();
     markdownReportRendersFromNativeRecords();
 
     std::cout << "native_win32_analysis_workflow_tests passed\n";

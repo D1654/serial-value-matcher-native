@@ -76,6 +76,23 @@ void readResponseReportsExceptionWithoutSuccess() {
     assert(parsed.exceptionDescription == "illegal data address");
 }
 
+void readResponseRejectsMismatchedIdentityAndShape() {
+    const ByteBuffer responseBody{0x01, 0x03, 0x04, 0x12, 0x34, 0xAB, 0xCD};
+    const auto responseFrame = svm::core::modbus::appendCrc16Modbus(responseBody);
+
+    const auto wrongSlave = svm::core::modbus::parseReadResponse(responseFrame, 2, 0x03, 100, 2);
+    assert(!wrongSlave.ok);
+    assert(wrongSlave.errorMessage == "Response slave id does not match expected slave id.");
+
+    const auto wrongFunction = svm::core::modbus::parseReadResponse(responseFrame, 1, 0x04, 100, 2);
+    assert(!wrongFunction.ok);
+    assert(wrongFunction.errorMessage == "Response function code does not match expected function code.");
+
+    const auto wrongQuantity = svm::core::modbus::parseReadResponse(responseFrame, 1, 0x03, 100, 1);
+    assert(!wrongQuantity.ok);
+    assert(wrongQuantity.errorMessage == "Response register count does not match expected quantity.");
+}
+
 void scanPlanSplitsRangeAndBuildsRequestFrames() {
     svm::core::modbus::ScanPlanOptions options;
     options.slaveId = 7;
@@ -105,6 +122,26 @@ void scanPlanSplitsRangeAndBuildsRequestFrames() {
     }
 }
 
+void scanPlanRejectsUnsafeRangesAndRetrySettings() {
+    svm::core::modbus::ScanPlanOptions options;
+    options.slaveId = 1;
+    options.functionCode = 0x03;
+    options.range = {10, 9};
+    options.blockSize = 16;
+    assert(!svm::core::modbus::buildScanPlan(options).ok);
+
+    options.range = {0, 4096};
+    assert(!svm::core::modbus::buildScanPlan(options).ok);
+
+    options.range = {0, 15};
+    options.blockSize = 65;
+    assert(!svm::core::modbus::buildScanPlan(options).ok);
+
+    options.blockSize = 16;
+    options.retryCount = 6;
+    assert(!svm::core::modbus::buildScanPlan(options).ok);
+}
+
 } // namespace
 
 int main() {
@@ -113,7 +150,9 @@ int main() {
     readRequestFramesSupportedFunctions();
     readResponseParsesRegistersAndObservations();
     readResponseReportsExceptionWithoutSuccess();
+    readResponseRejectsMismatchedIdentityAndShape();
     scanPlanSplitsRangeAndBuildsRequestFrames();
+    scanPlanRejectsUnsafeRangesAndRetrySettings();
 
     std::cout << "native_protocol_modbus_tests passed\n";
     return 0;
