@@ -106,6 +106,10 @@ jobs:
             throw "Native package audit did not pass."
           }
 
+      - name: Check docs artifact consistency
+        shell: pwsh
+        run: python scripts/check-docs-artifact-consistency.py
+
       - name: Report native package size
         shell: pwsh
         run: |

@@ -229,7 +229,21 @@ scripts/package-windows-native-mingw.sh
 
 ## 文档一致性
 
-当前 Phase 5 Task 05 会新增 docs consistency gate，用于检查文档中的 artifact 名称、路径和当前 Win32 native 口径。Task 04 期间该门禁尚未作为阻塞检查接入；接入后应和 package/UI capture workflow 一起维护。
+当前 docs consistency gate：
+
+```bash
+python3 scripts/check-docs-artifact-consistency.py
+```
+
+检查范围：
+
+- `svm-native-win32.exe`、`svm-native-win32`、package artifact 和 UI capture artifact 名称。
+- package workflow、UI capture workflow、self-test、ui-perf、package summary 和 forbidden runtime 术语。
+- 活跃文档中的旧 Qt 包名、`svm-native.exe` 当前发布说法、Qt/.NET/windeployqt 依赖矛盾。
+- Markdown 本地链接。
+- legacy / 过渡文档中的旧路线引用只作为提示或忽略，不作为当前发布事实。
+
+该门禁已接入 Windows native package workflow 和 Windows native UI capture workflow。失败时必须先修正文档、workflow 或脚本事实，不允许用跳过门禁替代修复。
 
 ## 未来增强
 

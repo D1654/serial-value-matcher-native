@@ -217,7 +217,11 @@ gh run download <run-id> --name windows-native-ui-screenshots --dir artifacts/gi
 2. `docs/user-guide.md`、`docs/developer-guide.md`、`docs/architecture-win32-native.md`、`docs/testing-validation.md`、`docs/release-artifacts.md`。
 3. 标注为 legacy / 过渡参考的旧文档。
 
-如果旧文档仍描述 Qt、`svm-native.exe`、windeployqt 或 SQLite 插件为当前发布路线，应视为过期。Phase 5 Task 05 会加入 docs consistency gate，防止 artifact 名称、路径和当前发布口径继续漂移。
+如果旧文档仍描述 Qt、`svm-native.exe`、windeployqt 或 SQLite 插件为当前发布路线，应视为过期。当前 docs consistency gate 会检查 artifact 名称、路径和当前发布口径，防止文档继续漂移：
+
+```bash
+python3 scripts/check-docs-artifact-consistency.py
+```
 
 ## 当前未覆盖的排查增强
 
