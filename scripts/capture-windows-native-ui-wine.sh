@@ -33,6 +33,7 @@ require_command xvfb-run
 require_command xdotool
 require_command xwd
 require_command convert
+require_command compare
 
 if [[ ! -f "$exe_path" ]]; then
     echo "未找到 svm-native-win32.exe：$exe_path" >&2
@@ -189,6 +190,29 @@ capture_checked_screen() {
     assert_screenshot_visible "$file"
 }
 
+assert_screenshots_differ() {
+    local left="$1"
+    local right="$2"
+    local label="$3"
+    local min_pixels="$4"
+    local diff
+    set +e
+    diff="$(compare -metric AE "$left" "$right" null: 2>&1 >/dev/null)"
+    local compare_status=$?
+    set -e
+    if [[ "$compare_status" -ne 0 && "$compare_status" -ne 1 ]]; then
+        echo "无法比较截图差异：$label $left $right" >&2
+        exit 9
+    fi
+    if [[ -z "$diff" ]]; then
+        diff=0
+    fi
+    if awk -v diff="$diff" -v min="$min_pixels" "BEGIN { exit !(diff < min) }"; then
+        echo "截图差异不足：$label diff=$diff min=$min_pixels" >&2
+        exit 9
+    fi
+}
+
 first_window_id="$(head -n 1 "$output_dir/window.ids")"
 geometry="$(xdotool getwindowgeometry --shell "$first_window_id")"
 eval "$geometry"
@@ -233,9 +257,9 @@ capture_tab_set() {
     local geometry
     geometry="$(xdotool getwindowgeometry --shell "$window_id")"
     eval "$geometry"
-    local tab_y_offset="${SVM_WINE_UI_TAB_Y_OFFSET:-251}"
+    local tab_y_offset="${SVM_WINE_UI_TAB_Y_OFFSET:-299}"
     if [[ "$prefix" == compact-tab-* ]]; then
-        tab_y_offset="${SVM_WINE_UI_COMPACT_TAB_Y_OFFSET:-243}"
+        tab_y_offset="${SVM_WINE_UI_COMPACT_TAB_Y_OFFSET:-295}"
     fi
     local tab_y=$((HEIGHT - tab_y_offset))
     if [[ "$tab_y" -lt 80 ]]; then
@@ -261,15 +285,8 @@ capture_tab_set() {
         printf "PASS %s%s file=%s%s.png\n" "$prefix" "${tab_names[$index]}" "$prefix" "${tab_names[$index]}" >> "$output_dir/capture-status.txt"
     done
 
-    local single_size
-    local scan_size
-    single_size="$(stat -c%s "$output_dir/${prefix}single.png")"
-    scan_size="$(stat -c%s "$output_dir/${prefix}scan.png")"
-    if (( scan_size * 10 <= single_size * 12 )); then
-        echo "标签页截图疑似未切换到扫描页：${prefix}single.png=${single_size} ${prefix}scan.png=${scan_size}" >&2
-        exit 7
-    fi
-    printf "PASS %stab-set screenshots=%s\n" "$prefix" "${#tab_names[@]}" >> "$output_dir/capture-status.txt"
+    assert_screenshots_differ "$output_dir/${prefix}single.png" "$output_dir/${prefix}scan.png" "${prefix}single-vs-scan" 500
+    printf "PASS %stab-set screenshots=%s switching=clicked-frame-diff-validated-by-ui-perf\n" "$prefix" "${#tab_names[@]}" >> "$output_dir/capture-status.txt"
 }
 
 capture_log_splitter_movement() {
@@ -331,18 +348,26 @@ capture_log_splitter_movement() {
     if (( log_height < 1 )); then
         log_height=1
     fi
-    local splitter_y=$((Y + margin + log_height + side_gap / 2))
+    local splitter_y_offset="${SVM_WINE_UI_SPLITTER_Y_OFFSET:-314}"
+    local splitter_y=$((Y + HEIGHT - splitter_y_offset))
     local splitter_x=$((X + WIDTH / 2))
 
     xdotool windowactivate --sync "$window_id" >/dev/null 2>&1 || true
     xdotool mousemove --sync "$splitter_x" "$splitter_y" mousedown 1
     sleep 0.1
+    xdotool mousemove --sync "$splitter_x" "$((splitter_y - 24))"
+    sleep 0.2
+    capture_checked_screen "$output_dir/log-splitter-frame-01.png"
     xdotool mousemove --sync "$splitter_x" "$((splitter_y - 48))"
     sleep 0.2
+    capture_checked_screen "$output_dir/log-splitter-frame-02.png"
     xdotool mouseup 1
     sleep 1
     capture_checked_screen "$output_dir/log-splitter-after.png"
-    printf "PASS log-splitter-movement files=log-splitter-before.png,log-splitter-after.png\n" >> "$output_dir/capture-status.txt"
+    assert_screenshots_differ "$output_dir/log-splitter-before.png" "$output_dir/log-splitter-frame-01.png" "splitter-before-vs-frame-01" 500
+    assert_screenshots_differ "$output_dir/log-splitter-frame-01.png" "$output_dir/log-splitter-frame-02.png" "splitter-frame-01-vs-frame-02" 500
+    assert_screenshots_differ "$output_dir/log-splitter-before.png" "$output_dir/log-splitter-after.png" "splitter-before-vs-after" 500
+    printf "PASS splitter-drag-frames files=log-splitter-before.png,log-splitter-frame-01.png,log-splitter-frame-02.png,log-splitter-after.png deltas=-24,-48 live=true diff-gated=true\n" >> "$output_dir/capture-status.txt"
 }
 
 if [[ "$capture_tabs" != "0" ]]; then

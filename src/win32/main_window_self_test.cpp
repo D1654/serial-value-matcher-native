@@ -595,6 +595,48 @@ bool NativeMainWindow::runUiPerformanceTest() {
         window.relayoutCurrentClient();
         return changedOnce;
     };
+    const auto splitterDragAppliesLiveTargets = [&]() {
+        window.layoutControls(1212, 753);
+        window.processNativeFrame();
+        const int originalPreferredHeight = window.preferredWorkbenchHeight_;
+        const int startX = (window.workbenchSplitterRect_.left + window.workbenchSplitterRect_.right) / 2;
+        const int startY = (window.workbenchSplitterRect_.top + window.workbenchSplitterRect_.bottom) / 2;
+        RECT clientRect = {};
+        GetClientRect(window.window_, &clientRect);
+        const int clientWidth = clientRect.right - clientRect.left;
+        const int clientHeight = clientRect.bottom - clientRect.top;
+        const std::uint64_t beforeLayouts = window.layoutPassCount_;
+
+        window.draggingWorkbenchSplitter_ = true;
+        window.splitterDragStartY_ = startY;
+        window.splitterDragStartWorkbenchHeight_ = window.currentWorkbenchHeight_;
+
+        const int firstY = startY - 16;
+        SendMessageW(window.window_, WM_MOUSEMOVE, 0, MAKELPARAM(startX, firstY));
+        const int expectedFirstHeight = window.clampedWorkbenchHeightForClient(
+            window.splitterDragStartWorkbenchHeight_ - (firstY - window.splitterDragStartY_),
+            clientWidth,
+            clientHeight);
+        window.processNativeFrame();
+        const bool firstApplied = window.layoutPassCount_ == beforeLayouts + 1
+            && window.currentWorkbenchHeight_ == expectedFirstHeight;
+
+        const int secondY = startY - 23;
+        SendMessageW(window.window_, WM_MOUSEMOVE, 0, MAKELPARAM(startX, secondY));
+        const int expectedSecondHeight = window.clampedWorkbenchHeightForClient(
+            window.splitterDragStartWorkbenchHeight_ - (secondY - window.splitterDragStartY_),
+            clientWidth,
+            clientHeight);
+        window.processNativeFrame();
+        const bool secondApplied = window.layoutPassCount_ == beforeLayouts + 2
+            && window.currentWorkbenchHeight_ == expectedSecondHeight;
+        const bool unquantizedDelta = expectedSecondHeight - expectedFirstHeight == firstY - secondY;
+
+        window.draggingWorkbenchSplitter_ = false;
+        window.preferredWorkbenchHeight_ = originalPreferredHeight;
+        window.relayoutCurrentClient();
+        return firstApplied && secondApplied && unquantizedDelta;
+    };
     if (!controlsAreVisible({
             window.serialPanelTitle_,
             window.portCombo_,
@@ -644,6 +686,9 @@ bool NativeMainWindow::runUiPerformanceTest() {
     }
     if (!splitterDragSkipsRedundantLayouts()) {
         return fail("ui-workbench-splitter-drag-layout");
+    }
+    if (!splitterDragAppliesLiveTargets()) {
+        return fail("ui-workbench-splitter-live-target");
     }
 
     constexpr int kIterations = 300;

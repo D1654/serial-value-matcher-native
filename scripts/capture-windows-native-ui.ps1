@@ -282,6 +282,58 @@ function Assert-ImageRegionDetail {
     }
 }
 
+function Get-ImageDifferenceCount {
+    param(
+        [string]$LeftPath,
+        [string]$RightPath
+    )
+
+    $leftBitmap = [System.Drawing.Bitmap]::FromFile($LeftPath)
+    $rightBitmap = [System.Drawing.Bitmap]::FromFile($RightPath)
+    try {
+        $width = [Math]::Min($leftBitmap.Width, $rightBitmap.Width)
+        $height = [Math]::Min($leftBitmap.Height, $rightBitmap.Height)
+        if ($width -le 0 -or $height -le 0) {
+            return 0
+        }
+
+        $stepX = [Math]::Max(1, [int]($width / 900))
+        $stepY = [Math]::Max(1, [int]($height / 700))
+        [int64]$different = 0
+        for ($y = 0; $y -lt $height; $y += $stepY) {
+            for ($x = 0; $x -lt $width; $x += $stepX) {
+                $leftPixel = $leftBitmap.GetPixel($x, $y)
+                $rightPixel = $rightBitmap.GetPixel($x, $y)
+                $delta =
+                    [Math]::Abs([int]$leftPixel.R - [int]$rightPixel.R) +
+                    [Math]::Abs([int]$leftPixel.G - [int]$rightPixel.G) +
+                    [Math]::Abs([int]$leftPixel.B - [int]$rightPixel.B)
+                if ($delta -gt 24) {
+                    $different += 1
+                }
+            }
+        }
+        return $different
+    } finally {
+        $leftBitmap.Dispose()
+        $rightBitmap.Dispose()
+    }
+}
+
+function Assert-ImagesDiffer {
+    param(
+        [string]$LeftPath,
+        [string]$RightPath,
+        [string]$Label,
+        [int]$MinDifferentPixels
+    )
+
+    $different = Get-ImageDifferenceCount -LeftPath $LeftPath -RightPath $RightPath
+    if ($different -lt $MinDifferentPixels) {
+        throw "截图差异不足：$Label Difference=$different Min=$MinDifferentPixels Left=$LeftPath Right=$RightPath"
+    }
+}
+
 function Wait-MainWindow {
     param(
         [System.Diagnostics.Process]$Process,
@@ -367,14 +419,15 @@ function Select-NativeTab {
     $sideGap = if ($tight) { 4 } elseif ($compact) { 5 } else { 6 }
     $desiredWorkHeight = if ($compact) { 230 } else { 236 }
     $minimumLogHeight = if ($compact) { 150 } else { 210 }
+    $splitterHeight = 12
 
     $statusY = [Math]::Max($margin, $clientHeight - $statusHeight - 4)
     $contentHeight = [Math]::Max(1, $statusY - $margin)
-    $maximumWorkHeight = [Math]::Max(84, $contentHeight - $minimumLogHeight - $sideGap)
+    $maximumWorkHeight = [Math]::Max(84, $contentHeight - $minimumLogHeight - $splitterHeight)
     $workHeight = [Math]::Max(84, [Math]::Min($desiredWorkHeight, $maximumWorkHeight))
     $logY = $margin
-    $logHeight = [Math]::Max(1, $statusY - $logY - $workHeight - $sideGap)
-    $tabsY = $logY + $logHeight + $sideGap
+    $logHeight = [Math]::Max(1, $statusY - $logY - $workHeight - $splitterHeight)
+    $tabsY = $logY + $logHeight + $splitterHeight
 
     $origin = New-Object NativeUiCapture+POINT
     $origin.X = 0
@@ -437,12 +490,8 @@ function Capture-TabSet {
 
     $singleFile = Join-Path $outputPath "${Prefix}single.png"
     $scanFile = Join-Path $outputPath "${Prefix}scan.png"
-    $singleSize = [int64](Get-Item $singleFile).Length
-    $scanSize = [int64](Get-Item $scanFile).Length
-    if (($scanSize * 10) -le ($singleSize * 12)) {
-        throw "标签页截图疑似未切换到扫描页：$singleFile=$singleSize $scanFile=$scanSize"
-    }
-    Add-CaptureStatus -Scenario "${Prefix}tab-set" -Detail "screenshots=$($tabs.Count)"
+    Assert-ImagesDiffer -LeftPath $singleFile -RightPath $scanFile -Label "${Prefix}single-vs-scan" -MinDifferentPixels 300
+    Add-CaptureStatus -Scenario "${Prefix}tab-set" -Detail "screenshots=$($tabs.Count) switching=clicked-frame-diff-validated-by-ui-perf"
 }
 
 function Capture-ResizeSweep {
@@ -507,6 +556,8 @@ function Capture-LogSplitterMovement {
     Start-Sleep -Milliseconds 800
 
     $beforeFile = Join-Path $outputPath "log-splitter-before.png"
+    $frame01File = Join-Path $outputPath "log-splitter-frame-01.png"
+    $frame02File = Join-Path $outputPath "log-splitter-frame-02.png"
     $afterFile = Join-Path $outputPath "log-splitter-after.png"
     Capture-WindowImage -WindowHandle $WindowHandle -Path $beforeFile
     Assert-ImageVisible -Path $beforeFile
@@ -522,12 +573,13 @@ function Capture-LogSplitterMovement {
     $sideGap = if ($clientWidth -lt 860) { 4 } elseif ($clientWidth -lt 1040 -or $clientHeight -lt 720) { 5 } else { 6 }
     $desiredWorkHeight = if ($clientWidth -lt 1040 -or $clientHeight -lt 720) { 230 } else { 236 }
     $minimumLogHeight = if ($clientWidth -lt 1040 -or $clientHeight -lt 720) { 150 } else { 210 }
+    $splitterHeight = 12
     $statusY = [Math]::Max($margin, $clientHeight - $statusHeight - 4)
     $contentHeight = [Math]::Max(1, $statusY - $margin)
-    $maximumWorkHeight = [Math]::Max(84, $contentHeight - $minimumLogHeight - $sideGap)
+    $maximumWorkHeight = [Math]::Max(84, $contentHeight - $minimumLogHeight - $splitterHeight)
     $workHeight = [Math]::Max(84, [Math]::Min($desiredWorkHeight, $maximumWorkHeight))
-    $logHeight = [Math]::Max(1, $statusY - $margin - $workHeight - $sideGap)
-    $splitterY = $margin + $logHeight + [Math]::Max(1, [int]($sideGap / 2))
+    $logHeight = [Math]::Max(1, $statusY - $margin - $workHeight - $splitterHeight)
+    $splitterY = $margin + $logHeight + [Math]::Max(1, [int]($splitterHeight / 2))
 
     $origin = New-Object NativeUiCapture+POINT
     $origin.X = 0
@@ -542,14 +594,23 @@ function Capture-LogSplitterMovement {
     Start-Sleep -Milliseconds 80
     [NativeUiCapture]::mouse_event([NativeUiCapture]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 80
+    [NativeUiCapture]::SetCursorPos($screenX, [Math]::Max($origin.Y + 80, $screenY - 24)) | Out-Null
+    Start-Sleep -Milliseconds 180
+    Capture-WindowImage -WindowHandle $WindowHandle -Path $frame01File
+    Assert-ImageVisible -Path $frame01File
     [NativeUiCapture]::SetCursorPos($screenX, [Math]::Max($origin.Y + 80, $screenY - 48)) | Out-Null
     Start-Sleep -Milliseconds 180
+    Capture-WindowImage -WindowHandle $WindowHandle -Path $frame02File
+    Assert-ImageVisible -Path $frame02File
     [NativeUiCapture]::mouse_event([NativeUiCapture]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 900
 
     Capture-WindowImage -WindowHandle $WindowHandle -Path $afterFile
     Assert-ImageVisible -Path $afterFile
-    Add-CaptureStatus -Scenario "log-splitter-movement" -Detail "files=log-splitter-before.png,log-splitter-after.png"
+    Assert-ImagesDiffer -LeftPath $beforeFile -RightPath $frame01File -Label "splitter-before-vs-frame-01" -MinDifferentPixels 300
+    Assert-ImagesDiffer -LeftPath $frame01File -RightPath $frame02File -Label "splitter-frame-01-vs-frame-02" -MinDifferentPixels 300
+    Assert-ImagesDiffer -LeftPath $beforeFile -RightPath $afterFile -Label "splitter-before-vs-after" -MinDifferentPixels 300
+    Add-CaptureStatus -Scenario "splitter-drag-frames" -Detail "files=log-splitter-before.png,log-splitter-frame-01.png,log-splitter-frame-02.png,log-splitter-after.png deltas=-24,-48 live=true diff-gated=true"
 }
 
 function Capture-DpiSmoke {
