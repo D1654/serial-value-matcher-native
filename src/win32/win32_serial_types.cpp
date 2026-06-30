@@ -169,6 +169,14 @@ SerialValidationResult validateSerialOpenOptions(const SerialOpenOptions& option
         return {false, "数据位不受支持。Windows 串口数据位应为 5、6、7 或 8。"};
     }
 
+    if (options.dataBits == 5 && options.stopBits == SerialStopBits::Two) {
+        return {false, "停止位组合不受支持。Windows 串口 5 数据位不能使用 2 位停止位。"};
+    }
+
+    if (options.dataBits != 5 && options.stopBits == SerialStopBits::OnePointFive) {
+        return {false, "停止位组合不受支持。Windows 串口 1.5 位停止位仅适用于 5 数据位。"};
+    }
+
     if (options.readTimeoutMs < 0 || options.writeTimeoutMs < 0) {
         return {false, "串口读写超时不能为负数。"};
     }

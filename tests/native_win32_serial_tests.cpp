@@ -40,12 +40,34 @@ void validatesSerialOpenOptions() {
     assert(contains(badDataBits.errorMessage, "数据位"));
 
     options.dataBits = 8;
+    options.stopBits = svm::win32::SerialStopBits::OnePointFive;
+    const auto badOnePointFiveStopBits = svm::win32::validateSerialOpenOptions(options);
+    assert(!badOnePointFiveStopBits.ok);
+    assert(contains(badOnePointFiveStopBits.errorMessage, "1.5"));
+
+    options.dataBits = 5;
+    options.stopBits = svm::win32::SerialStopBits::Two;
+    const auto badFiveDataBitsTwoStopBits = svm::win32::validateSerialOpenOptions(options);
+    assert(!badFiveDataBitsTwoStopBits.ok);
+    assert(contains(badFiveDataBitsTwoStopBits.errorMessage, "5 数据位"));
+
+    options.stopBits = svm::win32::SerialStopBits::OnePointFive;
+    assert(svm::win32::validateSerialOpenOptions(options).ok);
+
+    options.dataBits = 8;
+    options.stopBits = svm::win32::SerialStopBits::One;
     options.readTimeoutMs = -1;
     const auto badTimeout = svm::win32::validateSerialOpenOptions(options);
     assert(!badTimeout.ok);
     assert(contains(badTimeout.errorMessage, "超时"));
 
     options.readTimeoutMs = 1000;
+    options.writeTimeoutMs = -1;
+    const auto badWriteTimeout = svm::win32::validateSerialOpenOptions(options);
+    assert(!badWriteTimeout.ok);
+    assert(contains(badWriteTimeout.errorMessage, "超时"));
+
+    options.writeTimeoutMs = 1000;
     options.readBufferSize = 0;
     const auto badBuffer = svm::win32::validateSerialOpenOptions(options);
     assert(!badBuffer.ok);

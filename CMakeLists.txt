@@ -31,6 +31,13 @@ if(MSVC AND SVM_BUILD_WIN32_APP)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
+if(CMAKE_CROSSCOMPILING AND WIN32 AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+    find_program(SVM_WINE_EXECUTABLE NAMES wine)
+    if(SVM_WINE_EXECUTABLE)
+        set(CMAKE_CROSSCOMPILING_EMULATOR "${SVM_WINE_EXECUTABLE}")
+    endif()
+endif()
+
 if(MSVC)
     add_compile_options(/utf-8)
 endif()
