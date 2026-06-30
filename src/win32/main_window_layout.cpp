@@ -5,6 +5,7 @@
 #include "win32/native_control_utils.h"
 #include "win32/native_layout_transaction.h"
 #include "win32/native_layout_metrics.h"
+#include "win32/native_paint_policy.h"
 #include "win32/native_ui_preferences.h"
 
 #include <algorithm>
@@ -80,7 +81,7 @@ void NativeMainWindow::relayoutCurrentClient(bool immediate) {
         includeControlRect(window_, workPageBackground_, dragRedrawRect);
         includeRect(dragRedrawRect, workbenchRedrawRect_);
         includeRect(dragRedrawRect, workbenchSplitterRect_);
-        SendMessageW(window_, WM_SETREDRAW, FALSE, 0);
+        nativeSetWindowRedraw(window_, false);
     }
     layoutControls(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top);
     if (!immediate) {
@@ -89,13 +90,13 @@ void NativeMainWindow::relayoutCurrentClient(bool immediate) {
         includeControlRect(window_, workPageBackground_, dragRedrawRect);
         includeRect(dragRedrawRect, workbenchRedrawRect_);
         includeRect(dragRedrawRect, workbenchSplitterRect_);
-        SendMessageW(window_, WM_SETREDRAW, TRUE, 0);
+        nativeSetWindowRedraw(window_, true);
         if (rectIsValid(dragRedrawRect)) {
-            RedrawWindow(window_, &dragRedrawRect, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_NOERASE);
+            nativeRedrawLiveRegion(window_, &dragRedrawRect);
         }
         return;
     }
-    RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+    nativeRedrawFullRefresh(window_);
 }
 
 void NativeMainWindow::scheduleResizeFrame(int width, int height) {
@@ -142,7 +143,7 @@ void NativeMainWindow::processNativeFrame() {
         relayoutCurrentClient(false);
     } else if (nativeFrameHasReason(frame.reasons, NativeFrameReason::Resize) && frame.hasClientSize) {
         layoutControls(frame.clientWidth, frame.clientHeight);
-        RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+        nativeRedrawFullRefresh(window_);
     }
 
     if (nativeFrameHasReason(frame.reasons, NativeFrameReason::TabSwitch) && workbenchTabRepaintPending_) {

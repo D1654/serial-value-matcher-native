@@ -3,6 +3,7 @@
 #if defined(_WIN32)
 
 #include "win32/native_control_utils.h"
+#include "win32/native_paint_policy.h"
 #include "win32/ui_text.h"
 
 #include <commctrl.h>
@@ -29,14 +30,7 @@ void raiseVisibleControl(HWND control) {
         return;
     }
 
-    SetWindowPos(
-        control,
-        HWND_TOP,
-        0,
-        0,
-        0,
-        0,
-        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOREDRAW);
+    nativeRaiseWindowNoRedraw(control, HWND_TOP);
 }
 
 } // namespace
@@ -195,16 +189,9 @@ void NativeMainWindow::repaintWorkbenchTabControls() {
         && workbenchRedrawRect_.bottom > workbenchRedrawRect_.top;
     const bool dragging = draggingWorkbenchSplitter_;
     if (workTabs_ != nullptr) {
-        const UINT tabRedrawFlags = dragging
-            ? (RDW_INVALIDATE | RDW_NOERASE)
-            : (RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
-        RedrawWindow(workTabs_, nullptr, nullptr, tabRedrawFlags);
+        nativeRedrawWorkbenchTab(workTabs_, dragging);
     }
     if (workPageBackground_ != nullptr) {
-        UINT backgroundFlags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
-        if (dragging) {
-            backgroundFlags |= SWP_NOREDRAW;
-        }
         SetWindowPos(
             workPageBackground_,
             HWND_BOTTOM,
@@ -212,7 +199,7 @@ void NativeMainWindow::repaintWorkbenchTabControls() {
             0,
             0,
             0,
-            backgroundFlags);
+            nativeWorkbenchBackgroundPositionFlags(dragging));
     }
 
     const auto raiseCached = [](HWND control, bool cachedVisible) {
@@ -282,14 +269,7 @@ void NativeMainWindow::repaintWorkbenchTabControls() {
     }
 
     if (canRedrawWorkbench && IsWindowVisible(window_) != FALSE) {
-        const UINT workbenchRedrawFlags = dragging
-            ? (RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_NOERASE)
-            : (RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
-        RedrawWindow(
-            window_,
-            &workbenchRedrawRect_,
-            nullptr,
-            workbenchRedrawFlags);
+        nativeRedrawWorkbenchArea(window_, &workbenchRedrawRect_, dragging);
     }
 }
 
@@ -330,9 +310,9 @@ void NativeMainWindow::updateSideHelp(int tabIndex) {
     setControlText(sideHelpText_, helpText);
     workbenchTabState_.markHelpUpdated(tabIndex);
     if (titleChanged || textChanged) {
-        RedrawWindow(sideHelpFrame_, nullptr, nullptr, RDW_INVALIDATE);
-        RedrawWindow(sideHelpTitle_, nullptr, nullptr, RDW_INVALIDATE);
-        RedrawWindow(sideHelpText_, nullptr, nullptr, RDW_INVALIDATE);
+        nativeInvalidateControl(sideHelpFrame_, false);
+        nativeInvalidateControl(sideHelpTitle_, false);
+        nativeInvalidateControl(sideHelpText_, false);
     }
 }
 

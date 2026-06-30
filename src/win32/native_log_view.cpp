@@ -2,6 +2,8 @@
 
 #if defined(_WIN32)
 
+#include "win32/native_paint_policy.h"
+
 #include <algorithm>
 #include <richedit.h>
 
@@ -72,14 +74,14 @@ COLORREF logColorForKind(NativeLogKind kind, int themeIndex) {
 NativeLogRedrawGuard::NativeLogRedrawGuard(HWND window)
     : window_(window) {
     if (window_ != nullptr) {
-        SendMessageW(window_, WM_SETREDRAW, FALSE, 0);
+        nativeSetWindowRedraw(window_, false);
     }
 }
 
 NativeLogRedrawGuard::~NativeLogRedrawGuard() {
     if (window_ != nullptr) {
-        SendMessageW(window_, WM_SETREDRAW, TRUE, 0);
-        RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+        nativeSetWindowRedraw(window_, true);
+        nativeRedrawLogFlush(window_);
     }
 }
 
@@ -180,7 +182,7 @@ void nativeLogApplyTheme(HWND logControl, bool usesRichEdit, int themeIndex) {
     format.dwMask = CFM_COLOR;
     format.crTextColor = palette.normal;
     SendMessageW(logControl, EM_SETCHARFORMAT, SCF_DEFAULT, reinterpret_cast<LPARAM>(&format));
-    InvalidateRect(logControl, nullptr, TRUE);
+    nativeInvalidateControl(logControl, true);
 }
 
 void nativeLogSetTextLimit(HWND logControl, std::size_t limit) {

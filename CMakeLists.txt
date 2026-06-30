@@ -115,6 +115,7 @@ if(SVM_BUILD_WIN32_APP)
         src/win32/native_log_scroll_state.cpp
         src/win32/native_log_view.cpp
         src/win32/native_modbus_scan_request.cpp
+        src/win32/native_paint_policy.cpp
         src/win32/native_modbus_scan_ui_state.cpp
         src/win32/native_modbus_scan_worker.cpp
         src/win32/native_progress_control.cpp
@@ -575,6 +576,19 @@ if(SVM_BUILD_WIN32_APP)
     )
     target_include_directories(native_frame_scheduler_tests PRIVATE src)
     add_test(NAME native_frame_scheduler_tests COMMAND native_frame_scheduler_tests)
+
+    add_executable(native_paint_policy_tests
+        tests/native_paint_policy_tests.cpp
+        src/win32/native_paint_policy.cpp
+    )
+    set_target_properties(native_paint_policy_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    target_include_directories(native_paint_policy_tests PRIVATE src)
+    target_link_libraries(native_paint_policy_tests PRIVATE user32)
+    add_test(NAME native_paint_policy_tests COMMAND native_paint_policy_tests)
 
     add_executable(native_win32_analysis_workflow_tests
         tests/native_win32_analysis_workflow_tests.cpp

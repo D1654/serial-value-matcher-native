@@ -2,6 +2,7 @@
 
 #if defined(_WIN32)
 
+#include "win32/native_paint_policy.h"
 #include "win32/ui_text.h"
 
 namespace svm::win32 {
@@ -51,8 +52,7 @@ bool NativeMainWindow::create(HINSTANCE instance) {
 void NativeMainWindow::show(int commandShow) {
     ShowWindow(window_, commandShow);
     processNativeFrame();
-    RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
-    UpdateWindow(window_);
+    nativeRedrawFirstShow(window_);
 }
 
 int NativeMainWindow::runMessageLoop() {
