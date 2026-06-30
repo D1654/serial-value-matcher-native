@@ -101,7 +101,7 @@ scripts/package-windows-native-mingw.sh
 
 ## 文档
 
-当前文档将按 Win32 native 发布路线重写。优先阅读：
+当前文档以 Win32 native 发布路线为准。优先阅读：
 
 - `docs/user-guide.md`：当前用户指南入口。
 - `docs/developer-guide.md`：当前开发者指南入口。
