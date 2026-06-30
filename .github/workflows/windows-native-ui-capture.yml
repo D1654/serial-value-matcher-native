@@ -76,6 +76,11 @@ jobs:
             "- $_" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
           "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "## UI performance gate" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "````text" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          Get-Content (Join-Path $env:UI_ARTIFACT_DIR "ui-perf-test.log") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "## DPI / window metrics" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           Get-Content (Join-Path $env:UI_ARTIFACT_DIR "window-info.txt") | ForEach-Object {
             "- $_" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
@@ -83,6 +88,11 @@ jobs:
           "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "## Capture logs" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           Get-ChildItem $env:UI_ARTIFACT_DIR -File | Where-Object { $_.Extension -in ".log", ".txt" } | Sort-Object Name | ForEach-Object {
+            "- $($_.Name) ($($_.Length) bytes)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          }
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "## UI artifact evidence files" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          Get-ChildItem $env:UI_ARTIFACT_DIR -File | Sort-Object Name | ForEach-Object {
             "- $($_.Name) ($($_.Length) bytes)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
 
