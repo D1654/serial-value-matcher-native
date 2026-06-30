@@ -117,6 +117,7 @@ sha256sum "$zip_path" > "$hash_path"
 python3 "$repo_root/scripts/inspect-windows-package.py" \
     --stage-dir "$stage_dir" \
     --zip-path "$zip_path" \
+    --hash-path "$hash_path" \
     --summary-path "$summary_path" \
     --max-zip-bytes "$max_zip_bytes" \
     --max-extracted-bytes "$max_extracted_bytes"

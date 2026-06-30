@@ -106,6 +106,7 @@ $hash = Get-FileHash -Algorithm SHA256 $zipPath
 & (Join-Path $repoRoot "scripts\inspect-windows-package.ps1") `
     -StageDir $stageDir `
     -ZipPath $zipPath `
+    -HashPath $hashPath `
     -SummaryPath $summaryPath `
     -MaxZipBytes $MaxZipBytes `
     -MaxExtractedBytes $MaxExtractedBytes

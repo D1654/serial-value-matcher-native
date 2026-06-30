@@ -70,6 +70,23 @@ jobs:
           -SkipSelfTest
           -SkipUiPerfTest
 
+      - name: Assert native package audit
+        shell: pwsh
+        run: |
+          $zipPath = "artifacts/windows-native/$env:PACKAGE_NAME.zip"
+          $hashPath = "$zipPath.sha256.txt"
+          $summaryPath = "artifacts/windows-native/$env:PACKAGE_NAME.package-summary.txt"
+          foreach ($path in @($zipPath, $hashPath, $summaryPath)) {
+            if (!(Test-Path $path)) {
+              throw "Native package audit artifact missing: $path"
+            }
+          }
+          $summary = Get-Content $summaryPath -Raw
+          if ($summary -notmatch "Gate status: passed") {
+            Get-Content $summaryPath
+            throw "Native package audit did not pass."
+          }
+
       - name: Report native package size
         shell: pwsh
         run: |

@@ -65,8 +65,15 @@ UNICODE_PROBE_TERMS = [
 ]
 
 
-FORBIDDEN_NAMES = {"qsqlite.dll"}
-FORBIDDEN_DLL_PREFIXES = ("qt6",)
+FORBIDDEN_NAMES = {
+    "qsqlite.dll",
+    "mscoree.dll",
+    "coreclr.dll",
+    "clrjit.dll",
+    "hostfxr.dll",
+    "hostpolicy.dll",
+}
+FORBIDDEN_DLL_PREFIXES = ("qt6", "system.", "microsoft.net")
 FORBIDDEN_IMPORTS = {
     "qt6core.dll",
     "qt6gui.dll",
@@ -82,6 +89,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Inspect SerialValueMatcher Win32 native package.")
     parser.add_argument("--stage-dir", required=True, type=Path)
     parser.add_argument("--zip-path", required=True, type=Path)
+    parser.add_argument("--hash-path", required=True, type=Path)
     parser.add_argument("--summary-path", required=True, type=Path)
     parser.add_argument("--max-zip-bytes", required=True, type=int)
     parser.add_argument("--max-extracted-bytes", required=True, type=int)
@@ -120,6 +128,7 @@ def main() -> int:
     args = parse_args()
     stage_dir = args.stage_dir.resolve()
     zip_path = args.zip_path.resolve()
+    hash_path = args.hash_path.resolve()
     summary_path = args.summary_path.resolve()
 
     failures: list[str] = []
@@ -129,6 +138,8 @@ def main() -> int:
         failures.append(f"包检查失败：目录不存在：{stage_dir}")
     if not zip_path.is_file():
         failures.append(f"包检查失败：zip 不存在：{zip_path}")
+    if not hash_path.is_file():
+        failures.append(f"包检查失败：SHA256 文件不存在：{hash_path}")
     if failures:
         print(" ".join(failures), file=sys.stderr)
         return 2
@@ -136,6 +147,9 @@ def main() -> int:
     package_files = sorted([path for path in stage_dir.rglob("*") if path.is_file()])
     package_bytes = sum(path.stat().st_size for path in package_files)
     zip_bytes = zip_path.stat().st_size
+    zip_hash = file_sha256(zip_path)
+    hash_text = hash_path.read_text(encoding="utf-8", errors="replace").strip()
+    hash_matches = zip_hash in hash_text.upper()
     largest_files = sorted(package_files, key=lambda path: path.stat().st_size, reverse=True)[:12]
     native_exe = next((path for path in package_files if path.name.lower() == "svm-native-win32.exe"), None)
 
@@ -171,13 +185,20 @@ def main() -> int:
     summary.append("Package kind: Win32 native")
     summary.append("Inspector: Python local")
     summary.append(f"Zip path: {zip_path}")
+    summary.append(f"Hash path: {hash_path}")
     summary.append(f"Zip bytes: {zip_bytes}")
+    summary.append(f"Zip sha256: {zip_hash}")
+    summary.append(f"Zip sha256 file matches: {'yes' if hash_matches else 'no'}")
     summary.append(f"Extracted bytes: {package_bytes}")
     summary.append(f"File count: {len(package_files)}")
     summary.append(f"Max zip bytes: {args.max_zip_bytes}")
     summary.append(f"Max extracted bytes: {args.max_extracted_bytes}")
     if native_exe is not None:
+        summary.append("Native exe present: yes")
+        summary.append(f"Native exe bytes: {native_exe.stat().st_size}")
         summary.append(f"Native exe sha256: {exe_hash}")
+    else:
+        summary.append("Native exe present: no")
     summary.append("")
     summary.append("Largest files:")
     for path in largest_files:
@@ -212,9 +233,13 @@ def main() -> int:
             summary.append(f"  required: {term}")
 
     if forbidden_files:
-        failures.append("native 包中出现 Qt 或 qsqlite 运行时文件。")
+        failures.append("native 包中出现 Qt、SQLite 或 .NET 运行时文件。")
     if native_exe is None:
         failures.append("native 包缺少 svm-native-win32.exe。")
+    if not hash_matches:
+        failures.append("zip SHA256 文件缺失或内容不匹配。")
+    if native_exe is not None and pefile is None:
+        failures.append("缺少 python3-pefile，无法验证 native exe 导入表。")
     if missing_unicode_terms:
         failures.append("native exe 缺少关键中文 UTF-16LE 文本。")
     if forbidden_imports:
