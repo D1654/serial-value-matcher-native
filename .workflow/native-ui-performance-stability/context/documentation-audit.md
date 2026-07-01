@@ -2,6 +2,8 @@
 
 Generated: 2026-06-30T06:45:03+08:00
 
+Status: superseded for current release evidence by the final v1.0.1 artifact review and release verification. Historical `unknown` entries below describe the evidence state at generation time, before the GitHub Actions package, UI capture, and downloaded Release assets were inspected.
+
 ## Basis
 
 This audit checks existing documentation against current repository evidence. It does not treat documentation as acceptance criteria.
@@ -42,7 +44,7 @@ This audit checks existing documentation against current repository evidence. It
 | No Qt/SQLite/.NET runtime in native package. | `verified` for package audit; `unknown` for latest artifact until Task 03 | `inspect-windows-package.ps1`, `inspect-windows-package.py`; latest artifact not captured yet. | Keep as a gate, but tie pass/fail to package summary. |
 | `--self-test` verifies no Qt or .NET runtime is loaded. | `stale` | `runSelfTest()` checks Unicode, layout probes, serial option helpers, native storage. Forbidden runtime is package audit responsibility. | Rewrite UI validation docs to separate self-test from package audit. |
 | `--ui-perf-test` exists and checks tab/control visibility, layout stability, splitter hit target, tab switching, log flush/trim behavior. | `verified` | `main.cpp`, `main_window_self_test.cpp`, native workflows. | Keep; expand only after Phase 4 matrix changes. |
-| v1.0.0 Release URL and latest Release package status. | `unknown` | Not verified in this task; Task 03 will inspect Actions/release artifacts. | Treat as historical pointer until artifact baseline is captured. |
+| Previous Release URL and latest Release package status. | `unknown` | Not verified in this task; Task 03 will inspect Actions/release artifacts. | Superseded by final v1.0.1 artifact review and release verification. |
 | Manual real-device serial validation is required before every formal release. | `historical` for current workflow | User requirement says final test target is GitHub Actions executable and manual testing is not blocking in this pass. | Keep as optional/future manual checklist, not a blocking acceptance criterion for this project. |
 | Current docs are authoritative source of truth. | `stale` | Workflow source-of-truth rule requires source/CI/artifact/user feedback over docs. | Remove from rewritten docs. |
 
@@ -54,7 +56,7 @@ This audit checks existing documentation against current repository evidence. It
 |---|---|---|---|
 | Product is a Chinese Windows native serial debugging and value matching tool. | `verified` | Product strings in `CMakeLists.txt`; Win32 native source and workflows. | Keep. |
 | Current main package is Win32 native, no Qt runtime, SQLite plugin, or .NET/C# runtime. | `verified` as intended package gate; latest artifact `unknown` | Native workflow/package scripts and forbidden runtime inspectors. | Keep but attach to package summary evidence. |
-| Release page `v1.0.0` is the current download source. | `unknown` | Not inspected in this task. | Move to release guide or regenerate from final artifact review. |
+| Previous Release page is the current download source. | `unknown` | Not inspected in this task. | Superseded by current README and v1.0.1 release guide updates. |
 | UI preview image represents current UI. | `unknown` | `docs/images/native-ui-overview.png` exists, but screenshot freshness is not proven. | Replace or revalidate after UI capture phase. |
 | Current capabilities list: serial, logs, send, Modbus, analysis, reports. | `unknown` for functional completeness; source-present | Source modules/tests exist, but Phase 3 functional closure will verify behavior. | Keep as intended feature list only after regression gates pass. |
 | Qt source remains for history and partial automated tests. | `verified` | Qt CMake options, Qt workflows, Qt helper tests. | Keep in legacy/parallel section. |
@@ -77,7 +79,7 @@ This audit checks existing documentation against current repository evidence. It
 | Claim | Classification | Evidence | Rewrite Action |
 |---|---|---|---|
 | Repository keeps Win32 native release route and Qt historical baseline route. | `verified` | CMake targets and workflows. | Keep. |
-| v1.0.0 user-facing release is Win32 native. | `unknown` for latest Release artifact; `verified` for current build path | Workflows and package scripts support Win32 native; release artifact not captured here. | Keep only after artifact baseline or phrase as intended route. |
+| Previous user-facing release is Win32 native. | `unknown` for latest Release artifact; `verified` for current build path | Workflows and package scripts support Win32 native; release artifact not captured here. | Superseded by final v1.0.1 artifact review and release verification. |
 | Win32 native architecture uses `NativeMainWindow`, Win32 serial, native storage, slim core, UTF conversion. | `verified` | `src/win32`, `svm_win32_serial`, `svm_native_storage`, `svm_slim_core`. | Keep and expand around new UI architecture after Phase 2. |
 | Qt code is retained for history and some automated tests. | `verified` | Qt options/workflows/helper tests. | Move to legacy architecture notes. |
 | Analysis logic is in core modules reusable by Qt and Win32. | `stale` / overgeneralized | Win32 native links `src/core/analysis_core.*`; Qt path currently links `src/matching/*` and related modules. | Rewrite exact ownership; avoid implying identical shared core. |
@@ -166,4 +168,3 @@ The documentation mostly points in the right direction, but it mixes verified so
 - Feature coverage documents presenting behavior as complete before Phase 3/4 regression gates prove it.
 
 Until Phase 5 rewrite is complete, no stale or unknown document claim should be used as an acceptance criterion.
-

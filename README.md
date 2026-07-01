@@ -4,8 +4,8 @@
 
 - 项目名称：串口值匹配器 / SerialValueMatcher Native
 - 作者：w
-- 当前版本：v1.0.0
-- 发布页：https://github.com/D1654/serial-value-matcher-native/releases/tag/v1.0.0
+- 当前版本：v1.0.1
+- 发布页：https://github.com/D1654/serial-value-matcher-native/releases/tag/v1.0.1
 - 主程序：`svm-native-win32.exe`
 
 ## 下载安装
@@ -24,7 +24,7 @@ svm-native-win32.exe
 
 首次使用、串口连接、日志导出、发送、Modbus 扫描和报告流程见 [用户指南](docs/user-guide.md)。
 
-v1.0.0 包信息：
+v1.0.1 包信息：
 
 - GitHub Actions Windows runner 构建；
 - zip 和解压体积以 Release 附件中的 package summary 为准；
@@ -72,7 +72,7 @@ v1.0.0 包信息：
 
 ## 当前边界
 
-v1.0.0 已可作为轻量串口工具测试使用，但仍建议在真实设备上重点验证：
+v1.0.1 已可作为轻量串口工具测试使用，但仍建议在真实设备上重点验证：
 
 - USB 转串口芯片的端口描述和热插拔表现；
 - DTR/RTS、硬件流控在具体设备上的效果；
