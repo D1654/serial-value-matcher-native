@@ -61,7 +61,7 @@ Windows native workflow：
 - 包内 `README.md` 和 `docs/*.md` 的相对 Markdown 链接不允许断链；
 - zip 和解压体积不超过门禁。
 
-v1.0.3 门禁结果以 Release 附件中的 package summary 为准。当前 GitHub Actions Release 包：
+v1.0.4 门禁结果以 Release 附件中的 package summary 为准。当前 GitHub Actions Release 包：
 
 - zip：以 package summary 为准；
 - 解压：以 package summary 为准；
@@ -86,7 +86,7 @@ cmake --build build-windows-native --config Release --parallel 1
 
 ## Release 维护
 
-推荐版本号从当前 `v1.0.3` 继续递增。创建 Release 前应确认：
+推荐版本号从当前 `v1.0.4` 继续递增。创建 Release 前应确认：
 
 - `main` 已推送；
 - Windows native workflow 已成功；
