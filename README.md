@@ -22,7 +22,7 @@ SerialValueMatcherNative-win32-native-x64.zip
 svm-native-win32.exe
 ```
 
-首次使用、串口连接、日志导出、发送、Modbus 扫描和报告流程见 [用户指南](docs/user-guide.md)。
+首次使用、串口连接、日志导出、发送、Modbus 扫描和报告流程见 [用户指南](docs/用户指南.md)。
 
 v1.0.2 包信息：
 
@@ -97,26 +97,26 @@ scripts/build-windows-native-mingw.sh
 scripts/package-windows-native-mingw.sh
 ```
 
-本地打包默认会执行 Wine 自测和 UI 性能硬门禁；Wine/UI 截图闭环见 `docs/windows-native-local-debug.md`。
+本地打包默认会执行 Wine 自测和 UI 性能硬门禁；Wine/UI 截图闭环见 `docs/Windows原生本地调试.md`。
 
 ## 文档
 
 当前文档以 Win32 native 发布路线为准。优先阅读：
 
-- `docs/user-guide.md`：当前用户指南入口。
-- `docs/developer-guide.md`：当前开发者指南入口。
-- `docs/architecture-win32-native.md`：Win32 native 架构入口。
-- `docs/testing-validation.md`：测试、截图、PTY、包体审计和验证入口。
-- `docs/release-artifacts.md`：Actions artifact 和发布产物入口。
-- `docs/troubleshooting.md`：常见问题和排查入口。
-- `docs/legacy-qt-notes.md`：Qt 历史路线说明。
+- `docs/用户指南.md`：当前用户指南入口。
+- `docs/开发者指南.md`：当前开发者指南入口。
+- `docs/Win32原生架构.md`：Win32 native 架构入口。
+- `docs/测试与验证.md`：测试、截图、PTY、包体审计和验证入口。
+- `docs/发布产物.md`：Actions artifact 和发布产物入口。
+- `docs/故障排查.md`：常见问题和排查入口。
+- `docs/Qt历史说明.md`：Qt 历史路线说明。
 
 过渡期参考文档：
 
-- `docs/windows-deployment.md`
-- `docs/windows-native-local-debug.md`
-- `docs/windows-native-slimming.md`
-- `docs/windows-native-parity.md`
-- `docs/windows-native-ui-validation.md`
-- `docs/windows-serial-validation.md`
-- `docs/architecture.md`
+- `docs/Windows发布说明.md`
+- `docs/Windows原生本地调试.md`
+- `docs/Windows原生体积说明.md`
+- `docs/Win32原生与Qt基线对照.md`
+- `docs/Windows原生UI验证.md`
+- `docs/Windows串口真机验收.md`
+- `docs/架构说明.md`

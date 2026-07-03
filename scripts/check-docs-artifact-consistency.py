@@ -19,23 +19,23 @@ UI_WORKFLOW = ".github/workflows/windows-native-ui-capture.yml"
 
 ACTIVE_DOCS = [
     "README.md",
-    "docs/user-guide.md",
-    "docs/developer-guide.md",
-    "docs/architecture-win32-native.md",
-    "docs/testing-validation.md",
-    "docs/release-artifacts.md",
-    "docs/troubleshooting.md",
-    "docs/windows-deployment.md",
-    "docs/windows-native-slimming.md",
-    "docs/windows-native-ui-validation.md",
-    "docs/windows-serial-validation.md",
-    "docs/windows-native-local-debug.md",
+    "docs/用户指南.md",
+    "docs/开发者指南.md",
+    "docs/Win32原生架构.md",
+    "docs/测试与验证.md",
+    "docs/发布产物.md",
+    "docs/故障排查.md",
+    "docs/Windows发布说明.md",
+    "docs/Windows原生体积说明.md",
+    "docs/Windows原生UI验证.md",
+    "docs/Windows串口真机验收.md",
+    "docs/Windows原生本地调试.md",
 ]
 
 LEGACY_OR_TRANSITION_DOCS = [
-    "docs/legacy-qt-notes.md",
-    "docs/architecture.md",
-    "docs/windows-native-parity.md",
+    "docs/Qt历史说明.md",
+    "docs/架构说明.md",
+    "docs/Win32原生与Qt基线对照.md",
 ]
 
 REQUIRED_FILES = [
@@ -76,15 +76,15 @@ UI_WORKFLOW_TERMS = [
 
 REQUIRED_DOC_TERMS = {
     "README.md": [EXE_NAME, PACKAGE_ZIP],
-    "docs/user-guide.md": [EXE_NAME, PACKAGE_ZIP, "artifact"],
-    "docs/developer-guide.md": ["CMake", TARGET_NAME, EXE_NAME, "NativeFrameScheduler"],
-    "docs/architecture-win32-native.md": [
+    "docs/用户指南.md": [EXE_NAME, PACKAGE_ZIP, "artifact"],
+    "docs/开发者指南.md": ["CMake", TARGET_NAME, EXE_NAME, "NativeFrameScheduler"],
+    "docs/Win32原生架构.md": [
         "NativeFrameScheduler",
         "NativeLayoutModel",
         "NativeLayoutTransaction",
         "NativePaintPolicy",
     ],
-    "docs/testing-validation.md": [
+    "docs/测试与验证.md": [
         PACKAGE_WORKFLOW,
         UI_WORKFLOW,
         UI_ARTIFACT,
@@ -93,14 +93,14 @@ REQUIRED_DOC_TERMS = {
         "package",
         "docs consistency",
     ],
-    "docs/release-artifacts.md": [
+    "docs/发布产物.md": [
         PACKAGE_ARTIFACT,
         UI_ARTIFACT,
         PACKAGE_HASH,
         PACKAGE_SUMMARY,
         "Gate status: passed",
     ],
-    "docs/troubleshooting.md": [
+    "docs/故障排查.md": [
         PACKAGE_ARTIFACT,
         UI_ARTIFACT,
         "troubleshooting",
@@ -304,13 +304,13 @@ def check_cross_file_consistency(root: Path, failures: list[str]) -> None:
     package_script = read_text(root / "scripts/package-windows-native.ps1")
     mingw_package_script = read_text(root / "scripts/package-windows-native-mingw.sh")
     package_workflow = read_text(root / PACKAGE_WORKFLOW)
-    release_doc = read_text(root / "docs/release-artifacts.md")
+    release_doc = read_text(root / "docs/发布产物.md")
 
     for relative, text in [
         ("scripts/package-windows-native.ps1", package_script),
         ("scripts/package-windows-native-mingw.sh", mingw_package_script),
         (PACKAGE_WORKFLOW, package_workflow),
-        ("docs/release-artifacts.md", release_doc),
+        ("docs/发布产物.md", release_doc),
     ]:
         if PACKAGE_ARTIFACT not in text and "mingw" not in relative:
             add_failure(failures, relative, f"missing package artifact name: {PACKAGE_ARTIFACT}")

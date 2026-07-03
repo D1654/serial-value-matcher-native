@@ -102,9 +102,9 @@ foreach ($relative in $requiredPaths) {
 }
 
 Copy-Item (Join-Path $repoRoot "README.md") $stageDir
-if (Test-Path (Join-Path $repoRoot "docs\windows-deployment.md")) {
+if (Test-Path (Join-Path $repoRoot "docs\Windows发布说明.md")) {
     New-Item -ItemType Directory -Path (Join-Path $stageDir "docs") -Force | Out-Null
-    Copy-Item (Join-Path $repoRoot "docs\windows-deployment.md") (Join-Path $stageDir "docs")
+    Copy-Item (Join-Path $repoRoot "docs\Windows发布说明.md") (Join-Path $stageDir "docs")
 }
 
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }

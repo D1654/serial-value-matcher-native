@@ -72,7 +72,7 @@
 
 ## 相关旧文档
 
-- [Win32 Native 与 Qt 基线对照](windows-native-parity.md)
-- [过渡架构说明](architecture.md)
+- [Win32 Native 与 Qt 基线对照](Win32原生与Qt基线对照.md)
+- [过渡架构说明](架构说明.md)
 
-这些文档只作为过渡参考。当前用户入口、开发入口和发布入口分别是 [用户指南](user-guide.md)、[开发者指南](developer-guide.md) 和 [发布产物](release-artifacts.md)。
+这些文档只作为过渡参考。当前用户入口、开发入口和发布入口分别是 [用户指南](用户指南.md)、[开发者指南](开发者指南.md) 和 [发布产物](发布产物.md)。

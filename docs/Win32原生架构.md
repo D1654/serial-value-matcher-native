@@ -219,8 +219,8 @@ UI capture 工作流和脚本在 exe 自检之外补充截图证据，覆盖默�
 
 ## 相关文档
 
-- [开发者指南](developer-guide.md)
-- [测试与验证](testing-validation.md)
-- [发布产物](release-artifacts.md)
-- [历史 Qt 说明](legacy-qt-notes.md)
-- [过渡架构说明](architecture.md)
+- [开发者指南](开发者指南.md)
+- [测试与验证](测试与验证.md)
+- [发布产物](发布产物.md)
+- [历史 Qt 说明](Qt历史说明.md)
+- [过渡架构说明](架构说明.md)
