@@ -26,6 +26,67 @@ function Get-RelativePackagePath($Root, $Path) {
     return $normalizedPath
 }
 
+function Get-DocumentationPackageLinkFailures($StageRoot, $MarkdownFiles) {
+    $failures = New-Object System.Collections.Generic.List[string]
+    $stageFull = [System.IO.Path]::GetFullPath($StageRoot).TrimEnd('\', '/')
+    $linkPattern = [regex]'!?\[[^\]]*\]\(([^)]+)\)'
+    $pathPattern = [regex]'`((?:docs/|README\.md)[^`]+)`'
+
+    foreach ($file in $MarkdownFiles) {
+        $relativeFile = Get-RelativePackagePath $StageRoot $file.FullName
+        $lines = @(Get-Content -Path $file.FullName -Encoding UTF8)
+        for ($lineIndex = 0; $lineIndex -lt $lines.Count; $lineIndex += 1) {
+            $line = $lines[$lineIndex]
+            $rawTargets = New-Object System.Collections.Generic.List[string]
+            foreach ($match in $linkPattern.Matches($line)) {
+                $rawTargets.Add($match.Groups[1].Value)
+            }
+            foreach ($match in $pathPattern.Matches($line)) {
+                $rawTargets.Add($match.Groups[1].Value)
+            }
+
+            foreach ($rawTargetValue in $rawTargets) {
+                $rawTarget = $rawTargetValue.Trim()
+                if ($rawTarget.StartsWith("<") -and $rawTarget.EndsWith(">")) {
+                    $rawTarget = $rawTarget.Substring(1, $rawTarget.Length - 2).Trim()
+                }
+                if ([string]::IsNullOrWhiteSpace($rawTarget) -or $rawTarget.StartsWith("#")) {
+                    continue
+                }
+                if ($rawTarget -match '^[A-Za-z][A-Za-z0-9+.-]*:') {
+                    continue
+                }
+
+                $target = ($rawTarget -split '\s+')[0]
+                $target = ($target -split '#', 2)[0]
+                $target = ($target -split '\?', 2)[0]
+                if ([string]::IsNullOrWhiteSpace($target)) {
+                    continue
+                }
+                if ($target.Contains("*")) {
+                    continue
+                }
+                $target = [System.Uri]::UnescapeDataString($target)
+                $baseDir = $file.DirectoryName
+                if ($target.StartsWith("docs/") -or $target.StartsWith("docs\") -or $target -eq "README.md") {
+                    $baseDir = $StageRoot
+                }
+                $resolved = [System.IO.Path]::GetFullPath((Join-Path $baseDir $target))
+                $lineNo = $lineIndex + 1
+                if (-not $resolved.StartsWith($stageFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $failures.Add("${relativeFile}:${lineNo}: link leaves package: $rawTarget")
+                    continue
+                }
+                if (-not (Test-Path -LiteralPath $resolved)) {
+                    $failures.Add("${relativeFile}:${lineNo}: broken package link: $rawTarget")
+                }
+            }
+        }
+    }
+
+    return @($failures)
+}
+
 function Test-ByteSequence($Bytes, $Needle) {
     if ($Needle.Length -eq 0) {
         return $true
@@ -270,6 +331,8 @@ $forbiddenImportNames = @(
     "mscoree.dll"
 )
 $forbiddenImports = @($importedDlls | Where-Object { $forbiddenImportNames -contains $_.ToLowerInvariant() })
+$markdownFiles = @($packageFiles | Where-Object { $_.Extension -ieq ".md" })
+$documentationLinkFailures = @(Get-DocumentationPackageLinkFailures $StageDir $markdownFiles)
 
 $summary = New-Object System.Collections.Generic.List[string]
 $summary.Add("SerialValueMatcher Native Windows package summary")
@@ -329,6 +392,17 @@ if ($missingUnicodeTerms.Count -eq 0) {
         $summary.Add("  missing: $term")
     }
 }
+$summary.Add("")
+$summary.Add("Package documentation links:")
+if ($documentationLinkFailures.Count -eq 0) {
+    $summary.Add("  passed")
+    $summary.Add("  checked files: $($markdownFiles.Count)")
+} else {
+    $summary.Add("  failed")
+    foreach ($failure in $documentationLinkFailures) {
+        $summary.Add("  $failure")
+    }
+}
 
 $gateFailures = New-Object System.Collections.Generic.List[string]
 if ($forbiddenFiles.Count -gt 0) {
@@ -353,6 +427,9 @@ if ($zipBytes -gt $MaxZipBytes) {
 }
 if ($packageBytes -gt $MaxExtractedBytes) {
     $gateFailures.Add("解压后体积超过门禁：$packageBytes > $MaxExtractedBytes。")
+}
+if ($documentationLinkFailures.Count -gt 0) {
+    $gateFailures.Add("native 包内文档链接或文档路径存在断链。")
 }
 
 $summary.Add("")

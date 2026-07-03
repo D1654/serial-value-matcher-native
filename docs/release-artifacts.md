@@ -141,6 +141,7 @@ cat SerialValueMatcherNative-win32-native-x64.zip.sha256.txt
 - `Imported DLLs`
 - `Forbidden Qt/SQLite/.NET runtime files: none`
 - `Unicode text probe: passed`
+- `Package documentation links: passed`
 - `Gate status: passed`
 
 如果 `Gate status` 不是 `passed`，该 artifact 不应作为发布候选。
@@ -184,7 +185,7 @@ cat SerialValueMatcherNative-win32-native-x64.zip.sha256.txt
 
 - 手工复制本地 exe，缺少 Actions 证据。
 - 只有 zip，没有 SHA256 或 package summary。
-- package summary 缺少导入表检查或 Unicode probe。
+- package summary 缺少导入表检查、Unicode probe 或 Package documentation links。
 - UI capture 缺少 screenshot 或 `capture-status.txt`。
 - 发现 Qt/SQLite/.NET runtime 文件进入 native 包。
 

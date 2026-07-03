@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import argparse
 import hashlib
+import re
 import sys
+import urllib.parse
 from pathlib import Path
 
 try:
@@ -84,6 +86,10 @@ FORBIDDEN_IMPORTS = {
     "mscoree.dll",
 }
 
+MARKDOWN_LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
+PACKAGED_PATH_REFERENCE_PATTERN = re.compile(r"`((?:docs/|README\.md)[^`]+)`")
+EXTERNAL_LINK_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Inspect SerialValueMatcher Win32 native package.")
@@ -122,6 +128,58 @@ def imported_dlls(exe_path: Path) -> list[str]:
     for entry in getattr(pe, "DIRECTORY_ENTRY_IMPORT", []):
         imports.append(entry.dll.decode("ascii", errors="replace"))
     return sorted(set(imports), key=str.lower)
+
+
+def local_markdown_target(raw_target: str) -> str | None:
+    target = raw_target.strip()
+    if target.startswith("<") and target.endswith(">"):
+        target = target[1:-1].strip()
+    if not target or target.startswith("#"):
+        return None
+    if EXTERNAL_LINK_PATTERN.match(target):
+        return None
+    target = target.split()[0]
+    target = target.split("#", 1)[0].split("?", 1)[0]
+    if not target or "*" in target:
+        return None
+    return urllib.parse.unquote(target)
+
+
+def package_documentation_link_failures(stage_dir: Path, package_files: list[Path]) -> list[str]:
+    failures: list[str] = []
+    stage_root = stage_dir.resolve()
+    markdown_files = sorted(path for path in package_files if path.suffix.lower() == ".md")
+
+    def check_target(
+        markdown_path: Path,
+        relative_markdown: str,
+        line_no: int,
+        raw_target: str,
+        *,
+        root_relative: bool,
+    ) -> None:
+        target = local_markdown_target(raw_target)
+        if target is None:
+            return
+        base_dir = stage_root if root_relative else markdown_path.parent
+        resolved = (base_dir / target).resolve()
+        try:
+            resolved.relative_to(stage_root)
+        except ValueError:
+            failures.append(f"{relative_markdown}:{line_no}: link leaves package: {raw_target}")
+            return
+        if not resolved.exists():
+            failures.append(f"{relative_markdown}:{line_no}: broken package link: {raw_target}")
+
+    for markdown_path in markdown_files:
+        relative_markdown = relative_path(stage_dir, markdown_path)
+        lines = markdown_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        for line_no, line in enumerate(lines, start=1):
+            for match in MARKDOWN_LINK_PATTERN.finditer(line):
+                check_target(markdown_path, relative_markdown, line_no, match.group(1), root_relative=False)
+            for match in PACKAGED_PATH_REFERENCE_PATTERN.finditer(line):
+                check_target(markdown_path, relative_markdown, line_no, match.group(1), root_relative=True)
+    return failures
 
 
 def main() -> int:
@@ -180,6 +238,8 @@ def main() -> int:
     forbidden_imports = [
         dll for dll in imported if dll.lower() in FORBIDDEN_IMPORTS
     ]
+    markdown_files = sorted(path for path in package_files if path.suffix.lower() == ".md")
+    documentation_link_failures = package_documentation_link_failures(stage_dir, package_files)
 
     summary.append("SerialValueMatcher Native Windows package summary")
     summary.append("Package kind: Win32 native")
@@ -231,6 +291,15 @@ def main() -> int:
         summary.append("  passed")
         for term in UNICODE_PROBE_TERMS:
             summary.append(f"  required: {term}")
+    summary.append("")
+    summary.append("Package documentation links:")
+    if documentation_link_failures:
+        summary.append("  failed")
+        for failure in documentation_link_failures:
+            summary.append(f"  {failure}")
+    else:
+        summary.append("  passed")
+        summary.append(f"  checked files: {len(markdown_files)}")
 
     if forbidden_files:
         failures.append("native 包中出现 Qt、SQLite 或 .NET 运行时文件。")
@@ -248,6 +317,8 @@ def main() -> int:
         failures.append(f"zip 体积超过门禁：{zip_bytes} > {args.max_zip_bytes}。")
     if package_bytes > args.max_extracted_bytes:
         failures.append(f"解压后体积超过门禁：{package_bytes} > {args.max_extracted_bytes}。")
+    if documentation_link_failures:
+        failures.append("native 包内文档链接或文档路径存在断链。")
 
     summary.append("")
     if failures:

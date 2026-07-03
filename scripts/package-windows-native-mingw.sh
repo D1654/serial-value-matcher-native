@@ -93,18 +93,7 @@ mkdir -p "$stage_dir/docs"
 cp "$exe_path" "$stage_dir/"
 x86_64-w64-mingw32-strip --strip-all "$stage_dir/svm-native-win32.exe"
 cp "$repo_root/README.md" "$stage_dir/"
-
-for relative_doc in \
-    docs/windows-native-slimming.md \
-    docs/windows-native-ui-validation.md \
-    docs/windows-serial-validation.md \
-    docs/windows-deployment.md \
-    docs/windows-native-local-debug.md
-do
-    if [[ -f "$repo_root/$relative_doc" ]]; then
-        cp "$repo_root/$relative_doc" "$stage_dir/docs/"
-    fi
-done
+cp -R "$repo_root/docs/." "$stage_dir/docs/"
 
 rm -f "$zip_path" "$hash_path" "$summary_path"
 mkdir -p "$package_root"

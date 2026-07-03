@@ -117,6 +117,7 @@ PACKAGE_SUMMARY_TERMS = [
     "Imported DLLs",
     "Forbidden Qt/SQLite/.NET runtime files",
     "Unicode text probe",
+    "Package documentation links",
     "Gate status: passed",
 ]
 

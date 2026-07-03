@@ -58,13 +58,15 @@ Windows native workflow：
 - 不包含 `qsqlite.dll` 或 `sqldrivers`；
 - 不导入 `.NET` 运行库；
 - 中文 UTF-16 文本探针通过；
+- 包内 `README.md` 和 `docs/*.md` 的相对 Markdown 链接不允许断链；
 - zip 和解压体积不超过门禁。
 
-v1.0.1 门禁结果以 Release 附件中的 package summary 为准。当前 GitHub Actions Release 包：
+v1.0.2 门禁结果以 Release 附件中的 package summary 为准。当前 GitHub Actions Release 包：
 
-- zip：472,968 bytes，约 462 KiB；
-- 解压：986,825 bytes，约 964 KiB；
-- 文件数：6；
+- zip：以 package summary 为准；
+- 解压：以 package summary 为准；
+- 文件数：以 package summary 为准；
+- Package documentation links：passed；
 - Gate status：passed。
 
 ## 本地 Windows 构建
@@ -84,7 +86,7 @@ cmake --build build-windows-native --config Release --parallel 1
 
 ## Release 维护
 
-推荐版本号从当前 `v1.0.1` 继续递增。创建 Release 前应确认：
+推荐版本号从当前 `v1.0.2` 继续递增。创建 Release 前应确认：
 
 - `main` 已推送；
 - Windows native workflow 已成功；

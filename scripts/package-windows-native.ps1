@@ -83,18 +83,11 @@ Copy-Item $exePath $stageDir
 Copy-Item (Join-Path $repoRoot "README.md") $stageDir
 
 $docsDir = Join-Path $stageDir "docs"
+if (Test-Path $docsDir) { Remove-Item $docsDir -Recurse -Force }
 New-Item -ItemType Directory -Path $docsDir -Force | Out-Null
-$docsToCopy = @(
-    "docs\windows-native-slimming.md",
-    "docs\windows-native-ui-validation.md",
-    "docs\windows-serial-validation.md",
-    "docs\windows-deployment.md"
-)
-foreach ($relativeDoc in $docsToCopy) {
-    $docPath = Join-Path $repoRoot $relativeDoc
-    if (Test-Path $docPath) {
-        Copy-Item $docPath $docsDir
-    }
+$docsSourceDir = Join-Path $repoRoot "docs"
+if (Test-Path $docsSourceDir) {
+    Copy-Item (Join-Path $docsSourceDir "*") $docsDir -Recurse -Force
 }
 
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }

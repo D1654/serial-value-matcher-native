@@ -223,6 +223,7 @@ scripts/package-windows-native-mingw.sh
 - `Imported DLLs`
 - `Forbidden Qt/SQLite/.NET runtime files`
 - `Unicode text probe`
+- `Package documentation links`
 - `Gate status: passed`
 
 失败即阻塞发布。常见失败见 [故障排查](troubleshooting.md)。
