@@ -36,6 +36,20 @@ int nativeNormalizeWorkbenchHeight(int workbenchHeight) noexcept {
     return std::clamp(workbenchHeight, kNativeMinWorkbenchHeight, kNativeMaxWorkbenchHeight);
 }
 
+int nativeNormalizeWindowWidth(int windowWidth) noexcept {
+    if (windowWidth <= 0) {
+        return kNativeDefaultWindowWidth;
+    }
+    return std::clamp(windowWidth, kNativeMinWindowWidth, kNativeMaxWindowWidth);
+}
+
+int nativeNormalizeWindowHeight(int windowHeight) noexcept {
+    if (windowHeight <= 0) {
+        return kNativeDefaultWindowHeight;
+    }
+    return std::clamp(windowHeight, kNativeMinWindowHeight, kNativeMaxWindowHeight);
+}
+
 std::vector<std::string> nativeNormalizeQuickSendSlots(std::vector<std::string> slots, std::size_t slotCount) {
     slots.resize(slotCount);
     return slots;
@@ -50,6 +64,8 @@ native_storage::UiPreferences nativeNormalizeUiPreferences(native_storage::UiPre
     preferences.logVisibleCharLimit = static_cast<int>(nativeNormalizeLogVisibleCharLimit(visibleCharLimit));
     preferences.rawEventRetentionLimitMb = nativeNormalizeRawEventRetentionMb(preferences.rawEventRetentionLimitMb);
     preferences.workbenchHeight = nativeNormalizeWorkbenchHeight(preferences.workbenchHeight);
+    preferences.windowWidth = nativeNormalizeWindowWidth(preferences.windowWidth);
+    preferences.windowHeight = nativeNormalizeWindowHeight(preferences.windowHeight);
     preferences.quickSendSlots = nativeNormalizeQuickSendSlots(std::move(preferences.quickSendSlots), quickSendSlotCount);
     return preferences;
 }

@@ -34,6 +34,17 @@ void rawEventRetentionOnlyAllowsKnownChoices() {
     assert(svm::win32::nativeNormalizeRawEventRetentionMb(200) == svm::win32::kNativeDefaultRawEventRetentionMb);
 }
 
+void windowSizeLimitsPreserveUsableGeometry() {
+    assert(svm::win32::nativeNormalizeWindowWidth(-1) == svm::win32::kNativeDefaultWindowWidth);
+    assert(svm::win32::nativeNormalizeWindowHeight(-1) == svm::win32::kNativeDefaultWindowHeight);
+    assert(svm::win32::nativeNormalizeWindowWidth(100) == svm::win32::kNativeMinWindowWidth);
+    assert(svm::win32::nativeNormalizeWindowHeight(100) == svm::win32::kNativeMinWindowHeight);
+    assert(svm::win32::nativeNormalizeWindowWidth(900) == 900);
+    assert(svm::win32::nativeNormalizeWindowHeight(620) == 620);
+    assert(svm::win32::nativeNormalizeWindowWidth(100000) == svm::win32::kNativeMaxWindowWidth);
+    assert(svm::win32::nativeNormalizeWindowHeight(100000) == svm::win32::kNativeMaxWindowHeight);
+}
+
 void quickSendSlotsArePaddedAndTrimmed() {
     auto padded = svm::win32::nativeNormalizeQuickSendSlots({"A", "B"}, 4);
     assert(padded.size() == 4);
@@ -55,6 +66,8 @@ void wholePreferencesAreNormalizedTogether() {
     preferences.logVisibleCharLimit = -5;
     preferences.rawEventRetentionLimitMb = 250;
     preferences.workbenchHeight = 20;
+    preferences.windowWidth = 100;
+    preferences.windowHeight = -5;
     preferences.quickSendSlots = {"AT"};
 
     const auto normalized = svm::win32::nativeNormalizeUiPreferences(preferences, 3);
@@ -63,6 +76,8 @@ void wholePreferencesAreNormalizedTogether() {
     assert(normalized.logVisibleCharLimit == static_cast<int>(svm::win32::kNativeMinLogVisibleChars));
     assert(normalized.rawEventRetentionLimitMb == svm::win32::kNativeDefaultRawEventRetentionMb);
     assert(normalized.workbenchHeight == svm::win32::kNativeMinWorkbenchHeight);
+    assert(normalized.windowWidth == svm::win32::kNativeMinWindowWidth);
+    assert(normalized.windowHeight == svm::win32::kNativeDefaultWindowHeight);
     assert(normalized.quickSendSlots.size() == 3);
     assert(normalized.quickSendSlots[0] == "AT");
     assert(normalized.quickSendSlots[1].empty());
@@ -96,6 +111,7 @@ void sameSettingsIgnoreStorageMetadata() {
 int main() {
     scalarLimitsAreStable();
     rawEventRetentionOnlyAllowsKnownChoices();
+    windowSizeLimitsPreserveUsableGeometry();
     quickSendSlotsArePaddedAndTrimmed();
     wholePreferencesAreNormalizedTogether();
     sameSettingsIgnoreStorageMetadata();

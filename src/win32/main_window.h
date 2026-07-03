@@ -117,6 +117,7 @@ private:
     void applyLatestSerialProfile();
     void saveCurrentSerialProfile();
     void applyUiPreferences();
+    void scheduleUiPreferencesSave();
     void saveUiPreferences();
     void updateWorkbenchTab();
     void applyWorkbenchTabVisibility(int tabIndex);
@@ -363,6 +364,7 @@ private:
     std::uint64_t logRebuildPassCount_ = 0;
     std::uint64_t logQueuedLineCount_ = 0;
     bool uiPreferenceSaveFailureShown_ = false;
+    bool trackingWindowSizeMove_ = false;
     std::optional<native_storage::UiPreferences> lastSavedUiPreferences_;
     Win32SerialPort serialPort_;
     NativeSerialIoState serialIoState_;

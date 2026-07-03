@@ -105,6 +105,11 @@ std::optional<LRESULT> NativeMainWindow::handleTimerMessage(WPARAM wParam) {
         scheduleLogFlushFrame();
         return 0;
     }
+    if (wParam == IDT_UI_PREFERENCES_SAVE) {
+        KillTimer(window_, IDT_UI_PREFERENCES_SAVE);
+        saveUiPreferences();
+        return 0;
+    }
     if (wParam == IDT_STATUS_CLOCK) {
         scheduleStatusFrame();
         return 0;
@@ -122,6 +127,7 @@ LRESULT NativeMainWindow::handleDestroyMessage() {
              IDT_FILE_SEND,
              IDT_STATUS_CLOCK,
              IDT_LOG_FLUSH,
+             IDT_UI_PREFERENCES_SAVE,
          }) {
         KillTimer(window_, timerId);
     }

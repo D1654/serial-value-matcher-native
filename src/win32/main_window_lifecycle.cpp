@@ -3,6 +3,7 @@
 #if defined(_WIN32)
 
 #include "win32/native_paint_policy.h"
+#include "win32/native_ui_preferences.h"
 #include "win32/ui_text.h"
 
 namespace svm::win32 {
@@ -40,8 +41,8 @@ bool NativeMainWindow::create(HINSTANCE instance) {
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
-        1220,
-        780,
+        kNativeDefaultWindowWidth,
+        kNativeDefaultWindowHeight,
         nullptr,
         nullptr,
         instance_,

@@ -31,6 +31,16 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         return handleCreateMessage();
     case WM_SIZE:
         scheduleResizeFrame(LOWORD(lParam), HIWORD(lParam));
+        if (wParam != SIZE_MINIMIZED && !trackingWindowSizeMove_) {
+            scheduleUiPreferencesSave();
+        }
+        return 0;
+    case WM_ENTERSIZEMOVE:
+        trackingWindowSizeMove_ = true;
+        return 0;
+    case WM_EXITSIZEMOVE:
+        trackingWindowSizeMove_ = false;
+        saveUiPreferences();
         return 0;
     case WM_PAINT:
         paintLayoutChrome();

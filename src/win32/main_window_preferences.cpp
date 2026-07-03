@@ -5,6 +5,7 @@
 #include "win32/native_control_utils.h"
 #include "win32/native_time_utils.h"
 #include "win32/native_ui_preferences.h"
+#include "win32/resource.h"
 #include "win32/ui_text.h"
 #include "win32/utf8_win32.h"
 
@@ -54,7 +55,7 @@ void NativeMainWindow::applyUiPreferences() {
     applyLogTheme(preferences.logThemeIndex);
     updateLogTimestampMenu();
 
-    if (preferences.windowWidth >= 1080 && preferences.windowHeight >= 760) {
+    if (preferences.windowWidth >= kNativeMinWindowWidth && preferences.windowHeight >= kNativeMinWindowHeight) {
         RECT currentRect = {};
         GetWindowRect(window_, &currentRect);
         MoveWindow(
@@ -68,8 +69,22 @@ void NativeMainWindow::applyUiPreferences() {
     setStatus(tx(T::UiPreferencesRestoredStatus));
 }
 
+void NativeMainWindow::scheduleUiPreferencesSave() {
+    if (!store_.isOpen() || window_ == nullptr || IsIconic(window_)) {
+        return;
+    }
+    KillTimer(window_, IDT_UI_PREFERENCES_SAVE);
+    const bool timerStarted = SetTimer(window_, IDT_UI_PREFERENCES_SAVE, 300, nullptr) != 0;
+    if (!timerStarted) {
+        saveUiPreferences();
+    }
+}
+
 void NativeMainWindow::saveUiPreferences() {
     if (!store_.isOpen() || window_ == nullptr) {
+        return;
+    }
+    if (IsIconic(window_)) {
         return;
     }
 
@@ -100,8 +115,8 @@ void NativeMainWindow::saveUiPreferences() {
     preferences.quickSendSlots = nativeNormalizeQuickSendSlots(std::move(preferences.quickSendSlots), quickSendEdits_.size());
     preferences.windowLeft = windowRect.left;
     preferences.windowTop = windowRect.top;
-    preferences.windowWidth = windowRect.right - windowRect.left;
-    preferences.windowHeight = windowRect.bottom - windowRect.top;
+    preferences.windowWidth = nativeNormalizeWindowWidth(windowRect.right - windowRect.left);
+    preferences.windowHeight = nativeNormalizeWindowHeight(windowRect.bottom - windowRect.top);
     if (lastSavedUiPreferences_.has_value() && nativeUiPreferencesSameSettings(*lastSavedUiPreferences_, preferences)) {
         return;
     }
