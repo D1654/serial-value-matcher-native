@@ -388,6 +388,8 @@ printf "%s\n" "PASS capture-complete" >> "$output_dir/capture-status.txt"
 ' bash "$exe_path" "$output_dir" "$window_name" "$stabilize_seconds" "$capture_tabs" "$capture_compact" "$capture_fast_frames" "$fast_frame_delay" "$ui_perf_log_windows" "$capture_resize_sweep"
 
 echo "Wine UI 截图完成：$output_dir/root.png"
+echo "捕获状态：$output_dir/capture-status.txt"
 echo "窗口信息：$output_dir/window-info.txt"
 echo "self-test 日志：$output_dir/self-test.log"
 echo "UI 性能日志：$output_dir/ui-perf-test.log"
+echo "UI 基线说明：Wine 截图用于辅助诊断，最终视觉结论以 GitHub Actions Windows UI artifact 和真实 Windows 截图为准。"

@@ -1,0 +1,376 @@
+{
+  "version": "1.0",
+  "project_name": "SerialValueMatcher Native — Architecture Extension Roadmap",
+  "created_at": "2026-07-05T17:02:34+08:00",
+  "updated_at": "2026-07-06T17:12:03+08:00",
+  "current_phase": "execution",
+  "phase_history": [
+    {
+      "phase": "pre_research",
+      "entered_at": "2026-07-05T17:02:34+08:00",
+      "exited_at": "2026-07-05T17:28:00+08:00",
+      "exit_reason": "approved"
+    },
+    {
+      "phase": "requirements",
+      "entered_at": "2026-07-05T17:28:00+08:00",
+      "exited_at": "2026-07-06T08:15:30+08:00",
+      "exit_reason": "approved"
+    },
+    {
+      "phase": "draft",
+      "entered_at": "2026-07-06T08:15:30+08:00",
+      "exited_at": "2026-07-06T16:24:02+08:00",
+      "exit_reason": "approved"
+    },
+    {
+      "phase": "planning",
+      "entered_at": "2026-07-06T16:24:02+08:00",
+      "exited_at": "2026-07-06T16:59:44+08:00",
+      "exit_reason": "approved"
+    },
+    {
+      "phase": "execution",
+      "entered_at": "2026-07-06T16:59:44+08:00",
+      "exited_at": null,
+      "exit_reason": null
+    }
+  ],
+  "pre_research": {
+    "status": "completed",
+    "agents": {
+      "domain_research": {
+        "status": "completed",
+        "output_file": ".workflow/native-architecture-extension-roadmap/agent-outputs/agent-a-domain.md"
+      },
+      "competitive_analysis": {
+        "status": "completed",
+        "output_file": ".workflow/native-architecture-extension-roadmap/agent-outputs/agent-b-competitive.md"
+      },
+      "tech_ecosystem": {
+        "status": "completed",
+        "output_file": ".workflow/native-architecture-extension-roadmap/agent-outputs/agent-c-tech.md",
+        "deepwiki_called": true
+      }
+    },
+    "consolidation_status": "completed",
+    "completed_at": "2026-07-05T17:27:00+08:00"
+  },
+  "context_bus": {
+    "project_brief": ".workflow/native-architecture-extension-roadmap/context/project-brief.md",
+    "domain_knowledge": ".workflow/native-architecture-extension-roadmap/context/domain-knowledge.md",
+    "interview_transcript": ".workflow/native-architecture-extension-roadmap/context/interview-transcript.md",
+    "hypothesis_tracker": ".workflow/native-architecture-extension-roadmap/context/hypothesis-tracker.md",
+    "last_updated": "2026-07-06T16:59:44+08:00"
+  },
+  "requirements": {
+    "status": "completed",
+    "coverage_map": {
+      "project_vision": "clear",
+      "functional_scope": "clear",
+      "user_personas": "clear",
+      "domain_data_model": "clear",
+      "tech_stack": "clear",
+      "performance_scalability": "clear",
+      "security_compliance": "clear",
+      "integration": "clear",
+      "observability_operations": "partial",
+      "ux_design": "partial",
+      "development_quality": "clear",
+      "edge_cases_risk": "clear"
+    },
+    "questions_asked": 9,
+    "answers": [
+      {
+        "category": "project_vision,functional_scope",
+        "question": "请确认本轮总体目标边界：A 先架构整备，再接新功能；B 架构整备和一个新功能并行推进；C 只做架构规划，不实际整改源码；D 直接开发新功能，架构问题遇到再修。推荐 A。",
+        "answer": "A：先架构整备，再接新功能。先处理布局模型生产化、主窗口 controller 边界、Modbus executor 统一、storage 拆分边界、CMake/version 工具化；确认稳定后再进入新功能开发。",
+        "timestamp": "2026-07-05T18:45:23+08:00"
+      },
+      {
+        "category": "functional_scope,development_quality,edge_cases_risk",
+        "question": "本轮 Phase 4 实际整改的必做范围：A 核心五项整备；B UI/架构优先；C 后台能力优先；D 最大化整备。推荐 A。",
+        "answer": "ABCD 都得做。总体范围覆盖 UI/架构整备、后台能力整备、核心五项、异步写队列、会话证据包、命令序列基础、格式化/静态分析门禁等方向；后续需要通过分期控制风险。",
+        "timestamp": "2026-07-05T18:54:57+08:00"
+      },
+      {
+        "category": "development_quality,edge_cases_risk",
+        "question": "这些整改应该如何分期：A 三期稳态交付；B 两期交付；C 一期大整改；D 按风险动态排期。推荐 A。",
+        "answer": "A：三期稳态交付。一期 UI/架构地基，二期后台一致性，三期扩展能力、质量门禁和发布门禁增强。",
+        "timestamp": "2026-07-05T19:08:30+08:00"
+      },
+      {
+        "category": "user_personas,ux_design,security_compliance",
+        "question": "本轮架构整备应服务的核心用户旅程：A 单人本地开发测试工程师旅程；B 现场交付/运维旅程；C 产测/自动化旅程；D 三类都作为同等一等用户。推荐 A。",
+        "answer": "A：单人本地开发测试工程师旅程。用户在 Windows 本地打开 GitHub Actions 编译的 exe，连接串口设备，进行收发、日志观察、Modbus 扫描、候选值分析、规则验证、导出证据/报告。不做账号、多用户协作、云同步、权限体系。",
+        "timestamp": "2026-07-05T19:10:51+08:00"
+      },
+      {
+        "category": "domain_data_model,tech_stack,edge_cases_risk",
+        "question": "数据模型和持久化边界建议按哪个口径：A 兼容增量演进；B 重新设计存储模型；C 最小持久化整改；D 引入数据库。推荐 A。",
+        "answer": "倾向 D，引入数据库；但不确定是否必要。后期希望加入多种协议，同时仍希望软件保持很小体量。",
+        "timestamp": "2026-07-05T19:16:33+08:00"
+      },
+      {
+        "category": "domain_data_model,tech_stack,edge_cases_risk",
+        "question": "是否确认采用存储路线 E：兼容文件存储 + SQLite 决策门。短期保持现有 native 文件存储兼容，抽象 SessionStore 窄接口、补事务/恢复、设计 schema version；架构预留 SQLite backend，只有多协议数据、证据包、命令序列、跨会话查询确实需要索引和关联查询时才引入 SQLite。",
+        "answer": "E：兼容文件存储 + SQLite 决策门。",
+        "timestamp": "2026-07-05T19:18:52+08:00"
+      },
+      {
+        "category": "tech_stack,performance_scalability,development_quality,observability_operations",
+        "question": "技术栈和依赖治理是否采用 A2：10MB 预算下的保守 native 主线。继续 C++20 + Win32 native + CMake/CTest + GitHub Actions/Wine；Qt 不回流 native runtime；vcpkg 暂不引入 release 链路；GoogleTest/clang-format/clang-tidy 只作为开发/CI 工具，不进入 release 包；SQLite 不立即引入，仅作为后续可选 backend；release zip 和 exe 均以 10MB 为硬上限。",
+        "answer": "认可 A2，但 10MB 是绝对上限/红线，不是目标体量。不能因为设置了 10MB 就放宽当前编码和架构要求；当前小体量基线应继续保持，新增依赖和模块必须证明必要性、包体增量和架构收益。",
+        "timestamp": "2026-07-05T19:28:06+08:00"
+      },
+      {
+        "category": "security_compliance,edge_cases_risk,observability_operations",
+        "question": "安全与合规边界是否按 A：本地工具最小攻击面。不联网、不遥测、不上传数据；不做账号/权限/云同步；默认普通用户权限运行，不要求管理员；只访问用户选择的串口、文件和本地存储目录；导出报告不包含隐私路径或可选脱敏；危险写入/批量命令/广播 Modbus 写入后续必须有显式确认；CI 检查包体来源、依赖、签名/哈希和 forbidden runtime。",
+        "answer": "A：本地工具最小攻击面。",
+        "timestamp": "2026-07-05T19:35:05+08:00"
+      },
+      {
+        "category": "integration,security_compliance,edge_cases_risk,tech_stack",
+        "question": "未来 TCP/多协议边界怎么定：A 本轮不实现 TCP，但架构预留 transport 抽象；B 本轮加入 TCP Client 基础能力；C 本轮加入 TCP Client + TCP Server/模拟器；D 彻底不考虑 TCP。推荐 A。",
+        "answer": "A：本轮不实现 TCP，但架构预留 transport 抽象。当前 Phase 4 不做 TCP UI 和 TCP 功能；架构不写死串口，预留 SerialTransport/TcpClientTransport/ProtocolParser 等边界。未来做 Modbus TCP 或局域网 TCP 时，再单独开安全边界和验收门禁。",
+        "timestamp": "2026-07-06T08:14:13+08:00"
+      }
+    ]
+  },
+  "draft": {
+    "status": "approved",
+    "revision_count": 0,
+    "approved_at": "2026-07-06T16:24:02+08:00",
+    "completed_sections": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "cache_file": ".workflow/native-architecture-extension-roadmap/draft-cache.md"
+  },
+  "brainstorm": {
+    "bs1": {
+      "status": "completed",
+      "completed_at": "2026-07-05T19:38:18+08:00",
+      "artifact": ".workflow/native-architecture-extension-roadmap/brainstorm/bs-1.md"
+    },
+    "bs2": {
+      "status": "completed",
+      "completed_at": "2026-07-06T08:20:00+08:00",
+      "audit_score": null,
+      "artifact": ".workflow/native-architecture-extension-roadmap/brainstorm/bs-2.md"
+    },
+    "bs3": {
+      "status": "completed",
+      "completed_at": "2026-07-06T08:28:19+08:00",
+      "audit_score": null,
+      "artifact": ".workflow/native-architecture-extension-roadmap/brainstorm/bs-3.md"
+    },
+    "bs4": {
+      "status": "completed",
+      "completed_at": "2026-07-06T10:04:28+08:00",
+      "audit_score": null,
+      "artifact": ".workflow/native-architecture-extension-roadmap/brainstorm/bs-4.md"
+    },
+    "bs5": {
+      "status": "completed",
+      "completed_at": "2026-07-06T16:17:37+08:00",
+      "artifact": ".workflow/native-architecture-extension-roadmap/brainstorm/bs-5.md"
+    },
+    "bs6": {
+      "status": "completed",
+      "completed_at": "2026-07-06T16:27:22+08:00",
+      "artifact": ".workflow/native-architecture-extension-roadmap/brainstorm/bs-6.md"
+    },
+    "bs8": {
+      "status": "completed",
+      "completed_at": "2026-07-06T10:09:39+08:00",
+      "artifact": ".workflow/native-architecture-extension-roadmap/brainstorm/bs-8.md"
+    },
+    "bs7_count": 0
+  },
+  "planning": {
+    "status": "completed",
+    "total_phases": 3,
+    "total_tasks": 24,
+    "plans_written": {
+      "level_1": true,
+      "level_2_count": 3,
+      "level_3_count": 24
+    },
+    "consistency_report": ".workflow/native-architecture-extension-roadmap/plan-consistency-report.md",
+    "completed_at": "2026-07-06T16:39:03+08:00"
+  },
+  "execution": {
+    "status": "in_progress",
+    "started_at": "2026-07-06T16:59:44+08:00",
+    "current_phase_index": 1,
+    "current_task_index": 1,
+    "total_phases": 3,
+    "phases": {
+      "phase-1": {
+        "name": "UI / Architecture Foundation",
+        "status": "in_progress",
+        "completed_tasks": 1,
+        "total_tasks": 8,
+        "tasks": {
+          "task-01": {
+            "name": "Establish UI Baseline Gates",
+            "status": "completed",
+            "started_at": "2026-07-06T17:05:55+08:00",
+            "completed_at": "2026-07-06T17:12:03+08:00",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-1/tasks/task-01-establish-ui-baseline-gates.md"
+          },
+          "task-02": {
+            "name": "Promote Layout Model Contract",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-1/tasks/task-02-promote-layout-model-contract.md"
+          },
+          "task-03": {
+            "name": "Harden Layout Transaction and Paint Policy",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-1/tasks/task-03-harden-layout-transaction-and-paint-policy.md"
+          },
+          "task-04": {
+            "name": "Stabilize Workbench Split and Tab State",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-1/tasks/task-04-stabilize-workbench-split-and-tab-state.md"
+          },
+          "task-05": {
+            "name": "Define Main Window Shell Seams",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-1/tasks/task-05-define-main-window-shell-seams.md"
+          },
+          "task-06": {
+            "name": "Extract Serial Send Log UI Boundaries",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-1/tasks/task-06-extract-serial-send-log-ui-boundaries.md"
+          },
+          "task-07": {
+            "name": "Extract Modbus Analysis Preference UI Boundaries",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-1/tasks/task-07-extract-modbus-analysis-preference-ui-boundaries.md"
+          },
+          "task-08": {
+            "name": "Phase 1 UI Regression Closure",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-1/tasks/task-08-phase-1-ui-regression-closure.md"
+          }
+        }
+      },
+      "phase-2": {
+        "name": "Backend Consistency",
+        "status": "pending",
+        "completed_tasks": 0,
+        "total_tasks": 8,
+        "tasks": {
+          "task-01": {
+            "name": "Define Serial Write Queue Contract",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-2/tasks/task-01-define-serial-write-queue-contract.md"
+          },
+          "task-02": {
+            "name": "Integrate Async Write Queue",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-2/tasks/task-02-integrate-async-write-queue.md"
+          },
+          "task-03": {
+            "name": "Clarify Fake and PTY Stress Gates",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-2/tasks/task-03-clarify-fake-and-pty-stress-gates.md"
+          },
+          "task-04": {
+            "name": "Unify Native Modbus Worker Adapter",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-2/tasks/task-04-unify-native-modbus-worker-adapter.md"
+          },
+          "task-05": {
+            "name": "Normalize Modbus Result Semantics",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-2/tasks/task-05-normalize-modbus-result-semantics.md"
+          },
+          "task-06": {
+            "name": "Narrow Native Session Store Boundary",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-2/tasks/task-06-narrow-native-session-store-boundary.md"
+          },
+          "task-07": {
+            "name": "Add File Commit and Orphan Recovery",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-2/tasks/task-07-add-file-commit-and-orphan-recovery.md"
+          },
+          "task-08": {
+            "name": "Phase 2 Backend Regression Closure",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-2/tasks/task-08-phase-2-backend-regression-closure.md"
+          }
+        }
+      },
+      "phase-3": {
+        "name": "Extension Capability & Production Hardening",
+        "status": "pending",
+        "completed_tasks": 0,
+        "total_tasks": 8,
+        "tasks": {
+          "task-01": {
+            "name": "Define Session Evidence Model",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-3/tasks/task-01-define-session-evidence-model.md"
+          },
+          "task-02": {
+            "name": "Add Evidence Export and Redaction",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-3/tasks/task-02-add-evidence-export-and-redaction.md"
+          },
+          "task-03": {
+            "name": "Add Declarative Command Sequence Foundation",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-3/tasks/task-03-add-declarative-command-sequence-foundation.md"
+          },
+          "task-04": {
+            "name": "Add Dangerous Operation Confirmation and Audit",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-3/tasks/task-04-add-dangerous-operation-confirmation-and-audit.md"
+          },
+          "task-05": {
+            "name": "Single-Source Version Metadata",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-3/tasks/task-05-single-source-version-metadata.md"
+          },
+          "task-06": {
+            "name": "Harden Package Docs Dependency Gates",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-3/tasks/task-06-harden-package-docs-dependency-gates.md"
+          },
+          "task-07": {
+            "name": "Finalize Performance and Serial Evidence Gates",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-3/tasks/task-07-finalize-performance-and-serial-evidence-gates.md"
+          },
+          "task-08": {
+            "name": "Release Runbooks and Final Documentation",
+            "status": "pending",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-3/tasks/task-08-release-runbooks-and-final-documentation.md"
+          }
+        }
+      }
+    },
+    "deepwiki_cache": {
+      "phases_researched": [
+        "phase-1"
+      ],
+      "cache_dir": ".workflow/native-architecture-extension-roadmap/deepwiki-cache/"
+    },
+    "error_log": []
+  },
+  "bug_fixer": {
+    "reviews": []
+  },
+  "change_requests": []
+}
