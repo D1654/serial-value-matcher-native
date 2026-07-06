@@ -65,6 +65,10 @@ std::size_t NativeLogScrollState::noteHiddenLine() noexcept {
     return ++hiddenLineCount_;
 }
 
+bool NativeLogScrollState::shouldFollowAfterViewportChange(bool wasAtBottom) const noexcept {
+    return !paused_ && autoFollow_ && wasAtBottom;
+}
+
 NativeLogFollowDecision NativeLogScrollState::followDecision(bool atBottom) noexcept {
     if (atBottom) {
         noteAtBottom();

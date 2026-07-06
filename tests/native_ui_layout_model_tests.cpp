@@ -147,6 +147,24 @@ void promptAreaFollowsAvailableSideHeight() {
     }
 }
 
+void splitExtremesPreserveTabAndPromptReadability() {
+    const auto minimumSplit = svm::win32::calculateNativeMainLayoutModel({1212, 753, 1, 0});
+    const auto maximumSplit = svm::win32::calculateNativeMainLayoutModel({1212, 753, 10000, 2});
+
+    assert(svm::win32::nativeMainLayoutModelHasStableGeometry(minimumSplit));
+    assert(svm::win32::nativeMainLayoutModelHasStableGeometry(maximumSplit));
+    assert(minimumSplit.workbench.visibility.singleFormatRow);
+    assert(minimumSplit.workbench.visibility.singleSend);
+    assert(maximumSplit.workbench.visibility.fileFirstRow);
+    assert(maximumSplit.workbench.visibility.fileSecondRow);
+    assert(maximumSplit.workbench.page.height >= maximumSplit.metrics.row * 2);
+    assert(maximumSplit.logPanel.bounds.height >= maximumSplit.workbench.minimumLogHeight);
+    if (maximumSplit.sideHelp.visible) {
+        assert(maximumSplit.sideHelp.text.height >= 96);
+        assert(maximumSplit.sideHelp.frame.bottom() <= maximumSplit.status.statusText.y);
+    }
+}
+
 } // namespace
 
 int main() {
@@ -157,6 +175,7 @@ int main() {
     statusAndHelpStayAboveWindowBottom();
     allWorkbenchTabsKeepPageContract();
     promptAreaFollowsAvailableSideHeight();
+    splitExtremesPreserveTabAndPromptReadability();
 
     std::cout << "native_ui_layout_model_tests passed\n";
     return 0;

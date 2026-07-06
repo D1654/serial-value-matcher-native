@@ -22,6 +22,8 @@ struct NativeWorkbenchTabApplyPlan {
     bool redrawAfterApply = false;
 };
 
+int nativeNormalizeWorkbenchTabIndex(int tabIndex) noexcept;
+
 class NativeWorkbenchTabState final {
 public:
     std::uint64_t layoutRevision() const noexcept;
@@ -36,7 +38,7 @@ public:
         bool pageVisible,
         bool canRedraw,
         bool suspendRedraw) noexcept;
-    void finishApply(int tabIndex) noexcept;
+    void finishApply(int tabIndex, bool visibilityReady = true, bool pageVisible = true) noexcept;
 
     NativeWorkbenchHelpTopic helpTopicForTab(int tabIndex) const noexcept;
     bool shouldUpdateHelp(int tabIndex) const noexcept;
@@ -45,6 +47,8 @@ public:
 private:
     int activeTabIndex_ = -1;
     int lastHelpTabIndex_ = -1;
+    bool appliedVisibilityReady_ = false;
+    bool appliedPageVisible_ = false;
     std::uint64_t layoutRevision_ = 0;
     std::uint64_t appliedRevision_ = 0;
     std::uint64_t applyCount_ = 0;

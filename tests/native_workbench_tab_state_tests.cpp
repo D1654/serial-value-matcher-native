@@ -72,8 +72,42 @@ void hiddenPageStillRecordsAppliedTab() {
     const auto plan = state.beginApply(2, false, false, true, false);
     assert(!plan.skip);
     assert(!plan.showRequestedTab);
-    state.finishApply(2);
+    state.finishApply(2, false, false);
     assert(state.activeTabIndex() == 2);
+}
+
+void pageVisibilityChangeReappliesCurrentTab() {
+    svm::win32::NativeWorkbenchTabState state;
+    const auto hidden = state.beginApply(2, true, false, true, false);
+    assert(!hidden.skip);
+    assert(!hidden.showRequestedTab);
+    state.finishApply(2, true, false);
+
+    const auto visible = state.beginApply(2, true, true, true, false);
+    assert(!visible.skip);
+    assert(!visible.hidePreviousTab);
+    assert(visible.previousTabIndex == 2);
+    assert(visible.showRequestedTab);
+    state.finishApply(2, true, true);
+
+    const auto repeated = state.beginApply(2, true, true, true, false);
+    assert(repeated.skip);
+}
+
+void invalidTabIndexIsNormalized() {
+    svm::win32::NativeWorkbenchTabState state;
+    const auto low = state.beginApply(-12, true, true, true, false);
+    assert(!low.skip);
+    state.finishApply(-12);
+    assert(state.activeTabIndex() == 0);
+
+    const auto high = state.beginApply(99, true, true, true, false);
+    assert(!high.skip);
+    state.finishApply(99);
+    assert(state.activeTabIndex() == 4);
+
+    assert(svm::win32::nativeNormalizeWorkbenchTabIndex(-1) == 0);
+    assert(svm::win32::nativeNormalizeWorkbenchTabIndex(99) == 4);
 }
 
 void helpTopicAndUpdateStateTrackTabs() {
@@ -99,6 +133,8 @@ int main() {
     layoutChangeHidesAllControlsAndMayRequestRedraw();
     switchingTabsHidesPreviousTabOnly();
     hiddenPageStillRecordsAppliedTab();
+    pageVisibilityChangeReappliesCurrentTab();
+    invalidTabIndexIsNormalized();
     helpTopicAndUpdateStateTrackTabs();
 
     std::cout << "native_workbench_tab_state_tests passed\n";

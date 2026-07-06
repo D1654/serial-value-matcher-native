@@ -337,13 +337,13 @@ void NativeMainWindow::applyWorkbenchTabVisibility(int tabIndex) {
     }
 
     if (!plan.showRequestedTab) {
-        workbenchTabState_.finishApply(tabIndex);
+        workbenchTabState_.finishApply(tabIndex, workbenchVisibilityReady_, workbenchVisibility_.pageVisible);
         return;
     }
 
     setWorkbenchTabControlsVisible(tabIndex, true);
 
-    workbenchTabState_.finishApply(tabIndex);
+    workbenchTabState_.finishApply(tabIndex, workbenchVisibilityReady_, workbenchVisibility_.pageVisible);
     scheduleWorkbenchTabRepaint();
 }
 

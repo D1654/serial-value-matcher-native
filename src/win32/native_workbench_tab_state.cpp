@@ -1,6 +1,17 @@
 #include "win32/native_workbench_tab_state.h"
 
+#include <algorithm>
+
 namespace svm::win32 {
+namespace {
+
+inline constexpr int kWorkbenchTabCount = 5;
+
+} // namespace
+
+int nativeNormalizeWorkbenchTabIndex(int tabIndex) noexcept {
+    return std::clamp(tabIndex, 0, kWorkbenchTabCount - 1);
+}
 
 std::uint64_t NativeWorkbenchTabState::layoutRevision() const noexcept {
     return layoutRevision_;
@@ -28,7 +39,11 @@ NativeWorkbenchTabApplyPlan NativeWorkbenchTabState::beginApply(
     bool pageVisible,
     bool canRedraw,
     bool suspendRedraw) noexcept {
-    if (activeTabIndex_ == tabIndex && appliedRevision_ == layoutRevision_) {
+    const int normalizedTabIndex = nativeNormalizeWorkbenchTabIndex(tabIndex);
+    if (activeTabIndex_ == normalizedTabIndex
+        && appliedRevision_ == layoutRevision_
+        && appliedVisibilityReady_ == visibilityReady
+        && appliedPageVisible_ == pageVisible) {
         return {.skip = true};
     }
 
@@ -36,20 +51,22 @@ NativeWorkbenchTabApplyPlan NativeWorkbenchTabState::beginApply(
     NativeWorkbenchTabApplyPlan plan;
     plan.layoutChanged = appliedRevision_ != layoutRevision_;
     plan.hideAllControls = plan.layoutChanged;
-    plan.hidePreviousTab = !plan.layoutChanged && activeTabIndex_ >= 0 && activeTabIndex_ != tabIndex;
+    plan.hidePreviousTab = !plan.layoutChanged && activeTabIndex_ >= 0 && activeTabIndex_ != normalizedTabIndex;
     plan.previousTabIndex = activeTabIndex_;
     plan.showRequestedTab = visibilityReady && pageVisible;
     plan.redrawAfterApply = plan.layoutChanged && !suspendRedraw && canRedraw;
     return plan;
 }
 
-void NativeWorkbenchTabState::finishApply(int tabIndex) noexcept {
-    activeTabIndex_ = tabIndex;
+void NativeWorkbenchTabState::finishApply(int tabIndex, bool visibilityReady, bool pageVisible) noexcept {
+    activeTabIndex_ = nativeNormalizeWorkbenchTabIndex(tabIndex);
     appliedRevision_ = layoutRevision_;
+    appliedVisibilityReady_ = visibilityReady;
+    appliedPageVisible_ = pageVisible;
 }
 
 NativeWorkbenchHelpTopic NativeWorkbenchTabState::helpTopicForTab(int tabIndex) const noexcept {
-    switch (tabIndex) {
+    switch (nativeNormalizeWorkbenchTabIndex(tabIndex)) {
     case 1:
         return NativeWorkbenchHelpTopic::Quick;
     case 2:

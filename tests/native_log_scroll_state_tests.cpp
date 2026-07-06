@@ -77,6 +77,22 @@ void clearContentKeepsPauseButResetsHiddenCount() {
     assert(!state.historyReadNoticeShown());
 }
 
+void viewportChangeOnlyFollowsWhenStreamingAtBottom() {
+    svm::win32::NativeLogScrollState state;
+    assert(state.shouldFollowAfterViewportChange(true));
+    assert(!state.shouldFollowAfterViewportChange(false));
+
+    state.markHistoryRead();
+    assert(!state.shouldFollowAfterViewportChange(true));
+
+    state.followLatest();
+    state.pause();
+    assert(!state.shouldFollowAfterViewportChange(true));
+
+    state.resume();
+    assert(state.shouldFollowAfterViewportChange(true));
+}
+
 } // namespace
 
 int main() {
@@ -84,6 +100,7 @@ int main() {
     followDecisionTracksUserHistoryReading();
     explicitFollowAndResetRestoreStreamingMode();
     clearContentKeepsPauseButResetsHiddenCount();
+    viewportChangeOnlyFollowsWhenStreamingAtBottom();
 
     std::cout << "native_log_scroll_state_tests passed\n";
     return 0;

@@ -6,6 +6,7 @@
 #include "win32/native_layout_model.h"
 #include "win32/native_layout_transaction.h"
 #include "win32/native_layout_metrics.h"
+#include "win32/native_log_view.h"
 #include "win32/native_paint_policy.h"
 #include "win32/native_ui_preferences.h"
 
@@ -259,6 +260,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     };
     const int sideWidth = layoutModel.serialPanel.bounds.width;
     const int sideX = layoutModel.serialPanel.bounds.x;
+    const bool logWasAtBottom = nativeLogIsAtBottom(receiveLog_);
     currentWorkbenchHeight_ = layoutModel.workbench.workbenchHeight;
     workbenchSplitterRect_ = toWinRect(layoutModel.workbench.splitter);
 
@@ -642,6 +644,9 @@ void NativeMainWindow::layoutControls(int width, int height) {
     }
     moveControlRect(statusText_, layoutModel.status.statusText);
     statusTransaction.commit();
+    if (logScrollState_.shouldFollowAfterViewportChange(logWasAtBottom)) {
+        nativeLogScrollToBottom(receiveLog_);
+    }
 }
 
 } // namespace svm::win32

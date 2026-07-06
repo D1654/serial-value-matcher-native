@@ -25,6 +25,7 @@ public:
     void markHistoryRead() noexcept;
     void noteAtBottom() noexcept;
     std::size_t noteHiddenLine() noexcept;
+    bool shouldFollowAfterViewportChange(bool wasAtBottom) const noexcept;
 
     NativeLogFollowDecision followDecision(bool atBottom) noexcept;
 
