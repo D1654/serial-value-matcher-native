@@ -71,13 +71,32 @@ bool testPostFailureKeepsPendingWork() {
         && expect(scheduler.stats().postFailures == 1, "post failure should be counted");
 }
 
+bool testSettleCoalescesWithPendingResizeAndPostsWhenIdle() {
+    svm::win32::NativeFrameScheduler scheduler;
+    const bool resizePost = scheduler.requestResize(900, 640);
+    const bool settlePost = scheduler.requestSettle();
+    const svm::win32::NativeFrameSnapshot combinedFrame = scheduler.consumeFrame();
+    const bool idleSettlePost = scheduler.requestSettle();
+    const svm::win32::NativeFrameSnapshot settleFrame = scheduler.consumeFrame();
+
+    return expect(resizePost, "resize should request a post")
+        && expect(!settlePost, "settle should coalesce with pending resize")
+        && expect(nativeFrameHasReason(combinedFrame.reasons, svm::win32::NativeFrameReason::Resize), "combined frame should include resize")
+        && expect(nativeFrameHasReason(combinedFrame.reasons, svm::win32::NativeFrameReason::Settle), "combined frame should include settle")
+        && expect(idleSettlePost, "idle settle should request a post")
+        && expect(nativeFrameHasReason(settleFrame.reasons, svm::win32::NativeFrameReason::Settle), "idle settle frame should include settle")
+        && expect(scheduler.stats().postRequests == 2, "settle sequence should post twice")
+        && expect(scheduler.stats().coalescedRequests == 1, "settle sequence should coalesce once");
+}
+
 } // namespace
 
 int main() {
     if (!testResizeCoalescesToLatestClientSize()
         || !testSplitterDragPreservesLatestTarget()
         || !testMultipleReasonsShareOnePostedFrame()
-        || !testPostFailureKeepsPendingWork()) {
+        || !testPostFailureKeepsPendingWork()
+        || !testSettleCoalescesWithPendingResizeAndPostsWhenIdle()) {
         return 1;
     }
 

@@ -145,11 +145,13 @@ void NativeMainWindow::processNativeFrame() {
         preferredWorkbenchHeight_ = frame.workbenchHeight;
     }
 
+    bool resized = false;
     if (nativeFrameHasReason(frame.reasons, NativeFrameReason::SplitterDrag)) {
         relayoutCurrentClient(false);
     } else if (nativeFrameHasReason(frame.reasons, NativeFrameReason::Resize) && frame.hasClientSize) {
         layoutControls(frame.clientWidth, frame.clientHeight);
-        nativeRedrawFullRefresh(window_);
+        nativeRedrawResize(window_, trackingWindowSizeMove_);
+        resized = true;
     }
 
     if (nativeFrameHasReason(frame.reasons, NativeFrameReason::TabSwitch) && workbenchTabRepaintPending_) {
@@ -160,6 +162,9 @@ void NativeMainWindow::processNativeFrame() {
     }
     if (nativeFrameHasReason(frame.reasons, NativeFrameReason::Status)) {
         updateStatusSegments();
+    }
+    if (nativeFrameHasReason(frame.reasons, NativeFrameReason::Settle) && !resized) {
+        nativeRedrawFullRefresh(window_);
     }
 }
 

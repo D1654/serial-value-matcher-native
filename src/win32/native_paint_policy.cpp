@@ -8,6 +8,12 @@ UINT nativeLiveRegionRedrawFlags() noexcept {
     return RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_NOERASE;
 }
 
+UINT nativeResizeRedrawFlags(bool liveResize) noexcept {
+    return liveResize
+        ? nativeLiveRegionRedrawFlags()
+        : (RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+}
+
 UINT nativeFullRefreshRedrawFlags() noexcept {
     return RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW;
 }
@@ -46,6 +52,10 @@ bool nativeRedrawFlagsEraseBackground(UINT flags) noexcept {
     return (flags & RDW_ERASE) != 0 && (flags & RDW_NOERASE) == 0;
 }
 
+bool nativeShouldSuppressBackgroundErase(bool liveResize, bool draggingSplitter) noexcept {
+    return liveResize || draggingSplitter;
+}
+
 void nativeSetWindowRedraw(HWND window, bool enabled) {
     if (window != nullptr) {
         SendMessageW(window, WM_SETREDRAW, enabled ? TRUE : FALSE, 0);
@@ -55,6 +65,12 @@ void nativeSetWindowRedraw(HWND window, bool enabled) {
 void nativeRedrawLiveRegion(HWND window, const RECT* rect) {
     if (window != nullptr) {
         RedrawWindow(window, rect, nullptr, nativeLiveRegionRedrawFlags());
+    }
+}
+
+void nativeRedrawResize(HWND window, bool liveResize) {
+    if (window != nullptr) {
+        RedrawWindow(window, nullptr, nullptr, nativeResizeRedrawFlags(liveResize));
     }
 }
 

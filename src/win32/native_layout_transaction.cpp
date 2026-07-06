@@ -11,7 +11,7 @@ NativeLayoutTransaction::NativeLayoutTransaction(BOOL repaint)
 }
 
 void NativeLayoutTransaction::move(HWND control, int x, int y, int width, int height) {
-    if (control == nullptr) {
+    if (control == nullptr || committed_) {
         return;
     }
 
@@ -29,7 +29,7 @@ void NativeLayoutTransaction::move(HWND control, int x, int y, int width, int he
 }
 
 void NativeLayoutTransaction::moveTop(HWND control, int x, int y, int width, int height) {
-    if (control == nullptr) {
+    if (control == nullptr || committed_) {
         return;
     }
 
@@ -55,7 +55,7 @@ void NativeLayoutTransaction::moveTop(HWND control, int x, int y, int width, int
 }
 
 void NativeLayoutTransaction::show(HWND control, bool visible) {
-    if (control == nullptr) {
+    if (control == nullptr || committed_) {
         return;
     }
 
@@ -68,7 +68,7 @@ void NativeLayoutTransaction::show(HWND control, bool visible) {
 }
 
 void NativeLayoutTransaction::showFast(HWND control, bool visible) {
-    if (control == nullptr) {
+    if (control == nullptr || committed_) {
         return;
     }
 
@@ -81,6 +81,12 @@ void NativeLayoutTransaction::showFast(HWND control, bool visible) {
 }
 
 NativeLayoutTransactionStats NativeLayoutTransaction::commit() {
+    ++stats_.commitCalls;
+    if (committed_) {
+        ++stats_.duplicateCommits;
+        return stats_;
+    }
+    committed_ = true;
     commitMoveOperations();
     commitVisibilityOperations();
     moves_.clear();
@@ -93,6 +99,13 @@ const NativeLayoutTransactionStats& NativeLayoutTransaction::stats() const noexc
 }
 
 bool NativeLayoutTransaction::applyMoveDirect(const MoveOperation& operation) {
+    if (operation.insertAfter == nullptr
+        && (operation.flags & (SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_HIDEWINDOW)) == 0
+        && nativeControlGeometryMatches(operation.control, operation.x, operation.y, operation.width, operation.height)) {
+        ++stats_.skippedMoves;
+        return true;
+    }
+
     if (SetWindowPos(
             operation.control,
             operation.insertAfter,

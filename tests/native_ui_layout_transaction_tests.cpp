@@ -151,6 +151,29 @@ bool testBatchUsesDeferredPositioning() {
         && expect(svm::win32::nativeControlGeometryMatches(windows.childB, 70, 18, 40, 24), "batch child B geometry should match");
 }
 
+bool testDuplicateCommitDoesNotReplayOperations() {
+    TestWindows windows;
+    if (!expect(windows.valid(), "test windows should be created")) {
+        return false;
+    }
+
+    svm::win32::NativeLayoutTransaction transaction(FALSE);
+    transaction.move(windows.childA, 20, 25, 44, 31);
+    const svm::win32::NativeLayoutTransactionStats firstStats = transaction.commit();
+    const svm::win32::NativeLayoutTransactionStats secondStats = transaction.commit();
+    transaction.move(windows.childA, 70, 80, 44, 31);
+    const svm::win32::NativeLayoutTransactionStats thirdStats = transaction.commit();
+
+    return expect(firstStats.commitCalls == 1, "first commit should be counted")
+        && expect(firstStats.duplicateCommits == 0, "first commit should not be duplicate")
+        && expect(secondStats.commitCalls == 2, "second commit should be counted")
+        && expect(secondStats.duplicateCommits == 1, "second commit should be duplicate")
+        && expect(thirdStats.commitCalls == 3, "third commit should be counted")
+        && expect(thirdStats.duplicateCommits == 2, "third commit should be duplicate")
+        && expect(thirdStats.appliedMoves == 1, "duplicate commits should not replay moves")
+        && expect(svm::win32::nativeControlGeometryMatches(windows.childA, 20, 25, 44, 31), "move after commit should be ignored");
+}
+
 bool testVisibilityDiffing() {
     TestWindows windows;
     if (!expect(windows.valid(), "test windows should be created")) {
@@ -201,6 +224,7 @@ int main() {
     if (!testChangedGeometryMove()
         || !testRedundantMoveIsSkipped()
         || !testBatchUsesDeferredPositioning()
+        || !testDuplicateCommitDoesNotReplayOperations()
         || !testVisibilityDiffing()
         || !testMoveTopShowsHiddenControl()) {
         return 1;

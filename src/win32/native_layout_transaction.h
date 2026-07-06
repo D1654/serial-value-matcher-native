@@ -15,6 +15,8 @@
 namespace svm::win32 {
 
 struct NativeLayoutTransactionStats {
+    int commitCalls = 0;
+    int duplicateCommits = 0;
     int requestedMoves = 0;
     int appliedMoves = 0;
     int skippedMoves = 0;
@@ -66,6 +68,7 @@ private:
     NativeLayoutTransactionStats stats_;
     std::vector<MoveOperation> moves_;
     std::vector<VisibilityOperation> visibility_;
+    bool committed_ = false;
 };
 
 } // namespace svm::win32

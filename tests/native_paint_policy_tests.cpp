@@ -40,6 +40,23 @@ bool testFullRefreshIsExplicitlySynchronous() {
         && expect(svm::win32::nativeRedrawFlagsEraseBackground(flags), "full refresh should erase background");
 }
 
+bool testResizePolicySeparatesLiveAndSettledRefresh() {
+    const UINT liveFlags = svm::win32::nativeResizeRedrawFlags(true);
+    const UINT settledFlags = svm::win32::nativeResizeRedrawFlags(false);
+    return expect((liveFlags & RDW_NOERASE) != 0, "live resize should avoid erase")
+        && expect(!svm::win32::nativeRedrawFlagsForceImmediatePaint(liveFlags), "live resize should not force paint")
+        && expect(!svm::win32::nativeRedrawFlagsEraseBackground(liveFlags), "live resize should not erase")
+        && expect((settledFlags & RDW_ERASE) != 0, "settled resize should erase")
+        && expect(svm::win32::nativeRedrawFlagsForceImmediatePaint(settledFlags), "settled resize should force paint")
+        && expect(svm::win32::nativeRedrawFlagsEraseBackground(settledFlags), "settled resize should erase background");
+}
+
+bool testBackgroundEraseSuppressionOnlyForLiveLayout() {
+    return expect(svm::win32::nativeShouldSuppressBackgroundErase(true, false), "live resize should suppress erase")
+        && expect(svm::win32::nativeShouldSuppressBackgroundErase(false, true), "splitter drag should suppress erase")
+        && expect(!svm::win32::nativeShouldSuppressBackgroundErase(false, false), "idle paint should allow normal erase");
+}
+
 bool testDraggingWorkbenchPoliciesAvoidSynchronousErase() {
     const UINT tabFlags = svm::win32::nativeWorkbenchTabRedrawFlags(true);
     const UINT areaFlags = svm::win32::nativeWorkbenchAreaRedrawFlags(true);
@@ -64,6 +81,8 @@ bool testLogFlushDoesNotForceImmediatePaint() {
 int main() {
     if (!testLivePolicyAvoidsEraseAndImmediatePaint()
         || !testFullRefreshIsExplicitlySynchronous()
+        || !testResizePolicySeparatesLiveAndSettledRefresh()
+        || !testBackgroundEraseSuppressionOnlyForLiveLayout()
         || !testDraggingWorkbenchPoliciesAvoidSynchronousErase()
         || !testLogFlushDoesNotForceImmediatePaint()) {
         return 1;

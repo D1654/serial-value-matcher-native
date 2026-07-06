@@ -3,6 +3,7 @@
 #if defined(_WIN32)
 
 #include "win32/native_layout_metrics.h"
+#include "win32/native_paint_policy.h"
 
 #include <algorithm>
 
@@ -40,8 +41,14 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         return 0;
     case WM_EXITSIZEMOVE:
         trackingWindowSizeMove_ = false;
+        postNativeFrameMessage(frameScheduler_.requestSettle());
         saveUiPreferences();
         return 0;
+    case WM_ERASEBKGND:
+        if (nativeShouldSuppressBackgroundErase(trackingWindowSizeMove_, draggingWorkbenchSplitter_)) {
+            return 1;
+        }
+        break;
     case WM_PAINT:
         paintLayoutChrome();
         return 0;
