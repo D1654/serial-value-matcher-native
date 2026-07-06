@@ -17,6 +17,7 @@
 #include "win32/native_frame_scheduler.h"
 #include "win32/native_log_model.h"
 #include "win32/native_log_scroll_state.h"
+#include "win32/native_main_window_context.h"
 #include "win32/native_modbus_scan_ui_state.h"
 #include "win32/native_modbus_scan_worker.h"
 #include "win32/native_reconnect_state.h"
@@ -38,9 +39,6 @@
 #include <vector>
 
 namespace svm::win32 {
-
-inline constexpr UINT kNativeUiFrameMessage = WM_APP + 17;
-inline constexpr UINT kNativeWorkbenchTabRepaintMessage = WM_APP + 20;
 
 class NativeMainWindow final {
 public:
@@ -72,12 +70,20 @@ private:
 
     static LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
 
+    // Shell/lifecycle: top-level HWND ownership, message loop, and process quit coordination.
+    NativeMainWindowShellContext shellContext() const noexcept;
     LRESULT handleMessage(UINT message, WPARAM wParam, LPARAM lParam);
     LRESULT handleCreateMessage();
+    LRESULT handleDestroyMessage();
+
+    // Message categories: classify Win32 notifications before invoking feature behavior.
     std::optional<LRESULT> handleNotifyMessage(LPARAM lParam);
     LRESULT handleEditColorMessage(WPARAM wParam);
     std::optional<LRESULT> handleStaticColorMessage(WPARAM wParam, LPARAM lParam);
     LRESULT handleButtonColorMessage(WPARAM wParam);
+    std::optional<LRESULT> handleTimerMessage(WPARAM wParam);
+
+    // Command routing: menus/controls stay in the shell, feature behavior stays in feature methods.
     std::optional<LRESULT> handleCommandMessage(WPARAM wParam);
     std::optional<LRESULT> handleQuickCommand(WORD commandId, WORD notificationCode);
     std::optional<LRESULT> handleControlCommand(WORD commandId, WORD notificationCode);
@@ -93,8 +99,8 @@ private:
     std::optional<LRESULT> handleAnalysisMenuCommand(WORD commandId);
     std::optional<LRESULT> handleViewMenuCommand(WORD commandId);
     std::optional<LRESULT> handleHelpMenuCommand(WORD commandId);
-    std::optional<LRESULT> handleTimerMessage(WPARAM wParam);
-    LRESULT handleDestroyMessage();
+
+    // HWND/control ownership remains here; controller extraction later receives borrowed context only.
     void createMenus();
     void createControls();
     void populateSerialOptionControls();

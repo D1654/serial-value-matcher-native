@@ -211,13 +211,13 @@
     "status": "in_progress",
     "started_at": "2026-07-06T16:59:44+08:00",
     "current_phase_index": 1,
-    "current_task_index": 4,
+    "current_task_index": 5,
     "total_phases": 3,
     "phases": {
       "phase-1": {
         "name": "UI / Architecture Foundation",
         "status": "in_progress",
-        "completed_tasks": 4,
+        "completed_tasks": 5,
         "total_tasks": 8,
         "tasks": {
           "task-01": {
@@ -250,7 +250,9 @@
           },
           "task-05": {
             "name": "Define Main Window Shell Seams",
-            "status": "pending",
+            "status": "completed",
+            "started_at": "2026-07-06T18:16:20+08:00",
+            "completed_at": "2026-07-06T18:24:03+08:00",
             "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-1/tasks/task-05-define-main-window-shell-seams.md"
           },
           "task-06": {
@@ -373,7 +375,15 @@
       ],
       "cache_dir": ".workflow/native-architecture-extension-roadmap/deepwiki-cache/"
     },
-    "error_log": []
+    "error_log": [
+      {
+        "phase": "phase-1",
+        "task": "task-05",
+        "strike": 1,
+        "error": "After rebuilding build-codex, native_workbench_tab_state_tests failed because helpTopicForTab(99) still expected the pre-normalization default tab.",
+        "resolution": "Aligned help topic/update state with nativeNormalizeWorkbenchTabIndex and updated the focused test expectation; targeted test passed in build-codex and build-windows-native-mingw."
+      }
+    ]
   },
   "bug_fixer": {
     "reviews": []

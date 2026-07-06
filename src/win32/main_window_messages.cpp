@@ -22,6 +22,7 @@ HBRUSH formBackgroundBrush() {
 } // namespace
 
 LRESULT NativeMainWindow::handleCreateMessage() {
+    const auto context = shellContext();
     createMenus();
     createControls();
     if (!store_.open(defaultStoreDirectory())) {
@@ -38,8 +39,8 @@ LRESULT NativeMainWindow::handleCreateMessage() {
     if (const auto verificationRun = store_.latestRuleVerificationRun(); verificationRun.has_value()) {
         candidateCacheState_.setLatestVerificationRunId(verificationRun->verificationRunId);
     }
-    SetTimer(window_, IDT_SERIAL_POLL, 50, nullptr);
-    SetTimer(window_, IDT_STATUS_CLOCK, 1000, nullptr);
+    SetTimer(context.window, IDT_SERIAL_POLL, 50, nullptr);
+    SetTimer(context.window, IDT_STATUS_CLOCK, 1000, nullptr);
     return 0;
 }
 
@@ -118,18 +119,10 @@ std::optional<LRESULT> NativeMainWindow::handleTimerMessage(WPARAM wParam) {
 }
 
 LRESULT NativeMainWindow::handleDestroyMessage() {
+    const auto context = shellContext();
     saveUiPreferences();
-    for (UINT_PTR timerId : {
-             IDT_SERIAL_POLL,
-             IDT_RECONNECT,
-             IDT_LOG_FILTER,
-             IDT_TIMED_SEND,
-             IDT_FILE_SEND,
-             IDT_STATUS_CLOCK,
-             IDT_LOG_FLUSH,
-             IDT_UI_PREFERENCES_SAVE,
-         }) {
-        KillTimer(window_, timerId);
+    for (const UINT_PTR timerId : kNativeMainWindowShellTimerIds) {
+        KillTimer(context.window, timerId);
     }
     stopFileSend({});
     requestCancelModbusScan();

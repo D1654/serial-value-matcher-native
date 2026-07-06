@@ -36,13 +36,19 @@ std::wstring formatLogCacheLimit(std::size_t charLimit) {
 std::optional<LRESULT> NativeMainWindow::handleCommandMessage(WPARAM wParam) {
     const WORD commandId = LOWORD(wParam);
     const WORD notificationCode = HIWORD(wParam);
-    if (const auto result = handleQuickCommand(commandId, notificationCode); result.has_value()) {
-        return result;
+
+    switch (nativeMainCommandDomain(commandId, quickSendButtons_.size())) {
+    case NativeMainCommandDomain::quick:
+        return handleQuickCommand(commandId, notificationCode);
+    case NativeMainCommandDomain::control:
+        return handleControlCommand(commandId, notificationCode);
+    case NativeMainCommandDomain::menu:
+        return handleMenuCommand(commandId);
+    case NativeMainCommandDomain::unknown:
+        return std::nullopt;
     }
-    if (const auto result = handleControlCommand(commandId, notificationCode); result.has_value()) {
-        return result;
-    }
-    return handleMenuCommand(commandId);
+
+    return std::nullopt;
 }
 
 std::optional<LRESULT> NativeMainWindow::handleQuickCommand(WORD commandId, WORD notificationCode) {
@@ -62,19 +68,22 @@ std::optional<LRESULT> NativeMainWindow::handleQuickCommand(WORD commandId, WORD
 }
 
 std::optional<LRESULT> NativeMainWindow::handleControlCommand(WORD commandId, WORD notificationCode) {
-    if (const auto result = handleSerialControlCommand(commandId, notificationCode); result.has_value()) {
-        return result;
+    switch (nativeMainControlCommandDomain(commandId)) {
+    case NativeMainControlCommandDomain::serial:
+        return handleSerialControlCommand(commandId, notificationCode);
+    case NativeMainControlCommandDomain::log:
+        return handleLogControlCommand(commandId, notificationCode);
+    case NativeMainControlCommandDomain::send:
+        return handleSendControlCommand(commandId, notificationCode);
+    case NativeMainControlCommandDomain::file:
+        return handleFileControlCommand(commandId, notificationCode);
+    case NativeMainControlCommandDomain::analysis:
+        return handleAnalysisControlCommand(commandId);
+    case NativeMainControlCommandDomain::unknown:
+        return std::nullopt;
     }
-    if (const auto result = handleLogControlCommand(commandId, notificationCode); result.has_value()) {
-        return result;
-    }
-    if (const auto result = handleSendControlCommand(commandId, notificationCode); result.has_value()) {
-        return result;
-    }
-    if (const auto result = handleFileControlCommand(commandId, notificationCode); result.has_value()) {
-        return result;
-    }
-    return handleAnalysisControlCommand(commandId);
+
+    return std::nullopt;
 }
 
 std::optional<LRESULT> NativeMainWindow::handleSerialControlCommand(WORD commandId, WORD notificationCode) {
@@ -283,22 +292,24 @@ std::optional<LRESULT> NativeMainWindow::handleAnalysisControlCommand(WORD comma
 }
 
 std::optional<LRESULT> NativeMainWindow::handleMenuCommand(WORD commandId) {
-    if (const auto result = handleFileMenuCommand(commandId); result.has_value()) {
-        return result;
+    switch (nativeMainMenuCommandDomain(commandId)) {
+    case NativeMainMenuCommandDomain::file:
+        return handleFileMenuCommand(commandId);
+    case NativeMainMenuCommandDomain::serial:
+        return handleSerialMenuCommand(commandId);
+    case NativeMainMenuCommandDomain::tools:
+        return handleToolsMenuCommand(commandId);
+    case NativeMainMenuCommandDomain::analysis:
+        return handleAnalysisMenuCommand(commandId);
+    case NativeMainMenuCommandDomain::view:
+        return handleViewMenuCommand(commandId);
+    case NativeMainMenuCommandDomain::help:
+        return handleHelpMenuCommand(commandId);
+    case NativeMainMenuCommandDomain::unknown:
+        return std::nullopt;
     }
-    if (const auto result = handleSerialMenuCommand(commandId); result.has_value()) {
-        return result;
-    }
-    if (const auto result = handleToolsMenuCommand(commandId); result.has_value()) {
-        return result;
-    }
-    if (const auto result = handleAnalysisMenuCommand(commandId); result.has_value()) {
-        return result;
-    }
-    if (const auto result = handleViewMenuCommand(commandId); result.has_value()) {
-        return result;
-    }
-    return handleHelpMenuCommand(commandId);
+
+    return std::nullopt;
 }
 
 std::optional<LRESULT> NativeMainWindow::handleFileMenuCommand(WORD commandId) {

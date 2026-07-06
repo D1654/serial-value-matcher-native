@@ -117,12 +117,14 @@ void helpTopicAndUpdateStateTrackTabs() {
     assert(state.helpTopicForTab(2) == svm::win32::NativeWorkbenchHelpTopic::File);
     assert(state.helpTopicForTab(3) == svm::win32::NativeWorkbenchHelpTopic::Scan);
     assert(state.helpTopicForTab(4) == svm::win32::NativeWorkbenchHelpTopic::Settings);
-    assert(state.helpTopicForTab(99) == svm::win32::NativeWorkbenchHelpTopic::Single);
+    assert(state.helpTopicForTab(99) == svm::win32::NativeWorkbenchHelpTopic::Settings);
 
     assert(state.shouldUpdateHelp(3));
     state.markHelpUpdated(3);
     assert(!state.shouldUpdateHelp(3));
     assert(state.shouldUpdateHelp(4));
+    state.markHelpUpdated(99);
+    assert(!state.shouldUpdateHelp(4));
 }
 
 } // namespace

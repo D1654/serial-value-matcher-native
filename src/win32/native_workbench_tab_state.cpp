@@ -81,11 +81,11 @@ NativeWorkbenchHelpTopic NativeWorkbenchTabState::helpTopicForTab(int tabIndex) 
 }
 
 bool NativeWorkbenchTabState::shouldUpdateHelp(int tabIndex) const noexcept {
-    return lastHelpTabIndex_ != tabIndex;
+    return lastHelpTabIndex_ != nativeNormalizeWorkbenchTabIndex(tabIndex);
 }
 
 void NativeWorkbenchTabState::markHelpUpdated(int tabIndex) noexcept {
-    lastHelpTabIndex_ = tabIndex;
+    lastHelpTabIndex_ = nativeNormalizeWorkbenchTabIndex(tabIndex);
 }
 
 } // namespace svm::win32

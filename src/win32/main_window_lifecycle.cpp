@@ -19,6 +19,14 @@ const wchar_t* tx(T id) {
 
 } // namespace
 
+NativeMainWindowShellContext NativeMainWindow::shellContext() const noexcept {
+    return {
+        instance_,
+        window_,
+        menu_,
+    };
+}
+
 bool NativeMainWindow::create(HINSTANCE instance) {
     instance_ = instance;
 
@@ -47,13 +55,14 @@ bool NativeMainWindow::create(HINSTANCE instance) {
         nullptr,
         instance_,
         this);
-    return window_ != nullptr;
+    return nativeMainWindowShellReady(shellContext());
 }
 
 void NativeMainWindow::show(int commandShow) {
-    ShowWindow(window_, commandShow);
+    const auto context = shellContext();
+    ShowWindow(context.window, commandShow);
     processNativeFrame();
-    nativeRedrawFirstShow(window_);
+    nativeRedrawFirstShow(context.window);
 }
 
 int NativeMainWindow::runMessageLoop() {
