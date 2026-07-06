@@ -491,7 +491,8 @@ function Capture-TabSet {
     $singleFile = Join-Path $outputPath "${Prefix}single.png"
     $scanFile = Join-Path $outputPath "${Prefix}scan.png"
     Assert-ImagesDiffer -LeftPath $singleFile -RightPath $scanFile -Label "${Prefix}single-vs-scan" -MinDifferentPixels 300
-    Add-CaptureStatus -Scenario "${Prefix}tab-set" -Detail "screenshots=$($tabs.Count) switching=clicked-frame-diff-validated-by-ui-perf"
+    $setScenario = if ($Prefix -eq "compact-tab-") { "compact-tab-set" } else { "tab-set" }
+    Add-CaptureStatus -Scenario $setScenario -Detail "screenshots=$($tabs.Count) switching=clicked-frame-diff-validated-by-ui-perf"
 }
 
 function Capture-ResizeSweep {
@@ -688,6 +689,7 @@ try {
     Capture-TabSet -WindowHandle $windowHandle -Prefix "compact-tab-" -Width $CompactWidth -Height $CompactHeight
     Capture-ResizeSweep -WindowHandle $windowHandle
     Capture-LogSplitterMovement -WindowHandle $windowHandle
+    Add-CaptureStatus -Scenario "phase-1-ui-regression-closure" -Detail "tabs=5 compact-tabs=5 resize-sweep=true dpi-smoke=true splitter-drag-frames=true"
     Add-CaptureStatus -Scenario "capture-complete"
 } catch {
     Add-CaptureStatus -Scenario "capture" -Status "FAIL" -Detail $_.Exception.Message

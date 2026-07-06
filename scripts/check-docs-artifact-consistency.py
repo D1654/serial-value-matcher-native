@@ -69,9 +69,11 @@ UI_WORKFLOW_TERMS = [
     "--self-test",
     "--ui-perf-test",
     "capture-status.txt",
+    "self-test.log",
     "ui-perf-test.log",
     "window-info.txt",
     "artifacts/windows-native-ui/*.png",
+    "phase-1-ui-regression-closure",
 ]
 
 REQUIRED_DOC_TERMS = {

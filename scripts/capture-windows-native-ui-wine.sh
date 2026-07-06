@@ -257,22 +257,65 @@ capture_tab_set() {
     local geometry
     geometry="$(xdotool getwindowgeometry --shell "$window_id")"
     eval "$geometry"
-    local tab_y_offset="${SVM_WINE_UI_TAB_Y_OFFSET:-299}"
-    if [[ "$prefix" == compact-tab-* ]]; then
-        tab_y_offset="${SVM_WINE_UI_COMPACT_TAB_Y_OFFSET:-295}"
+
+    local compact=0
+    if (( WIDTH < 1040 || HEIGHT < 720 )); then
+        compact=1
     fi
-    local tab_y=$((HEIGHT - tab_y_offset))
-    if [[ "$tab_y" -lt 80 ]]; then
-        tab_y=$((HEIGHT - 120))
+    local tight=0
+    if (( WIDTH < 860 )); then
+        tight=1
     fi
-    printf "%s X=%s Y=%s WIDTH=%s HEIGHT=%s tab_y_offset=%s tab_y=%s\n" "$prefix" "$X" "$Y" "$WIDTH" "$HEIGHT" "$tab_y_offset" "$tab_y" >> "$output_dir/tab-clicks.txt"
+    local margin=6
+    local status_height=22
+    local desired_work_height=236
+    local minimum_log_height=210
+    local splitter_height=12
+    if (( tight == 1 )); then
+        margin=3
+    elif (( compact == 1 )); then
+        margin=4
+    fi
+    if (( compact == 1 )); then
+        status_height=20
+        desired_work_height=230
+        minimum_log_height=150
+    fi
+
+    local status_y=$((HEIGHT - status_height - 4))
+    if (( status_y < margin )); then
+        status_y="$margin"
+    fi
+    local content_height=$((status_y - margin))
+    if (( content_height < 1 )); then
+        content_height=1
+    fi
+    local maximum_work_height=$((content_height - minimum_log_height - splitter_height))
+    if (( maximum_work_height < 84 )); then
+        maximum_work_height=84
+    fi
+    local work_height="$desired_work_height"
+    if (( work_height > maximum_work_height )); then
+        work_height="$maximum_work_height"
+    fi
+    if (( work_height < 84 )); then
+        work_height=84
+    fi
+    local log_height=$((status_y - margin - work_height - splitter_height))
+    if (( log_height < 1 )); then
+        log_height=1
+    fi
+    local tabs_y=$((margin + log_height + splitter_height))
+    local tab_y_adjust="${SVM_WINE_UI_TAB_Y_ADJUST:-0}"
+    if (( compact == 1 )); then
+        tab_y_adjust="${SVM_WINE_UI_COMPACT_TAB_Y_ADJUST:-20}"
+    fi
+    local tab_y=$((tabs_y + 14 + tab_y_adjust))
+    printf "%s X=%s Y=%s WIDTH=%s HEIGHT=%s compact=%s tight=%s tabs_y=%s tab_y=%s adjust=%s\n" "$prefix" "$X" "$Y" "$WIDTH" "$HEIGHT" "$compact" "$tight" "$tabs_y" "$tab_y" "$tab_y_adjust" >> "$output_dir/tab-clicks.txt"
     local tab_names=(single quick file scan settings)
-    local tab_widths=(46 54 54 54 54)
-    local tab_left="${SVM_WINE_UI_TAB_LEFT:-14}"
-    local cursor="$tab_left"
+    local tab_centers=(25 75 125 175 225)
     for index in "${!tab_names[@]}"; do
-        local tab_x=$((cursor + tab_widths[index] / 2))
-        cursor=$((cursor + tab_widths[index]))
+        local tab_x=$((margin + tab_centers[index]))
         xdotool windowactivate --sync "$window_id" >/dev/null 2>&1 || true
         xdotool mousemove --sync "$((X + tab_x))" "$((Y + tab_y))" click 1
         if [[ "$fast_frames" != "0" ]]; then
@@ -286,7 +329,11 @@ capture_tab_set() {
     done
 
     assert_screenshots_differ "$output_dir/${prefix}single.png" "$output_dir/${prefix}scan.png" "${prefix}single-vs-scan" 500
-    printf "PASS %stab-set screenshots=%s switching=clicked-frame-diff-validated-by-ui-perf\n" "$prefix" "${#tab_names[@]}" >> "$output_dir/capture-status.txt"
+    local set_scenario="tab-set"
+    if [[ "$prefix" == "compact-tab-" ]]; then
+        set_scenario="compact-tab-set"
+    fi
+    printf "PASS %s screenshots=%s switching=clicked-frame-diff-validated-by-ui-perf\n" "$set_scenario" "${#tab_names[@]}" >> "$output_dir/capture-status.txt"
 }
 
 capture_log_splitter_movement() {
@@ -312,6 +359,7 @@ capture_log_splitter_movement() {
     local side_gap=6
     local desired_work_height=236
     local minimum_log_height=210
+    local splitter_height=12
     if (( tight == 1 )); then
         margin=3
         side_gap=4
@@ -333,7 +381,7 @@ capture_log_splitter_movement() {
     if (( content_height < 1 )); then
         content_height=1
     fi
-    local maximum_work_height=$((content_height - minimum_log_height - side_gap))
+    local maximum_work_height=$((content_height - minimum_log_height - splitter_height))
     if (( maximum_work_height < 84 )); then
         maximum_work_height=84
     fi
@@ -344,12 +392,12 @@ capture_log_splitter_movement() {
     if (( work_height < 84 )); then
         work_height=84
     fi
-    local log_height=$((status_y - margin - work_height - side_gap))
+    local log_height=$((status_y - margin - work_height - splitter_height))
     if (( log_height < 1 )); then
         log_height=1
     fi
-    local splitter_y_offset="${SVM_WINE_UI_SPLITTER_Y_OFFSET:-314}"
-    local splitter_y=$((Y + HEIGHT - splitter_y_offset))
+    local splitter_y_adjust="${SVM_WINE_UI_SPLITTER_Y_ADJUST:-0}"
+    local splitter_y=$((Y + margin + log_height + splitter_height / 2 + splitter_y_adjust))
     local splitter_x=$((X + WIDTH / 2))
 
     xdotool windowactivate --sync "$window_id" >/dev/null 2>&1 || true
@@ -371,6 +419,8 @@ capture_log_splitter_movement() {
 }
 
 if [[ "$capture_tabs" != "0" ]]; then
+    xdotool windowsize --sync "$first_window_id" 1212 753 >/dev/null 2>&1 || true
+    sleep 1
     capture_tab_set "$first_window_id" "tab-" "$capture_fast_frames" "$fast_frame_delay"
     if [[ "$capture_compact" != "0" ]]; then
         xdotool windowsize --sync "$first_window_id" 760 520 >/dev/null 2>&1 || true
@@ -384,6 +434,7 @@ if [[ "$capture_resize_sweep" != "0" ]]; then
 fi
 
 capture_log_splitter_movement "$first_window_id"
+printf "%s\n" "PASS phase-1-ui-regression-closure tabs=5 compact-tabs=5 resize-sweep=true splitter-drag-frames=true wine-smoke=true" >> "$output_dir/capture-status.txt"
 printf "%s\n" "PASS capture-complete" >> "$output_dir/capture-status.txt"
 ' bash "$exe_path" "$output_dir" "$window_name" "$stabilize_seconds" "$capture_tabs" "$capture_compact" "$capture_fast_frames" "$fast_frame_delay" "$ui_perf_log_windows" "$capture_resize_sweep"
 

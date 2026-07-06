@@ -14,9 +14,11 @@ UI 验收以 GitHub Actions 编译出的 Windows native artifact 为最终对象
 - resize sweep；
 - DPI smoke；
 - 通信日志和标签页分割条拖动帧；
+- Phase 1 UI regression closure 状态；
+- `self-test.log`；
 - `ui-perf-test.log`。
 
-性能判断必须从当前 release/artifact 的 `--ui-perf-test` 输出派生，不得临时写入没有基线依据的阈值。缺少截图、`capture-status.txt`、`ui-perf-test.log` 或 `window-info.txt` 时，不能把该次 UI capture 视为通过。
+性能判断必须从当前 release/artifact 的 `--ui-perf-test` 输出派生，不得临时写入没有基线依据的阈值。缺少截图、`capture-status.txt`、`self-test.log`、`ui-perf-test.log` 或 `window-info.txt` 时，不能把该次 UI capture 视为通过。
 
 ## 自动检查
 
@@ -54,8 +56,8 @@ scripts/capture-windows-native-ui-wine.sh
 - `log-splitter-before.png`、`log-splitter-frame-01.png`、`log-splitter-frame-02.png`、`log-splitter-after.png`；
 - `capture-status.txt`；
 - `window-info.txt`；
-- `ui-perf-test.log`；
-- `self-test.log`。
+- `self-test.log`；
+- `ui-perf-test.log`。
 
 截图不能全白，标签页必须实际切换成功；截图文件名和实际激活标签必须一致，例如 `compact-tab-scan.png` 必须停在“扫描”页。
 Wine 截图只用于冒烟检查，不作为最终视觉结论；中文字体、输入框文字基线、按钮和下拉框渲染必须以真实 Windows 截图为准。
@@ -122,6 +124,8 @@ Wine 截图只用于冒烟检查，不作为最终视觉结论；中文字体、
 - 小窗口下核心控件被遮挡且无法恢复；
 - 按钮或下拉框文字明显裁切；
 - `capture-status.txt` 缺少 `PASS tab-set`、`PASS compact-tab-set`、`PASS resize-sweep`、`PASS splitter-drag-frames` 或 `PASS capture-complete`；
+- `capture-status.txt` 缺少 `PASS phase-1-ui-regression-closure`；
+- `self-test.log` 缺失或 self-test 未通过；
 - `ui-perf-test.log` 缺失或没有通过当前 release/artifact 派生的性能门禁；
 - UI capture artifact 缺少截图、`capture-status.txt` 或 `window-info.txt`；
 - Release 包不应要求安装 .NET、Qt 或额外运行库；
