@@ -67,6 +67,9 @@ struct NativeWorkbenchLayout {
     NativeRect page;
     NativeTabVisibilityModel visibility;
     int selectedTabIndex = 0;
+    int minimumWorkbenchHeight = 0;
+    int maximumWorkbenchHeight = 0;
+    int minimumLogHeight = 0;
     int workbenchHeight = 0;
     int logHeight = 0;
 };
@@ -101,4 +104,3 @@ bool nativeMainLayoutModelHasStableGeometry(const NativeMainLayoutModel& model);
 } // namespace svm::win32
 
 #endif
-

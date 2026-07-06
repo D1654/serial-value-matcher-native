@@ -3,13 +3,13 @@
 #if defined(_WIN32)
 
 #include "win32/native_control_utils.h"
+#include "win32/native_layout_model.h"
 #include "win32/native_layout_transaction.h"
 #include "win32/native_layout_metrics.h"
 #include "win32/native_paint_policy.h"
 #include "win32/native_ui_preferences.h"
 
 #include <algorithm>
-#include <array>
 #include <commctrl.h>
 
 namespace svm::win32 {
@@ -45,6 +45,10 @@ void includeControlRect(HWND parent, HWND control, RECT& target) {
     includeRect(target, rect);
 }
 
+RECT toWinRect(const NativeRect& rect) noexcept {
+    return {rect.x, rect.y, rect.right(), rect.bottom()};
+}
+
 } // namespace
 
 bool NativeMainWindow::splitterHitTest(int x, int y) const noexcept {
@@ -57,15 +61,17 @@ bool NativeMainWindow::splitterHitTest(int x, int y) const noexcept {
 }
 
 int NativeMainWindow::clampedWorkbenchHeightForClient(int requestedHeight, int width, int height) const {
-    width = std::max(width, 1);
-    height = std::max(height, 1);
-    const NativeUiMetrics metrics = nativeUiMetricsForSize(width, height);
-    const int statusY = std::max(metrics.margin, height - metrics.statusHeight - 4);
-    const int contentHeight = std::max(1, statusY - metrics.margin);
-    return clampedWorkbenchHeightForContent(
+    int activeTab = static_cast<int>(TabCtrl_GetCurSel(workTabs_));
+    if (activeTab < 0) {
+        activeTab = 0;
+    }
+    const NativeMainLayoutModel layoutModel = calculateNativeMainLayoutModel({
+        std::max(width, 1),
+        std::max(height, 1),
         nativeNormalizeWorkbenchHeight(requestedHeight),
-        metrics,
-        contentHeight);
+        activeTab,
+    });
+    return layoutModel.workbench.workbenchHeight;
 }
 
 void NativeMainWindow::relayoutCurrentClient(bool immediate) {
@@ -210,10 +216,19 @@ void NativeMainWindow::paintLayoutChrome() {
 void NativeMainWindow::layoutControls(int width, int height) {
     ++layoutPassCount_;
 
-    width = std::max(width, 1);
-    height = std::max(height, 1);
+    int activeTab = static_cast<int>(TabCtrl_GetCurSel(workTabs_));
+    if (activeTab < 0) {
+        activeTab = 0;
+    }
 
-    const NativeUiMetrics metrics = nativeUiMetricsForSize(width, height);
+    const NativeMainLayoutModel layoutModel = calculateNativeMainLayoutModel({
+        std::max(width, 1),
+        std::max(height, 1),
+        preferredWorkbenchHeight_,
+        activeTab,
+    });
+
+    const NativeUiMetrics& metrics = layoutModel.metrics;
     const bool compact = metrics.compact;
     const int margin = metrics.margin;
     const int row = metrics.row;
@@ -234,33 +249,13 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const auto moveTopControl = [&](HWND control, int moveX, int moveY, int moveWidth, int moveHeight, BOOL) {
         activeLayoutTransaction->moveTop(control, moveX, moveY, moveWidth, moveHeight);
     };
-
-    const int statusHeight = metrics.statusHeight;
-    const int statusY = std::max(margin, height - statusHeight - 4);
-    const int sideGap = metrics.sideGap;
-    const int availableWidth = std::max(1, width - margin * 2);
-    const int desiredSideWidth = metrics.desiredSideWidth;
-    const int maxSideWidth = std::min(desiredSideWidth, std::max(1, availableWidth - 80));
-    const int minSideWidth = std::min(metrics.minSideWidth, maxSideWidth);
-    const int sideWidth = std::clamp(std::min(desiredSideWidth, availableWidth / 4), minSideWidth, maxSideWidth);
-    const int sideX = width - margin - sideWidth;
-    const int mainX = margin;
-    const int mainWidth = std::max(1, sideX - sideGap - mainX);
-    const int contentHeight = std::max(1, statusY - margin);
-
-    const int minimumLogHeight = metrics.minimumLogHeight;
-    const int splitterHeight = metrics.splitterHeight;
-    const int requestedWorkHeight = preferredWorkbenchHeight_ > 0 ? preferredWorkbenchHeight_ : metrics.desiredWorkHeight;
-    const int workHeight = clampedWorkbenchHeightForContent(requestedWorkHeight, metrics, contentHeight);
-    currentWorkbenchHeight_ = workHeight;
-    const int logY = margin;
-    const int logHeight = std::max(1, statusY - logY - workHeight - splitterHeight);
-    const int splitterY = logY + logHeight;
-    workbenchSplitterRect_ = {mainX, splitterY, mainX + mainWidth, splitterY + splitterHeight};
-    const int sendY = splitterY + splitterHeight;
-    const int sendHeight = std::max(1, statusY - sendY - 2);
-    const int tabsY = sendY;
-    const int tabsHeight = std::max(84, sendHeight);
+    const auto moveControlRect = [&](HWND control, const NativeRect& rect) {
+        moveControl(control, rect.x, rect.y, rect.width, rect.height, layoutRepaint);
+    };
+    const int sideWidth = layoutModel.serialPanel.bounds.width;
+    const int sideX = layoutModel.serialPanel.bounds.x;
+    currentWorkbenchHeight_ = layoutModel.workbench.workbenchHeight;
+    workbenchSplitterRect_ = toWinRect(layoutModel.workbench.splitter);
 
     showControl(connectionGroup_, false);
     showControl(sendGroup_, false);
@@ -299,50 +294,22 @@ void NativeMainWindow::layoutControls(int width, int height) {
     moveControl(rtsCheck_, x + sideInnerWidth / 2, y + 2, sideInnerWidth / 2, row - 2, layoutRepaint);
     y += row;
     moveControl(autoReconnectCheck_, x, y + 2, sideInnerWidth, row - 2, layoutRepaint);
-    const int sideControlBottom = y + row;
-    const int sideSeparatorHeight = 2;
-    const int sideActionGap = compact ? 2 : 4;
-    const int sideHelpMinimumHeight = compact ? 132 : 150;
-    const int sideHelpDesiredHeight = compact ? 152 : 180;
-    const int sideActionSeparatorY = sideControlBottom + sideActionGap;
-    const int sideActionButtonY = sideActionSeparatorY + sideSeparatorHeight + sideActionGap;
-    const int sideActionBottom = sideActionButtonY + row;
-    const bool sideActionVisible = sideInnerWidth >= 108
-        && sideActionButtonY + row <= statusY - margin;
-    moveControl(sideActionSeparator_, x, sideActionSeparatorY, sideInnerWidth, sideSeparatorHeight, layoutRepaint);
+    const bool sideActionVisible = layoutModel.serialPanel.actionsVisible;
+    moveControlRect(sideActionSeparator_, layoutModel.serialPanel.actionSeparator);
     showControl(sideActionSeparator_, sideActionVisible);
-    const int sideActionButtonWidth = std::max(1, (sideInnerWidth - gap) / 2);
-    moveControl(pauseScrollButton_, x, sideActionButtonY, sideActionButtonWidth, row, layoutRepaint);
-    moveControl(clearButton_, x + sideActionButtonWidth + gap, sideActionButtonY, sideActionButtonWidth, row, layoutRepaint);
+    moveControlRect(pauseScrollButton_, layoutModel.serialPanel.pauseButton);
+    moveControlRect(clearButton_, layoutModel.serialPanel.clearButton);
     showControl(pauseScrollButton_, sideActionVisible);
     showControl(clearButton_, sideActionVisible);
-    const int sideHelpBottom = statusY - 2;
-    const int earliestSideHelpY = sideActionBottom + sideActionGap + sideSeparatorHeight + sideActionGap;
-    const int sideHelpY = std::max(earliestSideHelpY, sideHelpBottom - sideHelpDesiredHeight);
-    const int sideHelpSeparatorY = sideHelpY - sideActionGap - sideSeparatorHeight;
-    const int sideHelpHeight = std::max(1, sideHelpBottom - sideHelpY);
-    const bool sideHelpVisible = sideActionVisible
-        && sideHelpHeight >= sideHelpMinimumHeight
-        && sideHelpSeparatorY >= sideActionBottom + sideActionGap
-        && sideHelpY + sideHelpHeight <= statusY;
-    moveControl(sideHelpSeparator_, x, sideHelpSeparatorY, sideInnerWidth, sideSeparatorHeight, layoutRepaint);
+    const bool sideHelpVisible = layoutModel.sideHelp.visible;
+    moveControlRect(sideHelpSeparator_, layoutModel.sideHelp.separator);
     showControl(sideHelpSeparator_, sideHelpVisible);
     if (sideHelpVisible) {
-        const int helpHeight = sideHelpHeight;
-        const int helpY = sideHelpY;
-        const int helpPad = compact ? 6 : 7;
-        const int helpTitleHeight = compact ? 17 : 18;
-        const int helpTitleWidth = compact ? 66 : 74;
-        moveControl(sideHelpFrame_, x, helpY, sideInnerWidth, helpHeight, layoutRepaint);
-        moveControl(sideHelpTitle_, x + helpPad, helpY + helpPad, std::min(std::max(1, sideInnerWidth - helpPad * 2), helpTitleWidth), helpTitleHeight, layoutRepaint);
-        moveControl(
-            sideHelpText_,
-            x + helpPad,
-            helpY + helpPad + helpTitleHeight + (compact ? 3 : 4),
-            std::max(1, sideInnerWidth - helpPad * 2),
-            std::max(1, helpHeight - helpPad * 2 - helpTitleHeight - (compact ? 3 : 4)),
-            layoutRepaint);
+        moveControlRect(sideHelpFrame_, layoutModel.sideHelp.frame);
+        moveControlRect(sideHelpTitle_, layoutModel.sideHelp.title);
+        moveControlRect(sideHelpText_, layoutModel.sideHelp.text);
     } else {
+        const int sideHelpY = layoutModel.sideHelp.frame.y;
         moveControl(sideHelpFrame_, x, sideHelpY, 1, 1, layoutRepaint);
         moveControl(sideHelpTitle_, x, sideHelpY, 1, 1, layoutRepaint);
         moveControl(sideHelpText_, x, sideHelpY, 1, 1, layoutRepaint);
@@ -351,15 +318,12 @@ void NativeMainWindow::layoutControls(int width, int height) {
     showControl(sideHelpTitle_, sideHelpVisible);
     showControl(sideHelpText_, sideHelpVisible);
 
-    const int logTitleWidth = compact ? 52 : 58;
-    const bool showLogTitle = mainWidth >= 520;
+    const bool showLogTitle = layoutModel.logPanel.titleVisible;
     showControl(logPanelTitle_, showLogTitle);
     if (showLogTitle) {
-        moveControl(logPanelTitle_, mainX, logY + 2, logTitleWidth, titleHeight, layoutRepaint);
+        moveControlRect(logPanelTitle_, layoutModel.logPanel.title);
     }
-    const int toolbarX = showLogTitle ? mainX + logTitleWidth + gap : mainX;
-    const int toolbarWidth = std::max(1, mainWidth - (showLogTitle ? logTitleWidth + gap : 0));
-    const LogToolbarLayout logLayout = calculateLogToolbarLayout(toolbarX, logY, toolbarWidth, row, gap, metrics.logActionWidth);
+    const LogToolbarLayout& logLayout = layoutModel.logPanel.toolbar;
     showControl(logFormatLabel_, false);
     showControl(logEncodingLabel_, false);
     showControl(logFilterLabel_, false);
@@ -371,28 +335,15 @@ void NativeMainWindow::layoutControls(int width, int height) {
     moveControl(logFilterEdit_, logLayout.filterEdit.x, logLayout.filterEdit.y + editOffsetY, logLayout.filterEdit.width, editHeight, layoutRepaint);
     moveControl(logSearchEdit_, logLayout.searchEdit.x, logLayout.searchEdit.y + editOffsetY, logLayout.searchEdit.width, editHeight, layoutRepaint);
     moveControl(findLogButton_, logLayout.findButton.x, logLayout.findButton.y, logLayout.findButton.width, logLayout.findButton.height, layoutRepaint);
-    const int logContentY = std::max(logLayout.exportButton.bottom(), logLayout.findButton.bottom()) + (compact ? 5 : 6);
-    moveControl(receiveLog_, mainX, logContentY, mainWidth, std::max(1, logY + logHeight - logContentY), layoutRepaint);
+    moveControlRect(receiveLog_, layoutModel.logPanel.logView);
 
     showControl(workPanelTitle_, false);
-    const int workInnerX = mainX;
-    const int workInnerWidth = mainWidth;
-    moveControl(workTabs_, workInnerX, tabsY, workInnerWidth, tabsHeight, layoutRepaint);
+    moveControlRect(workTabs_, layoutModel.workbench.tabs);
 
-    RECT tabDisplayRect = {0, 0, workInnerWidth, tabsHeight};
-    TabCtrl_AdjustRect(workTabs_, FALSE, &tabDisplayRect);
-    const int pageHorizontalInset = compact ? 7 : 6;
-    const int pageVerticalInset = compact ? 3 : 4;
-    const int pageX = workInnerX + std::max(0L, tabDisplayRect.left) + pageHorizontalInset;
-    const int pageY = tabsY + std::max(0L, tabDisplayRect.top) + pageVerticalInset;
-    const int pageRight = workInnerX + std::min<LONG>(workInnerWidth, tabDisplayRect.right) - pageHorizontalInset;
-    const int pageBottom = tabsY + std::min<LONG>(tabsHeight, tabDisplayRect.bottom) - pageVerticalInset;
-    const int pageBackgroundX = workInnerX + std::max(0L, tabDisplayRect.left);
-    const int pageBackgroundY = tabsY + std::max(0L, tabDisplayRect.top);
-    const int pageBackgroundRight = workInnerX + std::min<LONG>(workInnerWidth, tabDisplayRect.right);
-    const int pageBackgroundBottom = tabsY + std::min<LONG>(tabsHeight, tabDisplayRect.bottom);
-    const int pageW = std::max(1, pageRight - pageX);
-    const bool pageHasRoom = pageBottom > pageY;
+    const int pageX = layoutModel.workbench.page.x;
+    const int pageY = layoutModel.workbench.page.y;
+    const int pageBottom = layoutModel.workbench.page.bottom();
+    const int pageW = layoutModel.workbench.page.width;
     const int labelOffsetY = std::max(0, (row - labelHeight) / 2);
     const int checkOffsetY = std::max(0, (row - 16) / 2);
     const int progressOffsetY = compact ? 3 : 4;
@@ -401,14 +352,8 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const auto moveWorkEdit = [&](HWND control, int editX, int editY, int editWidth) {
         moveControl(control, editX, editY + editOffsetY, editWidth, editHeight, layoutRepaint);
     };
-    moveControl(
-        workPageBackground_,
-        pageBackgroundX,
-        pageBackgroundY,
-        std::max(1, pageBackgroundRight - pageBackgroundX),
-        std::max(1, pageBackgroundBottom - pageBackgroundY),
-        layoutRepaint);
-    const bool showSingleSendFormatRow = pageHasRoom && pageY + row <= pageBottom;
+    moveControlRect(workPageBackground_, layoutModel.workbench.pageBackground);
+    const bool showSingleSendFormatRow = layoutModel.workbench.visibility.singleFormatRow;
 
     showControl(sendModeLabel_, false);
     showControl(sendEncodingLabel_, false);
@@ -417,7 +362,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
 
     const int formatGapCount = pageW >= 380 ? 3 : 2;
     const int formatAvailable = std::max(3, pageW - gap * formatGapCount);
-    const bool showHistoryCombo = showSingleSendFormatRow && pageW >= 380;
+    const bool showHistoryCombo = layoutModel.workbench.visibility.singleHistory;
     const int modeWidth = std::max(1, std::min(compact ? 104 : 118, formatAvailable * 35 / 100));
     const int encodingWidth = std::max(1, std::min(compact ? 62 : 70, formatAvailable * 19 / 100));
     const int lineEndingWidth = std::max(1, std::min(compact ? 62 : 70, formatAvailable * 19 / 100));
@@ -443,7 +388,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int sendEditWidth = std::max(1, pageW - sendButtonWidth - gap);
     moveWorkEdit(sendEdit_, x, y, sendEditWidth);
     moveControl(sendButton_, x + sendEditWidth + gap, y, sendButtonWidth, row, layoutRepaint);
-    const bool sendContentVisible = y + row <= pageBottom && pageW >= 96;
+    const bool sendContentVisible = layoutModel.workbench.visibility.singleSend;
     const int timedX = pageX;
     const int timedY = y + row + gap;
     const int timedCheckWidth = compact ? 48 : 54;
@@ -464,14 +409,13 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int quickColumnWidth = std::max(1, (pageW - gap * (quickColumns - 1)) / quickColumns);
     const int quickButtonWidth = std::max(1, std::min(compact ? 32 : 36, quickColumnWidth / 2));
     const int quickSlotHeight = row + gap;
-    std::array<bool, 10> quickSlotVisible = {};
+    const auto& quickSlotVisible = layoutModel.workbench.visibility.quickSlots;
     for (std::size_t index = 0; index < quickSendEdits_.size(); ++index) {
         const int column = static_cast<int>(index % quickColumns);
         const int slotRow = static_cast<int>(index / quickColumns);
         const int slotX = pageX + column * (quickColumnWidth + gap);
         const int slotY = pageY + slotRow * quickSlotHeight;
         const int editWidth = std::max(1, quickColumnWidth - quickButtonWidth - gap);
-        quickSlotVisible[index] = slotY + row <= pageBottom && quickColumnWidth > quickButtonWidth + gap;
         moveWorkEdit(quickSendEdits_[index], slotX, slotY, editWidth);
         moveControl(quickSendButtons_[index], slotX + editWidth + gap, slotY, quickButtonWidth, row, layoutRepaint);
     }
@@ -482,7 +426,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int browseWidth = compact ? 44 : 50;
     const int fileSendWidth = compact ? 68 : 76;
     const int fileStopWidth = compact ? 44 : 50;
-    const bool fileFirstRowVisible = y + row <= pageBottom && pageW >= fileLabelWidth + browseWidth + fileSendWidth + fileStopWidth + gap * 4 + 24;
+    const bool fileFirstRowVisible = layoutModel.workbench.visibility.fileFirstRow;
     const int filePathWidth = std::max(1, pageW - fileLabelWidth - browseWidth - fileSendWidth - fileStopWidth - gap * 4 - formFieldGap);
     moveControl(filePathLabel_, x, y + labelOffsetY, fileLabelWidth, labelHeight, layoutRepaint);
     x += fileLabelWidth + formFieldGap;
@@ -498,7 +442,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int delayLabelWidth = compact ? 60 : 68;
     const int delayComboWidth = compact ? 66 : 74;
     const int fileProgressLabelWidth = compact ? 60 : 68;
-    const bool fileSecondRowVisible = y + row <= pageBottom;
+    const bool fileSecondRowVisible = layoutModel.workbench.visibility.fileSecondRow;
     moveControl(fileDelayLabel_, x, y + labelOffsetY, delayLabelWidth, labelHeight, layoutRepaint);
     x += delayLabelWidth + formFieldGap;
     moveControl(fileDelayCombo_, x, y, delayComboWidth, 160, layoutRepaint);
@@ -511,7 +455,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     y = pageY;
     const int scanSectionGap = compact ? 2 : 3;
     const int scanBlockGap = compact ? 3 : 4;
-    const bool scanSectionVisible = y + labelHeight <= pageBottom;
+    const bool scanSectionVisible = layoutModel.workbench.visibility.scanSection;
     moveControl(scanSectionLabel_, pageX, y, pageW, labelHeight, layoutRepaint);
     y += labelHeight + scanSectionGap;
     x = pageX;
@@ -531,7 +475,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
         + formFieldGap * 4;
     const int scanFunctionDesiredWidth = compact ? 144 : 168;
     const int scanFunctionWidth = std::max(1, std::min(scanFunctionDesiredWidth, pageW - fixedScanRowWidth));
-    const bool scanParameterRowVisible = y + row <= pageBottom && pageW >= fixedScanRowWidth + 80;
+    const bool scanParameterRowVisible = layoutModel.workbench.visibility.scanParameterRow;
     moveControl(scanSlaveLabel_, x, y + labelOffsetY, shortLabelWidth, labelHeight, layoutRepaint);
     x += shortLabelWidth + formFieldGap;
     moveWorkEdit(scanSlaveEdit_, x, y, scanSlaveEditWidth);
@@ -555,7 +499,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int progressLabelWidth = compact ? 32 : 36;
     const int progressTextWidth = std::max(1, std::min(compact ? 126 : 148, pageW / 3));
     const int progressBarWidth = std::max(1, pageW - progressLabelWidth - progressTextWidth - gap * 2);
-    const bool scanProgressRowVisible = y + row <= pageBottom && pageW >= 180;
+    const bool scanProgressRowVisible = layoutModel.workbench.visibility.scanProgressRow;
     moveControl(modbusProgressLabel_, x, y + labelOffsetY, progressLabelWidth, labelHeight, layoutRepaint);
     x += progressLabelWidth + gap;
     moveTopControl(modbusProgress_, x, y + progressOffsetY, progressBarWidth, progressHeight, layoutRepaint);
@@ -564,10 +508,10 @@ void NativeMainWindow::layoutControls(int width, int height) {
 
     y += row + scanBlockGap;
     x = pageX;
-    const bool scanAnalysisSectionVisible = y + labelHeight <= pageBottom;
+    const bool scanAnalysisSectionVisible = layoutModel.workbench.visibility.scanAnalysisSection;
     moveControl(analysisSectionLabel_, pageX, y, pageW, labelHeight, layoutRepaint);
     y += labelHeight + scanSectionGap;
-    const bool scanTargetRowVisible = y + row <= pageBottom;
+    const bool scanTargetRowVisible = layoutModel.workbench.visibility.scanTargetRow;
     const int targetNameLabelWidth = compact ? 42 : 48;
     const int targetValueLabelWidth = compact ? 42 : 48;
     const int targetUnitLabelWidth = compact ? 28 : 32;
@@ -616,7 +560,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
 
     y += row + scanBlockGap;
     x = pageX;
-    const bool scanCandidateRowVisible = y + row <= pageBottom;
+    const bool scanCandidateRowVisible = layoutModel.workbench.visibility.scanCandidateRow;
     const int candidateLabelWidth = compact ? 32 : 36;
     const int analysisButtonWidth = compact ? 66 : 76;
     const int ruleButtonWidth = compact ? 66 : 76;
@@ -644,7 +588,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     const int settingsComboWidth = compact ? 68 : 78;
     const int rawRetentionLabelWidth = compact ? 58 : 66;
     const int rawRetentionComboWidth = compact ? 78 : 90;
-    const bool settingsRowVisible = y + row <= pageBottom;
+    const bool settingsRowVisible = layoutModel.workbench.visibility.settingsRow;
     moveControl(logCacheLabel_, x, y + labelOffsetY, settingsLabelWidth, labelHeight, layoutRepaint);
     x += settingsLabelWidth + formFieldGap;
     moveControl(logCacheCombo_, x, y, settingsComboWidth, 260, layoutRepaint);
@@ -653,7 +597,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     x += rawRetentionLabelWidth + formFieldGap;
     moveControl(rawEventRetentionCombo_, x, y, rawRetentionComboWidth, 140, layoutRepaint);
 
-    const bool pageVisible = pageBottom > pageY;
+    const bool pageVisible = layoutModel.workbench.visibility.pageVisible;
     showControl(workTabs_, pageVisible);
     showControl(workPageBackground_, pageVisible);
     layoutTransaction.commit();
@@ -664,7 +608,7 @@ void NativeMainWindow::layoutControls(int width, int height) {
     workbenchVisibility_.singleFormatRow = showSingleSendFormatRow;
     workbenchVisibility_.singleHistory = showHistoryCombo;
     workbenchVisibility_.singleSend = sendContentVisible;
-    workbenchVisibility_.singleTimed = timedY + row <= pageBottom && pageW >= 230;
+    workbenchVisibility_.singleTimed = layoutModel.workbench.visibility.singleTimed;
     workbenchVisibility_.quickSlots = quickSlotVisible;
     workbenchVisibility_.fileFirstRow = fileFirstRowVisible;
     workbenchVisibility_.fileSecondRow = fileSecondRowVisible;
@@ -675,33 +619,23 @@ void NativeMainWindow::layoutControls(int width, int height) {
     workbenchVisibility_.scanTargetRow = scanTargetRowVisible;
     workbenchVisibility_.scanCandidateRow = scanCandidateRowVisible;
     workbenchVisibility_.settingsRow = settingsRowVisible;
-    workbenchRedrawRect_ = {workInnerX, tabsY, workInnerX + workInnerWidth, tabsY + tabsHeight};
+    workbenchRedrawRect_ = toWinRect(layoutModel.workbench.tabs);
     workbenchVisibilityReady_ = true;
     workbenchTabState_.noteLayoutChanged();
-    int activeTab = static_cast<int>(TabCtrl_GetCurSel(workTabs_));
-    if (activeTab < 0) {
-        activeTab = 0;
-    }
     applyWorkbenchTabVisibility(activeTab);
-    const int clockWidth = compact ? 78 : 88;
-    const int counterWidth = compact ? 76 : 86;
-    int statusRight = width - margin;
-    const bool showClock = width >= 560;
-    const bool showCounters = width >= 470;
+    const bool showClock = layoutModel.status.clockVisible;
+    const bool showCounters = layoutModel.status.countersVisible;
     showControl(clockStatusText_, showClock);
     showControl(rxStatusText_, showCounters);
     showControl(txStatusText_, showCounters);
     if (showClock) {
-        moveControl(clockStatusText_, statusRight - clockWidth, statusY, clockWidth, statusHeight, layoutRepaint);
-        statusRight -= clockWidth + gap;
+        moveControlRect(clockStatusText_, layoutModel.status.clockText);
     }
     if (showCounters) {
-        moveControl(rxStatusText_, statusRight - counterWidth, statusY, counterWidth, statusHeight, layoutRepaint);
-        statusRight -= counterWidth + gap;
-        moveControl(txStatusText_, statusRight - counterWidth, statusY, counterWidth, statusHeight, layoutRepaint);
-        statusRight -= counterWidth + gap;
+        moveControlRect(rxStatusText_, layoutModel.status.rxText);
+        moveControlRect(txStatusText_, layoutModel.status.txText);
     }
-    moveControl(statusText_, margin, statusY, std::max(1, statusRight - margin), statusHeight, layoutRepaint);
+    moveControlRect(statusText_, layoutModel.status.statusText);
     statusTransaction.commit();
 }
 

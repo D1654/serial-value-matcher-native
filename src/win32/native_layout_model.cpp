@@ -60,6 +60,8 @@ NativeMainLayoutModel calculateNativeMainLayoutModel(const NativeLayoutModelInpu
     const int requestedWorkHeight = input.requestedWorkbenchHeight > 0
         ? input.requestedWorkbenchHeight
         : metrics.desiredWorkHeight;
+    const int maximumWorkHeight = std::max(84, contentHeight - metrics.minimumLogHeight - metrics.splitterHeight);
+    const int minimumWorkHeight = std::min(std::max(84, metrics.minimumWorkHeight), maximumWorkHeight);
     const int workHeight = clampedWorkbenchHeightForContent(requestedWorkHeight, metrics, contentHeight);
     const int logY = margin;
     const int logHeight = std::max(1, statusY - logY - workHeight - metrics.splitterHeight);
@@ -72,6 +74,9 @@ NativeMainLayoutModel calculateNativeMainLayoutModel(const NativeLayoutModelInpu
     model.logPanel.bounds = {mainX, logY, mainWidth, logHeight};
     model.workbench.bounds = {mainX, workY, mainWidth, workHeightAvailable};
     model.workbench.splitter = {mainX, splitterY, mainWidth, metrics.splitterHeight};
+    model.workbench.minimumWorkbenchHeight = minimumWorkHeight;
+    model.workbench.maximumWorkbenchHeight = maximumWorkHeight;
+    model.workbench.minimumLogHeight = metrics.minimumLogHeight;
     model.workbench.workbenchHeight = workHeight;
     model.workbench.logHeight = logHeight;
     model.workbench.selectedTabIndex = normalizeTabIndex(input.selectedTabIndex);
@@ -236,6 +241,11 @@ bool nativeMainLayoutModelHasStableGeometry(const NativeMainLayoutModel& model) 
         && rectIsValid(model.workbench.pageBackground)
         && rectIsValid(model.workbench.page)
         && rectIsValid(model.status.statusText)
+        && model.workbench.minimumWorkbenchHeight <= model.workbench.maximumWorkbenchHeight
+        && model.workbench.workbenchHeight >= model.workbench.minimumWorkbenchHeight
+        && model.workbench.workbenchHeight <= model.workbench.maximumWorkbenchHeight
+        && model.workbench.minimumLogHeight == model.metrics.minimumLogHeight
+        && model.workbench.logHeight == model.logPanel.bounds.height
         && model.logPanel.bounds.bottom() <= model.workbench.splitter.y
         && model.workbench.splitter.bottom() <= model.workbench.bounds.y
         && model.workbench.bounds.bottom() <= model.status.statusText.y + 2
