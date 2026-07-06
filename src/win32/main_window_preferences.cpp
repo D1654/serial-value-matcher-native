@@ -70,7 +70,11 @@ void NativeMainWindow::applyUiPreferences() {
 }
 
 void NativeMainWindow::scheduleUiPreferencesSave() {
-    if (!store_.isOpen() || window_ == nullptr || IsIconic(window_)) {
+    const NativePreferenceSaveDecision decision = modbusAnalysisController_.preferenceSaveDecision(
+        store_.isOpen(),
+        window_ != nullptr,
+        window_ != nullptr && IsIconic(window_));
+    if (!decision.shouldSave) {
         return;
     }
     KillTimer(window_, IDT_UI_PREFERENCES_SAVE);
@@ -81,10 +85,11 @@ void NativeMainWindow::scheduleUiPreferencesSave() {
 }
 
 void NativeMainWindow::saveUiPreferences() {
-    if (!store_.isOpen() || window_ == nullptr) {
-        return;
-    }
-    if (IsIconic(window_)) {
+    const NativePreferenceSaveDecision decision = modbusAnalysisController_.preferenceSaveDecision(
+        store_.isOpen(),
+        window_ != nullptr,
+        window_ != nullptr && IsIconic(window_));
+    if (!decision.shouldSave) {
         return;
     }
 
@@ -117,7 +122,9 @@ void NativeMainWindow::saveUiPreferences() {
     preferences.windowTop = windowRect.top;
     preferences.windowWidth = nativeNormalizeWindowWidth(windowRect.right - windowRect.left);
     preferences.windowHeight = nativeNormalizeWindowHeight(windowRect.bottom - windowRect.top);
-    if (lastSavedUiPreferences_.has_value() && nativeUiPreferencesSameSettings(*lastSavedUiPreferences_, preferences)) {
+    if (!modbusAnalysisController_.shouldPersistPreferences(
+            lastSavedUiPreferences_.has_value() ? &*lastSavedUiPreferences_ : nullptr,
+            preferences)) {
         return;
     }
     preferences.updatedAtUtc = nativeUtcTimestampText();
@@ -136,13 +143,13 @@ void NativeMainWindow::applyRawEventRetentionLimit(int retentionLimitMb) {
     if (!store_.isOpen()) {
         return;
     }
-    retentionLimitMb = nativeNormalizeRawEventRetentionMb(retentionLimitMb);
+    retentionLimitMb = modbusAnalysisController_.normalizedRawEventRetentionLimitMb(retentionLimitMb);
     if (retentionLimitMb <= 0) {
         store_.setRawEventRetentionLimit(0, 0);
         return;
     }
-    const std::uintmax_t softLimitBytes = static_cast<std::uintmax_t>(retentionLimitMb) * 1024ULL * 1024ULL;
-    const std::uintmax_t targetBytes = softLimitBytes * 4ULL / 5ULL;
+    const std::uintmax_t softLimitBytes = modbusAnalysisController_.rawEventSoftLimitBytes(retentionLimitMb);
+    const std::uintmax_t targetBytes = modbusAnalysisController_.rawEventTargetLimitBytes(retentionLimitMb);
     store_.setRawEventRetentionLimit(softLimitBytes, targetBytes);
 }
 

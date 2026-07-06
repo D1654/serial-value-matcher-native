@@ -18,6 +18,7 @@
 #include "win32/native_log_model.h"
 #include "win32/native_log_scroll_state.h"
 #include "win32/native_main_window_context.h"
+#include "win32/native_modbus_analysis_controller.h"
 #include "win32/native_modbus_scan_ui_state.h"
 #include "win32/native_modbus_scan_worker.h"
 #include "win32/native_reconnect_state.h"
@@ -387,6 +388,7 @@ private:
     NativeSendControlState sendControlState_;
     NativeSerialSendController serialSendController_;
     NativeFileSendState fileSend_;
+    NativeModbusAnalysisController modbusAnalysisController_;
     NativeModbusScanUiState modbusScanUiState_;
     HANDLE modbusScanThread_ = nullptr;
     std::atomic_bool modbusScanCancelRequested_ = false;

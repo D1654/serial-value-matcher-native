@@ -59,19 +59,24 @@ void NativeMainWindow::updateModbusScanProgress(
 }
 
 void NativeMainWindow::runModbusScan() {
-    if (serialIoState_.isOwnedBy(NativeSerialIoOwner::ModbusScan)) {
+    const NativeModbusScanDecision scanDecision = modbusAnalysisController_.scanDecision(
+        serialIoState_.isOwnedBy(NativeSerialIoOwner::ModbusScan),
+        serialPort_.isOpen(),
+        store_.isOpen(),
+        serialIoState_);
+    if (scanDecision.cancelsScan()) {
         requestCancelModbusScan();
         return;
     }
-    if (!serialPort_.isOpen()) {
+    if (scanDecision.action == NativeModbusAction::ConnectRequired) {
         setStatus(tx(T::ConnectBeforeModbus));
         return;
     }
-    if (!store_.isOpen()) {
+    if (scanDecision.action == NativeModbusAction::StorageUnavailable) {
         setStatus(tx(T::StorageModbusClosed));
         return;
     }
-    if (!serialIoState_.allowsModbusScan()) {
+    if (scanDecision.action == NativeModbusAction::SerialBusy) {
         setStatus(serialIoBusyStatus());
         return;
     }
@@ -95,7 +100,7 @@ void NativeMainWindow::runModbusScan() {
     closeModbusScanThread();
     modbusScanCancelRequested_ = false;
     disconnectAfterModbusScan_ = false;
-    if (!serialIoState_.tryAcquire(NativeSerialIoOwner::ModbusScan)) {
+    if (!serialIoState_.tryAcquire(scanDecision.owner)) {
         setStatus(serialIoBusyStatus());
         return;
     }
@@ -264,7 +269,7 @@ void NativeMainWindow::setModbusScanRunningUi(bool running) {
         SetTimer(window_, IDT_SERIAL_POLL, 50, nullptr);
         updateTimedSendTimer();
     }
-    const NativeModbusScanUiSnapshot ui = modbusScanUiState_.snapshot(running);
+    const NativeModbusScanUiSnapshot ui = modbusAnalysisController_.scanUiSnapshot(modbusScanUiState_, running);
     setControlText(modbusButton_, ui.buttonMode == NativeModbusScanButtonMode::Stop ? tx(T::ModbusStopButton) : tx(T::ModbusScanButton));
 
     for (HWND control : {

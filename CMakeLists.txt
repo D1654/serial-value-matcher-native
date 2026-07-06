@@ -121,6 +121,7 @@ if(SVM_BUILD_WIN32_APP)
         src/win32/native_log_model.cpp
         src/win32/native_log_scroll_state.cpp
         src/win32/native_log_view.cpp
+        src/win32/native_modbus_analysis_controller.cpp
         src/win32/native_modbus_scan_request.cpp
         src/win32/native_paint_policy.cpp
         src/win32/native_modbus_scan_ui_state.cpp
@@ -330,7 +331,10 @@ add_test(NAME native_connection_ui_state_tests COMMAND native_connection_ui_stat
 
 add_executable(native_modbus_scan_ui_state_tests
     tests/native_modbus_scan_ui_state_tests.cpp
+    src/win32/native_modbus_analysis_controller.cpp
     src/win32/native_modbus_scan_ui_state.cpp
+    src/win32/native_serial_io_state.cpp
+    src/win32/native_ui_preferences.cpp
 )
 set_target_properties(native_modbus_scan_ui_state_tests PROPERTIES
     AUTOMOC OFF
@@ -391,6 +395,9 @@ add_test(NAME native_serial_profile_codec_tests COMMAND native_serial_profile_co
 
 add_executable(native_ui_preferences_tests
     tests/native_ui_preferences_tests.cpp
+    src/win32/native_modbus_analysis_controller.cpp
+    src/win32/native_modbus_scan_ui_state.cpp
+    src/win32/native_serial_io_state.cpp
     src/win32/native_ui_preferences.cpp
 )
 set_target_properties(native_ui_preferences_tests PROPERTIES

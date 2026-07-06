@@ -1,3 +1,4 @@
+#include "win32/native_modbus_analysis_controller.h"
 #include "win32/native_ui_preferences.h"
 
 #include <cassert>
@@ -106,6 +107,36 @@ void sameSettingsIgnoreStorageMetadata() {
     assert(!svm::win32::nativeUiPreferencesSameSettings(left, right));
 }
 
+void controllerKeepsPreferenceDecisionsPure() {
+    svm::win32::NativeModbusAnalysisController controller;
+
+    auto decision = controller.preferenceSaveDecision(false, true, false);
+    assert(!decision.shouldSave);
+    assert(!decision.skipBecauseMinimized);
+
+    decision = controller.preferenceSaveDecision(true, false, false);
+    assert(!decision.shouldSave);
+
+    decision = controller.preferenceSaveDecision(true, true, true);
+    assert(!decision.shouldSave);
+    assert(decision.skipBecauseMinimized);
+
+    decision = controller.preferenceSaveDecision(true, true, false);
+    assert(decision.shouldSave);
+
+    assert(controller.normalizedRawEventRetentionLimitMb(200) == svm::win32::kNativeDefaultRawEventRetentionMb);
+    assert(controller.rawEventSoftLimitBytes(100) == 100ULL * 1024ULL * 1024ULL);
+    assert(controller.rawEventTargetLimitBytes(100) == 80ULL * 1024ULL * 1024ULL);
+
+    svm::native_storage::UiPreferences preferences;
+    preferences.quickSendSlots = {"A"};
+    assert(controller.shouldPersistPreferences(nullptr, preferences));
+    assert(!controller.shouldPersistPreferences(&preferences, preferences));
+    auto changed = preferences;
+    changed.windowHeight = preferences.windowHeight + 1;
+    assert(controller.shouldPersistPreferences(&preferences, changed));
+}
+
 } // namespace
 
 int main() {
@@ -115,6 +146,7 @@ int main() {
     quickSendSlotsArePaddedAndTrimmed();
     wholePreferencesAreNormalizedTogether();
     sameSettingsIgnoreStorageMetadata();
+    controllerKeepsPreferenceDecisionsPure();
 
     std::cout << "native_ui_preferences_tests passed\n";
     return 0;

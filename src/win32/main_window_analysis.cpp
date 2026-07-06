@@ -27,25 +27,29 @@ const wchar_t* tx(T id) {
 } // namespace
 
 void NativeMainWindow::showAnalysisWorkspace() {
-    if (!store_.isOpen()) {
+    if (modbusAnalysisController_.analysisDecision(store_.isOpen(), false, false, true, true)
+        == NativeAnalysisAction::StorageUnavailable) {
         setStatus(tx(T::AnalysisNoStore));
         return;
     }
     const auto session = store_.latestScanSession();
-    if (!session.has_value()) {
+    if (modbusAnalysisController_.analysisDecision(true, session.has_value(), false, true, true)
+        == NativeAnalysisAction::ScanRequired) {
         setStatus(tx(T::AnalysisNoScan));
         return;
     }
 
     const auto observations = store_.scanObservations(session->sessionId);
-    if (observations.empty()) {
+    if (modbusAnalysisController_.analysisDecision(true, true, !observations.empty(), true, true)
+        == NativeAnalysisAction::ObservationsRequired) {
         setStatus(tx(T::AnalysisNoObservations));
         return;
     }
 
     bool targetOk = false;
     const double targetValue = textToDoubleText(analysisInputText(targetValueEdit_), 0.0, &targetOk);
-    if (!targetOk) {
+    if (modbusAnalysisController_.analysisDecision(true, true, true, targetOk, true)
+        == NativeAnalysisAction::InvalidTarget) {
         setStatus(tx(T::AnalysisInvalidTarget));
         return;
     }
@@ -68,7 +72,8 @@ void NativeMainWindow::showAnalysisWorkspace() {
         setStatus(utf8ToWide(analysis.errorMessage));
         return;
     }
-    if (analysis.candidates.empty()) {
+    if (modbusAnalysisController_.analysisDecision(true, true, true, true, !analysis.candidates.empty())
+        == NativeAnalysisAction::NoCandidates) {
         setStatus(tx(T::AnalysisNoCandidates));
         return;
     }
@@ -92,22 +97,28 @@ void NativeMainWindow::showAnalysisWorkspace() {
 }
 
 void NativeMainWindow::showRuleVerification() {
-    if (!store_.isOpen()) {
+    if (modbusAnalysisController_.ruleVerificationDecision(store_.isOpen(), false, false, false, false, false)
+        == NativeRuleAction::StorageUnavailable) {
         setStatus(tx(T::RuleNoStore));
         return;
     }
 
-    if (const auto candidate = selectedCandidate(); candidate.has_value()) {
-        if (!saveRuleFromCandidate(*candidate)) {
-            return;
-        }
-    } else if (store_.recentProtocolFieldRules(1).empty()) {
+    const auto candidate = selectedCandidate();
+    const bool hasExistingRules = !store_.recentProtocolFieldRules(1).empty();
+    if (modbusAnalysisController_.ruleVerificationDecision(true, candidate.has_value(), hasExistingRules, true, true, true)
+        == NativeRuleAction::CandidateOrRuleRequired) {
         setStatus(tx(T::RuleNoCandidates));
         return;
     }
+    if (candidate.has_value()) {
+        if (!saveRuleFromCandidate(*candidate)) {
+            return;
+        }
+    }
 
     const auto session = store_.latestScanSession();
-    if (!session.has_value()) {
+    if (modbusAnalysisController_.ruleVerificationDecision(true, true, true, session.has_value(), true, true)
+        == NativeRuleAction::ScanRequired) {
         setStatus(tx(T::RuleVerifyNoScan));
         return;
     }
@@ -115,7 +126,7 @@ void NativeMainWindow::showRuleVerification() {
 }
 
 void NativeMainWindow::exportReport() {
-    if (!store_.isOpen()) {
+    if (modbusAnalysisController_.reportDecision(store_.isOpen(), true) == NativeReportAction::StorageUnavailable) {
         setStatus(tx(T::RuleNoStore));
         return;
     }
@@ -127,7 +138,7 @@ void NativeMainWindow::exportReport() {
     if (!run.has_value()) {
         run = store_.latestRuleVerificationRun();
     }
-    if (!run.has_value()) {
+    if (modbusAnalysisController_.reportDecision(true, run.has_value()) == NativeReportAction::RunRequired) {
         setStatus(tx(T::ExportNoRun));
         return;
     }
@@ -262,18 +273,21 @@ bool NativeMainWindow::saveRuleFromCandidate(const native_storage::MatchCandidat
 }
 
 bool NativeMainWindow::runRuleVerification(const native_storage::ScanSessionRecord& session) {
-    if (!store_.isOpen()) {
+    if (modbusAnalysisController_.ruleVerificationDecision(store_.isOpen(), true, true, true, true, true)
+        == NativeRuleAction::StorageUnavailable) {
         setStatus(tx(T::RuleNoStore));
         return false;
     }
 
     const auto rules = store_.recentProtocolFieldRules(200);
-    if (rules.empty()) {
+    if (modbusAnalysisController_.ruleVerificationDecision(true, true, true, true, !rules.empty(), true)
+        == NativeRuleAction::RulesRequired) {
         setStatus(tx(T::RuleVerifyNoRules));
         return false;
     }
     const auto observations = store_.scanObservations(session.sessionId);
-    if (observations.empty()) {
+    if (modbusAnalysisController_.ruleVerificationDecision(true, true, true, true, true, !observations.empty())
+        == NativeRuleAction::ObservationsRequired) {
         setStatus(tx(T::RuleVerifyNoObservations));
         return false;
     }
