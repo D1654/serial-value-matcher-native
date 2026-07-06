@@ -194,6 +194,9 @@ void NativeMainWindow::shutdownSerialPort() {
 }
 
 std::wstring NativeMainWindow::serialIoBusyStatus() const {
+    if (!serialIoState_.isBusy()) {
+        return tx(T::SerialIoBusyStatus);
+    }
     switch (serialIoState_.owner()) {
     case NativeSerialIoOwner::FileSend:
         return tx(T::FileSendBusyStatus);

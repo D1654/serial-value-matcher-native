@@ -144,4 +144,22 @@ std::wstring_view nativeLogPayloadPrefix(NativeLogKind kind) {
     return L"[DATA]";
 }
 
+NativeLogEntry nativeMakeTextLogEntry(NativeLogKind kind, std::wstring timestamp, std::wstring text) {
+    NativeLogEntry entry;
+    entry.kind = kind;
+    entry.timestamp = std::move(timestamp);
+    entry.text = std::move(text);
+    return entry;
+}
+
+NativeLogEntry nativeMakePayloadLogEntry(NativeLogKind kind, std::wstring timestamp, std::vector<std::uint8_t> payload) {
+    NativeLogEntry entry;
+    entry.kind = kind;
+    entry.timestamp = std::move(timestamp);
+    entry.payloadPrefix = std::wstring(nativeLogPayloadPrefix(kind));
+    entry.payload = std::move(payload);
+    entry.hasPayload = true;
+    return entry;
+}
+
 } // namespace svm::win32

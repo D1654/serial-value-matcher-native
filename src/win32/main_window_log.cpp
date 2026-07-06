@@ -41,21 +41,11 @@ void NativeMainWindow::appendLog(const std::wstring& line) {
 }
 
 void NativeMainWindow::appendLog(NativeLogKind kind, const std::wstring& line) {
-    NativeLogEntry entry;
-    entry.kind = kind;
-    entry.timestamp = nativeLocalClockText();
-    entry.text = line;
-    addLogEntry(std::move(entry));
+    addLogEntry(nativeMakeTextLogEntry(kind, nativeLocalClockText(), line));
 }
 
 void NativeMainWindow::appendPayloadLog(NativeLogKind kind, const std::vector<std::uint8_t>& payload) {
-    NativeLogEntry entry;
-    entry.kind = kind;
-    entry.timestamp = nativeLocalClockText();
-    entry.payloadPrefix = std::wstring(nativeLogPayloadPrefix(kind));
-    entry.payload = payload;
-    entry.hasPayload = true;
-    addLogEntry(std::move(entry));
+    addLogEntry(nativeMakePayloadLogEntry(kind, nativeLocalClockText(), payload));
 }
 
 std::wstring NativeMainWindow::formatPayloadForLog(const std::vector<std::uint8_t>& payload) const {

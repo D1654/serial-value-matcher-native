@@ -89,6 +89,27 @@ void longVisibleLogLinesAreClippedWithSuffix() {
     assert(unchanged == L"ABC");
 }
 
+void logEntriesAreBuiltByTheModel() {
+    const auto text = svm::win32::nativeMakeTextLogEntry(
+        svm::win32::NativeLogKind::Error,
+        L"10:00",
+        L"failed");
+    assert(text.kind == svm::win32::NativeLogKind::Error);
+    assert(text.timestamp == L"10:00");
+    assert(text.text == L"failed");
+    assert(!text.hasPayload);
+
+    const auto payload = svm::win32::nativeMakePayloadLogEntry(
+        svm::win32::NativeLogKind::Tx,
+        L"10:01",
+        {0x41, 0x42});
+    assert(payload.kind == svm::win32::NativeLogKind::Tx);
+    assert(payload.timestamp == L"10:01");
+    assert(payload.payloadPrefix == L"[TX]");
+    assert(payload.payload.size() == 2);
+    assert(payload.hasPayload);
+}
+
 } // namespace
 
 int main() {
@@ -99,6 +120,7 @@ int main() {
     visibleLogTextEscapesControlCharacters();
     containsNeedleIsCaseInsensitive();
     longVisibleLogLinesAreClippedWithSuffix();
+    logEntriesAreBuiltByTheModel();
 
     std::cout << "native_log_filter_state_tests passed\n";
     return 0;

@@ -128,6 +128,7 @@ if(SVM_BUILD_WIN32_APP)
         src/win32/native_progress_control.cpp
         src/win32/native_reconnect_state.cpp
         src/win32/native_serial_io_state.cpp
+        src/win32/native_serial_send_controller.cpp
         src/win32/native_serial_profile_codec.cpp
         src/win32/native_send_codec.cpp
         src/win32/native_send_control_state.cpp
@@ -462,6 +463,8 @@ add_test(NAME native_send_codec_tests COMMAND native_send_codec_tests)
 
 add_executable(native_send_control_state_tests
     tests/native_send_control_state_tests.cpp
+    src/win32/native_serial_io_state.cpp
+    src/win32/native_serial_send_controller.cpp
     src/win32/native_send_control_state.cpp
     src/win32/native_ui_preferences.cpp
 )

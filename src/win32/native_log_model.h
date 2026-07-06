@@ -68,5 +68,7 @@ bool containsLoweredNeedle(std::wstring_view haystack, std::wstring_view lowered
 bool containsCaseInsensitive(std::wstring_view haystack, std::wstring_view needle);
 std::wstring clipRenderedLogLine(std::wstring text, std::size_t maxChars, std::wstring_view suffix);
 std::wstring_view nativeLogPayloadPrefix(NativeLogKind kind);
+NativeLogEntry nativeMakeTextLogEntry(NativeLogKind kind, std::wstring timestamp, std::wstring text);
+NativeLogEntry nativeMakePayloadLogEntry(NativeLogKind kind, std::wstring timestamp, std::vector<std::uint8_t> payload);
 
 } // namespace svm::win32

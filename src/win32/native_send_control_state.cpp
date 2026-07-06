@@ -10,8 +10,12 @@ bool NativeSendControlState::timedSendEnabled() const noexcept {
     return timedSendEnabled_;
 }
 
+bool NativeSendControlState::canRunTimedSend(bool serialOpen, bool manualSendAllowed) const noexcept {
+    return timedSendEnabled_ && serialOpen && manualSendAllowed;
+}
+
 NativeTimedSendTimerDecision NativeSendControlState::timerDecision(bool serialOpen, bool manualSendAllowed, int requestedPeriodMs) const noexcept {
-    if (!timedSendEnabled_ || !serialOpen || !manualSendAllowed) {
+    if (!canRunTimedSend(serialOpen, manualSendAllowed)) {
         return {false, nativeNormalizeTimedSendPeriodMs(requestedPeriodMs)};
     }
     return {true, nativeNormalizeTimedSendPeriodMs(requestedPeriodMs)};

@@ -11,10 +11,15 @@ using svm::win32::NativeSerialIoState;
 void idleStateAllowsNewOwners() {
     NativeSerialIoState state;
     assert(state.isIdle());
+    assert(!state.isBusy());
     assert(state.owner() == NativeSerialIoOwner::None);
     assert(state.allowsManualSend());
     assert(state.allowsFileSend());
     assert(state.allowsModbusScan());
+    assert(state.allowsOwner(NativeSerialIoOwner::ManualSend));
+    assert(state.allowsOwner(NativeSerialIoOwner::FileSend));
+    assert(state.allowsOwner(NativeSerialIoOwner::ModbusScan));
+    assert(!state.allowsOwner(NativeSerialIoOwner::None));
     assert(state.allowsSerialPoll());
     assert(state.allowsLineControl());
     assert(!state.shouldDeferDisconnect());
@@ -23,7 +28,9 @@ void idleStateAllowsNewOwners() {
 void manualSendIsExclusiveAndShortLived() {
     NativeSerialIoState state;
     assert(state.tryAcquire(NativeSerialIoOwner::ManualSend));
+    assert(state.isBusy());
     assert(state.isOwnedBy(NativeSerialIoOwner::ManualSend));
+    assert(!state.allowsOwner(NativeSerialIoOwner::ManualSend));
     assert(!state.allowsManualSend());
     assert(!state.allowsFileSend());
     assert(!state.allowsModbusScan());

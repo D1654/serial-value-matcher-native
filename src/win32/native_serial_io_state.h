@@ -13,6 +13,7 @@ class NativeSerialIoState final {
 public:
     NativeSerialIoOwner owner() const noexcept;
     bool isIdle() const noexcept;
+    bool isBusy() const noexcept;
     bool isOwnedBy(NativeSerialIoOwner owner) const noexcept;
 
     bool canAcquire(NativeSerialIoOwner owner) const noexcept;
@@ -23,6 +24,7 @@ public:
     bool allowsManualSend() const noexcept;
     bool allowsFileSend() const noexcept;
     bool allowsModbusScan() const noexcept;
+    bool allowsOwner(NativeSerialIoOwner owner) const noexcept;
     bool allowsSerialPoll() const noexcept;
     bool allowsLineControl() const noexcept;
     bool shouldDeferDisconnect() const noexcept;

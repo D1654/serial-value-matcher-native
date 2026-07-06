@@ -17,6 +17,7 @@ public:
     void setTimedSendEnabled(bool enabled) noexcept;
     bool timedSendEnabled() const noexcept;
 
+    bool canRunTimedSend(bool serialOpen, bool manualSendAllowed) const noexcept;
     NativeTimedSendTimerDecision timerDecision(bool serialOpen, bool manualSendAllowed, int requestedPeriodMs) const noexcept;
 
     bool isQuickSendIndexValid(std::size_t index, std::size_t slotCount) const noexcept;

@@ -10,6 +10,10 @@ bool NativeSerialIoState::isIdle() const noexcept {
     return owner_ == NativeSerialIoOwner::None;
 }
 
+bool NativeSerialIoState::isBusy() const noexcept {
+    return !isIdle();
+}
+
 bool NativeSerialIoState::isOwnedBy(NativeSerialIoOwner owner) const noexcept {
     return owner_ == owner;
 }
@@ -48,6 +52,20 @@ bool NativeSerialIoState::allowsFileSend() const noexcept {
 
 bool NativeSerialIoState::allowsModbusScan() const noexcept {
     return isIdle();
+}
+
+bool NativeSerialIoState::allowsOwner(NativeSerialIoOwner owner) const noexcept {
+    switch (owner) {
+    case NativeSerialIoOwner::ManualSend:
+        return allowsManualSend();
+    case NativeSerialIoOwner::FileSend:
+        return allowsFileSend();
+    case NativeSerialIoOwner::ModbusScan:
+        return allowsModbusScan();
+    case NativeSerialIoOwner::None:
+        break;
+    }
+    return false;
 }
 
 bool NativeSerialIoState::allowsSerialPoll() const noexcept {

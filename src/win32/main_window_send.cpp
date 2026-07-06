@@ -121,27 +121,30 @@ void NativeMainWindow::sendPayload() {
 }
 
 bool NativeMainWindow::sendPayloadFromText(const std::wstring& text, bool saveHistory) {
-    if (!serialPort_.isOpen()) {
+    const NativeSerialSendDecision availability = serialSendController_.manualSendAvailability(serialPort_.isOpen(), serialIoState_);
+    if (availability.kind == NativeSerialSendDecisionKind::SerialNotConnected) {
         setStatus(tx(T::SerialNotConnectedSend));
         return false;
     }
-    if (!serialIoState_.allowsManualSend()) {
+    if (availability.kind == NativeSerialSendDecisionKind::SerialIoBusy) {
         setStatus(serialIoBusyStatus());
         return false;
     }
 
     std::wstring errorText;
     const std::vector<std::uint8_t> payload = payloadFromText(text, &errorText);
-    if (!errorText.empty()) {
+    const NativeSerialSendDecision payloadDecision = serialSendController_.manualPayloadDecision(!errorText.empty(), payload.empty());
+    if (payloadDecision.kind == NativeSerialSendDecisionKind::PayloadInvalid) {
         setStatus(errorText);
         return false;
     }
-    if (payload.empty()) {
+    if (payloadDecision.kind == NativeSerialSendDecisionKind::PayloadEmpty) {
         setStatus(tx(T::EmptyPayload));
         return false;
     }
 
-    if (!serialIoState_.tryAcquire(NativeSerialIoOwner::ManualSend)) {
+    const NativeSerialSendDecision acquireDecision = serialSendController_.manualAcquireDecision(serialIoState_.tryAcquire(availability.owner));
+    if (!acquireDecision.allowed()) {
         setStatus(serialIoBusyStatus());
         return false;
     }
@@ -172,11 +175,18 @@ bool NativeMainWindow::sendPayloadFromText(const std::wstring& text, bool saveHi
 }
 
 void NativeMainWindow::sendQuickPayload(std::size_t index) {
-    if (!sendControlState_.isQuickSendIndexValid(index, quickSendEdits_.size())) {
+    const std::wstring text = sendControlState_.isQuickSendIndexValid(index, quickSendEdits_.size())
+        ? controlText(quickSendEdits_[index])
+        : std::wstring();
+    const NativeSerialSendDecision decision = serialSendController_.quickSendDecision(
+        sendControlState_,
+        index,
+        quickSendEdits_.size(),
+        text);
+    if (decision.ignored()) {
         return;
     }
-    const std::wstring text = controlText(quickSendEdits_[index]);
-    if (!sendControlState_.isQuickSendTextUsable(text)) {
+    if (decision.kind == NativeSerialSendDecisionKind::QuickSendEmpty) {
         setStatus(tx(T::QuickSendEmptyStatus));
         return;
     }
@@ -185,9 +195,10 @@ void NativeMainWindow::sendQuickPayload(std::size_t index) {
 
 void NativeMainWindow::updateTimedSendTimer() {
     KillTimer(window_, IDT_TIMED_SEND);
-    const NativeTimedSendTimerDecision decision = sendControlState_.timerDecision(
+    const NativeTimedSendTimerDecision decision = serialSendController_.timedSendDecision(
+        sendControlState_,
         serialPort_.isOpen(),
-        serialIoState_.allowsManualSend(),
+        serialIoState_,
         textToInt(timedPeriodEdit_, kNativeDefaultTimedSendPeriodMs));
     if (!decision.shouldRun) {
         return;
@@ -220,20 +231,24 @@ void NativeMainWindow::browseFileSend() {
 }
 
 void NativeMainWindow::startFileSend() {
-    if (!serialPort_.isOpen()) {
+    const std::wstring pathText = controlText(filePathEdit_);
+    const NativeSerialSendDecision startDecision = serialSendController_.fileStartDecision(
+        serialPort_.isOpen(),
+        serialIoState_,
+        fileSend_.active(),
+        pathText);
+    if (startDecision.kind == NativeSerialSendDecisionKind::SerialNotConnected) {
         setStatus(tx(T::SerialNotConnectedSend));
         return;
     }
-    if (!serialIoState_.allowsFileSend()) {
+    if (startDecision.kind == NativeSerialSendDecisionKind::SerialIoBusy) {
         setStatus(serialIoBusyStatus());
         return;
     }
-    if (fileSend_.active()) {
+    if (startDecision.ignored()) {
         return;
     }
-
-    const std::wstring pathText = controlText(filePathEdit_);
-    if (pathText.empty()) {
+    if (startDecision.kind == NativeSerialSendDecisionKind::FilePathEmpty) {
         setStatus(tx(T::FileSendNoFile));
         return;
     }
@@ -243,7 +258,8 @@ void NativeMainWindow::startFileSend() {
         setStatus(uiString(T::FileSendOpenFailedPrefix) + pathText);
         return;
     }
-    if (!serialIoState_.tryAcquire(NativeSerialIoOwner::FileSend)) {
+    const NativeSerialSendDecision acquireDecision = serialSendController_.fileAcquireDecision(serialIoState_.tryAcquire(startDecision.owner));
+    if (!acquireDecision.allowed()) {
         fileSend_.close();
         setStatus(serialIoBusyStatus());
         return;
@@ -283,14 +299,18 @@ void NativeMainWindow::stopFileSend(const std::wstring& statusText) {
 }
 
 void NativeMainWindow::pumpFileSend() {
-    if (!fileSend_.active()) {
+    const NativeSerialSendDecision pumpDecision = serialSendController_.filePumpDecision(
+        fileSend_.active(),
+        serialPort_.isOpen(),
+        serialIoState_);
+    if (pumpDecision.ignored()) {
         return;
     }
-    if (!serialPort_.isOpen()) {
+    if (pumpDecision.kind == NativeSerialSendDecisionKind::FileDisconnected) {
         stopFileSend(tx(T::DisconnectedStatus));
         return;
     }
-    if (!serialIoState_.isOwnedBy(NativeSerialIoOwner::FileSend)) {
+    if (pumpDecision.kind == NativeSerialSendDecisionKind::SerialIoBusy) {
         stopFileSend(serialIoBusyStatus());
         return;
     }

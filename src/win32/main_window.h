@@ -22,6 +22,7 @@
 #include "win32/native_modbus_scan_worker.h"
 #include "win32/native_reconnect_state.h"
 #include "win32/native_serial_io_state.h"
+#include "win32/native_serial_send_controller.h"
 #include "win32/native_ui_preferences.h"
 #include "win32/native_send_control_state.h"
 #include "win32/native_send_history_state.h"
@@ -384,6 +385,7 @@ private:
     NativeLogScrollState logScrollState_;
     NativeStatusCountersState statusCountersState_;
     NativeSendControlState sendControlState_;
+    NativeSerialSendController serialSendController_;
     NativeFileSendState fileSend_;
     NativeModbusScanUiState modbusScanUiState_;
     HANDLE modbusScanThread_ = nullptr;
