@@ -27,7 +27,7 @@ bool NativeSerialIoState::isOwnedBy(NativeSerialIoOwner owner) const noexcept {
 }
 
 bool NativeSerialIoState::canAcquire(NativeSerialIoOwner owner) const noexcept {
-    return owner != NativeSerialIoOwner::None && isIdle();
+    return allowsOwner(owner);
 }
 
 bool NativeSerialIoState::tryAcquire(NativeSerialIoOwner owner) noexcept {
@@ -51,15 +51,15 @@ void NativeSerialIoState::forceRelease() noexcept {
 }
 
 bool NativeSerialIoState::allowsManualSend() const noexcept {
-    return isIdle();
+    return isIdle() && !serialWriteQueueHasBackpressure();
 }
 
 bool NativeSerialIoState::allowsFileSend() const noexcept {
-    return isIdle();
+    return isIdle() && !hasPendingSerialWrites();
 }
 
 bool NativeSerialIoState::allowsModbusScan() const noexcept {
-    return isIdle();
+    return isIdle() && !hasPendingSerialWrites();
 }
 
 bool NativeSerialIoState::allowsOwner(NativeSerialIoOwner owner) const noexcept {
@@ -82,7 +82,7 @@ bool NativeSerialIoState::allowsSerialPoll() const noexcept {
 }
 
 bool NativeSerialIoState::allowsLineControl() const noexcept {
-    return isIdle();
+    return isIdle() && !hasPendingSerialWrites();
 }
 
 bool NativeSerialIoState::shouldDeferDisconnect() const noexcept {

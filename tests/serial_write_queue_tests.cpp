@@ -80,6 +80,22 @@ void cancelBeforeSendRemovesOnlyTargetRequest() {
     assert(missing.status == SerialWriteResultStatus::RejectedInvalid);
 }
 
+void cancelAllPendingReturnsTerminalResultsInFifoOrder() {
+    SerialWriteQueue queue(4);
+    const auto first = queue.enqueue({0x01, 0x02});
+    const auto second = queue.enqueue({0x03});
+
+    const auto cancelled = queue.cancelAllPending();
+    assert(cancelled.size() == 2);
+    assert(cancelled[0].status == SerialWriteResultStatus::Cancelled);
+    assert(cancelled[0].terminal());
+    assert(cancelled[0].requestId == first.requestId);
+    assert(cancelled[0].byteCount == 2);
+    assert(cancelled[1].requestId == second.requestId);
+    assert(cancelled[1].byteCount == 1);
+    assert(queue.empty());
+}
+
 void completionResultsPopTheFrontRequest() {
     SerialWriteQueue queue(3);
     const auto sentRequest = queue.enqueue({0x01, 0x02});
@@ -148,6 +164,7 @@ int main() {
     fullQueueReportsBackpressureWithoutDroppingExistingRequests();
     invalidRequestsAreRejected();
     cancelBeforeSendRemovesOnlyTargetRequest();
+    cancelAllPendingReturnsTerminalResultsInFifoOrder();
     completionResultsPopTheFrontRequest();
     partialCompletionIsAFailedTerminalResult();
     snapshotExposesBoundedQueueState();

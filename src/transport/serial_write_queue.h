@@ -81,6 +81,7 @@ public:
 
     SerialWriteResult cancelPending(SerialWriteRequestId requestId);
     SerialWriteResult cancelPending(SerialWriteCancellationToken token);
+    std::vector<SerialWriteResult> cancelAllPending();
     SerialWriteResult completeNextSent(std::size_t byteCount);
     SerialWriteResult completeNextFailed(std::string message);
     SerialWriteResult completeNextTimeout(std::string message = {});

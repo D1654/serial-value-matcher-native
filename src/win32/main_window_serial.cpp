@@ -180,6 +180,7 @@ void NativeMainWindow::closeSerialPort(const std::wstring& statusText) {
     stopFileSend({});
     const std::wstring endpoint = utf8ToWide(serialPort_.endpoint());
     serialPort_.close();
+    clearPendingSerialWrites();
     appendLog(uiString(T::SystemDisconnectedPrefix) + endpoint);
     updateConnectionButtonState();
     updateRtsControlState();
@@ -191,9 +192,13 @@ void NativeMainWindow::shutdownSerialPort() {
     if (serialPort_.isOpen()) {
         serialPort_.close();
     }
+    clearPendingSerialWrites();
 }
 
 std::wstring NativeMainWindow::serialIoBusyStatus() const {
+    if (serialIoState_.hasPendingSerialWrites()) {
+        return L"串口写入队列仍有待发送数据，请稍后再试。";
+    }
     if (!serialIoState_.isBusy()) {
         return tx(T::SerialIoBusyStatus);
     }

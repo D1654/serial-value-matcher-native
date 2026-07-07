@@ -76,6 +76,7 @@ if(WIN32)
 endif()
 
 target_include_directories(svm_win32_serial PUBLIC src)
+target_link_libraries(svm_win32_serial PUBLIC svm_slim_core)
 
 add_library(svm_native_storage
     src/native_storage/native_store_file_ops.cpp
@@ -391,6 +392,7 @@ set_target_properties(native_file_send_state_tests PROPERTIES
     AUTOUIC OFF
     AUTORCC OFF
 )
+target_link_libraries(native_file_send_state_tests PRIVATE svm_slim_core)
 target_include_directories(native_file_send_state_tests PRIVATE src)
 add_test(NAME native_file_send_state_tests COMMAND native_file_send_state_tests)
 

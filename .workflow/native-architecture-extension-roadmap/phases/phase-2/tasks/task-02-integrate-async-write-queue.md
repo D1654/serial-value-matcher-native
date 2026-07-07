@@ -1,7 +1,7 @@
 # Task 02: Integrate Async Write Queue
 
 > Phase: 2 — Backend Consistency
-> Status: pending
+> Status: completed
 
 ---
 
@@ -64,9 +64,9 @@ If implementation touches more live paths than expected, split before further co
 
 ## Verification
 
-- [ ] UI thread no longer synchronously waits for serial write completion.
-- [ ] Manual send result is visible and logged.
-- [ ] Focused and full tests pass.
+- [x] UI thread no longer synchronously waits for serial write completion.
+- [x] Manual send result is visible and logged.
+- [x] Focused and full tests pass.
 
 **Test command:**
 ```bash

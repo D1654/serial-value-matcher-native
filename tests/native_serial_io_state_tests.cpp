@@ -95,6 +95,32 @@ void writeQueueStatusTracksPendingCapacityAndBackpressure() {
     assert(!state.serialWriteQueueHasBackpressure());
 }
 
+void pendingWritesBlockExclusiveOwnersButAllowManualBacklog() {
+    NativeSerialIoState state;
+    state.updateWriteQueueStatus(1, 4);
+
+    assert(state.hasPendingSerialWrites());
+    assert(state.allowsManualSend());
+    assert(state.allowsOwner(NativeSerialIoOwner::ManualSend));
+    assert(!state.allowsFileSend());
+    assert(!state.allowsOwner(NativeSerialIoOwner::FileSend));
+    assert(!state.allowsModbusScan());
+    assert(!state.allowsOwner(NativeSerialIoOwner::ModbusScan));
+    assert(!state.allowsLineControl());
+    assert(state.tryAcquire(NativeSerialIoOwner::ManualSend));
+    assert(state.release(NativeSerialIoOwner::ManualSend));
+}
+
+void fullWriteQueueBlocksManualBacklogToo() {
+    NativeSerialIoState state;
+    state.updateWriteQueueStatus(4, 4);
+
+    assert(state.serialWriteQueueHasBackpressure());
+    assert(!state.allowsManualSend());
+    assert(!state.allowsOwner(NativeSerialIoOwner::ManualSend));
+    assert(!state.tryAcquire(NativeSerialIoOwner::ManualSend));
+}
+
 } // namespace
 
 int main() {
@@ -103,6 +129,8 @@ int main() {
     fileSendOwnsWritesButKeepsPollingAllowed();
     modbusScanOwnsThePortUntilFinished();
     writeQueueStatusTracksPendingCapacityAndBackpressure();
+    pendingWritesBlockExclusiveOwnersButAllowManualBacklog();
+    fullWriteQueueBlocksManualBacklogToo();
 
     std::cout << "native_serial_io_state_tests passed\n";
     return 0;

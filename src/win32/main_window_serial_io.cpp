@@ -25,9 +25,128 @@ const wchar_t* tx(T id) {
     return uiText(id);
 }
 
+std::wstring writeResultMessage(const svm::transport::SerialWriteResult& result) {
+    if (!result.message.empty()) {
+        return utf8ToWide(result.message);
+    }
+    switch (result.status) {
+    case svm::transport::SerialWriteResultStatus::Timeout:
+        return L"串口写入超时。";
+    case svm::transport::SerialWriteResultStatus::Cancelled:
+        return L"串口写入已取消。";
+    case svm::transport::SerialWriteResultStatus::Failed:
+        return L"串口写入失败。";
+    case svm::transport::SerialWriteResultStatus::RejectedFull:
+        return L"串口写入队列已满。";
+    case svm::transport::SerialWriteResultStatus::RejectedInvalid:
+        return L"串口写入请求无效。";
+    case svm::transport::SerialWriteResultStatus::Accepted:
+        return L"串口写入请求已接受。";
+    case svm::transport::SerialWriteResultStatus::Sent:
+        return {};
+    }
+    return L"串口写入状态未知。";
+}
+
 } // namespace
 
+void NativeMainWindow::updateSerialWriteQueueStatus() {
+    serialIoState_.updateWriteQueueStatus(serialPort_.writeQueueSnapshot());
+}
+
+void NativeMainWindow::clearPendingSerialWrites() {
+    pendingSerialWrites_.clear();
+    serialPort_.takeCompletedWrites();
+    updateSerialWriteQueueStatus();
+}
+
+void NativeMainWindow::drainSerialWriteResults() {
+    const std::vector<svm::transport::SerialWriteResult> results = serialPort_.takeCompletedWrites();
+    if (results.empty()) {
+        updateSerialWriteQueueStatus();
+        return;
+    }
+
+    for (const auto& result : results) {
+        const auto found = std::find_if(
+            pendingSerialWrites_.begin(),
+            pendingSerialWrites_.end(),
+            [&result](const NativePendingSerialWrite& pending) {
+                return pending.requestId == result.requestId;
+            });
+        if (found == pendingSerialWrites_.end()) {
+            continue;
+        }
+
+        NativePendingSerialWrite pending = std::move(*found);
+        pendingSerialWrites_.erase(found);
+
+        if (result.status == svm::transport::SerialWriteResultStatus::Cancelled) {
+            setStatus(writeResultMessage(result));
+            continue;
+        }
+
+        if (result.status != svm::transport::SerialWriteResultStatus::Sent) {
+            const std::wstring message = writeResultMessage(result);
+            if (pending.source == NativePendingSerialWriteSource::File && fileSend_.active()) {
+                stopFileSend(message);
+            } else {
+                setStatus(message);
+            }
+            handleSerialFailure(result.message.empty() ? "串口写入失败。" : result.message);
+            continue;
+        }
+
+        if (pending.source == NativePendingSerialWriteSource::Manual) {
+            saveRawEvent("Tx", pending.payload);
+            if (pending.saveHistory && store_.isOpen()) {
+                native_storage::SendHistoryEntry history = nativeMakeSendHistoryEntry(
+                    wideToUtf8(pending.manualText),
+                    pending.payloadMode,
+                    pending.lineEnding,
+                    pending.textCodePage,
+                    nativeUtcTimestampText());
+                store_.saveSendHistory(history);
+                refreshSendHistory();
+            }
+            appendPayloadLog(NativeLogKind::Tx, pending.payload);
+            statusCountersState_.addTxBytes(static_cast<std::uint64_t>(result.byteCount));
+            updateStatusSegments();
+            setStatus(uiString(T::SentPrefix) + std::to_wstring(result.byteCount) + uiString(T::BytesSuffix));
+            continue;
+        }
+
+        if (!fileSend_.active()) {
+            continue;
+        }
+
+        saveRawEvent("Tx", pending.payload);
+        appendPayloadLog(NativeLogKind::Tx, pending.payload);
+        fileSend_.markBytesWritten(result.byteCount);
+        statusCountersState_.addTxBytes(static_cast<std::uint64_t>(result.byteCount));
+        updateFileSendProgress();
+        updateStatusSegments();
+
+        if (fileSend_.done()) {
+            const std::wstring summary = uiString(T::FileSendDonePrefix) + std::to_wstring(fileSend_.sentBytes()) + uiString(T::BytesSuffix);
+            stopFileSend(summary);
+            continue;
+        }
+
+        if ((fileSend_.sentBytes() % static_cast<std::uintmax_t>(kNativeFileSendChunkBytes * 16)) == 0) {
+            setStatus(uiString(T::FileSendProgressPrefix)
+                + std::to_wstring(fileSend_.sentBytes())
+                + L"/"
+                + std::to_wstring(fileSend_.totalBytes())
+                + uiString(T::BytesSuffix));
+        }
+    }
+
+    updateSerialWriteQueueStatus();
+}
+
 void NativeMainWindow::pollSerial() {
+    drainSerialWriteResults();
     if (!serialPort_.isOpen()) {
         return;
     }

@@ -12,6 +12,8 @@
 
 #include <algorithm>
 #include <limits>
+#include <optional>
+#include <string_view>
 #include <utility>
 
 namespace svm::win32 {
@@ -20,6 +22,24 @@ namespace {
 HANDLE asHandle(void* handle) noexcept {
     return static_cast<HANDLE>(handle);
 }
+
+class WriteLock final {
+public:
+    explicit WriteLock(CRITICAL_SECTION& lock) noexcept
+        : lock_(lock) {
+        EnterCriticalSection(&lock_);
+    }
+
+    ~WriteLock() {
+        LeaveCriticalSection(&lock_);
+    }
+
+    WriteLock(const WriteLock&) = delete;
+    WriteLock& operator=(const WriteLock&) = delete;
+
+private:
+    CRITICAL_SECTION& lock_;
+};
 
 bool isValidHandle(HANDLE handle) noexcept {
     return handle != nullptr && handle != INVALID_HANDLE_VALUE;
@@ -76,6 +96,11 @@ bool setLastErrorText(std::string& lastErrorText, unsigned long errorCode, std::
 
 bool unsupportedDisabledControlLine(unsigned long errorCode, bool enabled) noexcept {
     return !enabled && errorCode == ERROR_NOT_SUPPORTED;
+}
+
+bool isTimeoutErrorText(std::string_view message) noexcept {
+    return message.find("超时") != std::string_view::npos
+        || message.find("121") != std::string_view::npos;
 }
 
 std::string commStatusErrorText(DWORD errors) {
@@ -169,24 +194,17 @@ bool applyControlLines(HANDLE handle, const SerialOpenOptions& options, std::str
 
 } // namespace
 
+Win32SerialPort::Win32SerialPort() {
+    InitializeCriticalSection(&writeLock_);
+}
+
 Win32SerialPort::~Win32SerialPort() {
     close();
-}
-
-Win32SerialPort::Win32SerialPort(Win32SerialPort&& other) noexcept
-    : handle_(std::exchange(other.handle_, nullptr)),
-      options_(std::move(other.options_)),
-      lastErrorText_(std::move(other.lastErrorText_)) {
-}
-
-Win32SerialPort& Win32SerialPort::operator=(Win32SerialPort&& other) noexcept {
-    if (this != &other) {
-        close();
-        handle_ = std::exchange(other.handle_, nullptr);
-        options_ = std::move(other.options_);
-        lastErrorText_ = std::move(other.lastErrorText_);
+    if (writeWakeEvent_ != nullptr) {
+        CloseHandle(writeWakeEvent_);
+        writeWakeEvent_ = nullptr;
     }
-    return *this;
+    DeleteCriticalSection(&writeLock_);
 }
 
 bool Win32SerialPort::open(SerialOpenOptions options) {
@@ -237,14 +255,18 @@ bool Win32SerialPort::open(SerialOpenOptions options) {
 }
 
 void Win32SerialPort::close() {
+    stopWriteWorker();
+
     HANDLE handle = asHandle(handle_);
     if (!isValidHandle(handle)) {
         handle_ = nullptr;
+        writeQueue_.clear();
         return;
     }
 
     CloseHandle(handle);
     handle_ = nullptr;
+    writeQueue_.clear();
 }
 
 bool Win32SerialPort::isOpen() const noexcept {
@@ -302,19 +324,33 @@ SerialIoResult Win32SerialPort::writeBytes(const std::vector<std::uint8_t>& payl
 }
 
 SerialIoResult Win32SerialPort::writeBytes(const std::uint8_t* payload, std::size_t size) {
+    return writeBytesInternal(payload, size, true);
+}
+
+SerialIoResult Win32SerialPort::writeBytesInternal(const std::uint8_t* payload, std::size_t size, bool updateLastError) {
+    const auto fail = [this, updateLastError](std::size_t byteCount, std::string message) {
+        if (updateLastError) {
+            lastErrorText_ = message;
+        }
+        return SerialIoResult{false, byteCount, std::move(message)};
+    };
+    const auto succeed = [this, updateLastError](std::size_t byteCount) {
+        if (updateLastError) {
+            lastErrorText_.clear();
+        }
+        return SerialIoResult{true, byteCount, {}};
+    };
+
     if (!isOpen()) {
-        lastErrorText_ = "串口未打开，无法发送数据。";
-        return {false, 0, lastErrorText_};
+        return fail(0, "串口未打开，无法发送数据。");
     }
 
     if (size == 0) {
-        lastErrorText_.clear();
-        return {};
+        return succeed(0);
     }
 
     if (payload == nullptr) {
-        lastErrorText_ = "待发送数据为空指针，无法写入串口。";
-        return {false, 0, lastErrorText_};
+        return fail(0, "待发送数据为空指针，无法写入串口。");
     }
 
     HANDLE handle = asHandle(handle_);
@@ -326,19 +362,219 @@ SerialIoResult Win32SerialPort::writeBytes(const std::uint8_t* payload, std::siz
             static_cast<std::size_t>(std::numeric_limits<DWORD>::max())));
         DWORD written = 0;
         if (!WriteFile(handle, payload + totalWritten, chunkSize, &written, nullptr)) {
-            lastErrorText_ = win32SerialErrorText(GetLastError(), "写入串口");
-            return {false, totalWritten, lastErrorText_};
+            return fail(totalWritten, win32SerialErrorText(GetLastError(), "写入串口"));
         }
 
         totalWritten += written;
         if (written == 0) {
-            lastErrorText_ = "串口驱动没有写入任何字节。设备可能已断开、缓冲区已满，或流控阻止继续发送。";
-            return {false, totalWritten, lastErrorText_};
+            return fail(totalWritten, "串口驱动没有写入任何字节。设备可能已断开、缓冲区已满，或流控阻止继续发送。");
         }
     }
 
-    lastErrorText_.clear();
-    return {true, totalWritten, {}};
+    return succeed(totalWritten);
+}
+
+svm::transport::SerialWriteResult Win32SerialPort::enqueueWrite(std::vector<std::uint8_t> payload) {
+    if (!isOpen()) {
+        lastErrorText_ = "串口未打开，无法发送数据。";
+        return {
+            .status = svm::transport::SerialWriteResultStatus::Failed,
+            .message = lastErrorText_,
+        };
+    }
+
+    svm::transport::SerialWriteResult result;
+    {
+        WriteLock lock(writeLock_);
+        const auto snapshot = writeQueue_.snapshot();
+        if (writeInProgress_ && snapshot.capacity > 0 && snapshot.pendingCount + 1 >= snapshot.capacity) {
+            result = {
+                .status = svm::transport::SerialWriteResultStatus::RejectedFull,
+                .message = "串口写入队列已满，请等待前序请求完成。",
+            };
+        } else {
+            result = writeQueue_.enqueue(std::move(payload), std::max(1, options_.writeTimeoutMs));
+        }
+        if (result.accepted() && !ensureWriteWorkerLocked()) {
+            writeQueue_.cancelPending(result.requestId);
+            result = {
+                .requestId = result.requestId,
+                .status = svm::transport::SerialWriteResultStatus::Failed,
+                .message = lastErrorText_.empty() ? "启动串口写入后台线程失败。" : lastErrorText_,
+            };
+        }
+    }
+
+    if (result.accepted()) {
+        lastErrorText_.clear();
+        SetEvent(writeWakeEvent_);
+    } else if (!result.message.empty()) {
+        lastErrorText_ = result.message;
+    }
+    return result;
+}
+
+std::vector<svm::transport::SerialWriteResult> Win32SerialPort::cancelPendingWrites() {
+    std::vector<svm::transport::SerialWriteResult> results;
+    {
+        WriteLock lock(writeLock_);
+        results = writeQueue_.cancelAllPending();
+        for (const auto& result : results) {
+            completedWrites_.push_back(result);
+        }
+    }
+    if (writeWakeEvent_ != nullptr) {
+        SetEvent(writeWakeEvent_);
+    }
+    return results;
+}
+
+std::vector<svm::transport::SerialWriteResult> Win32SerialPort::takeCompletedWrites() {
+    WriteLock lock(writeLock_);
+    std::vector<svm::transport::SerialWriteResult> results;
+    results.reserve(completedWrites_.size());
+    while (!completedWrites_.empty()) {
+        results.push_back(std::move(completedWrites_.front()));
+        completedWrites_.pop_front();
+    }
+    return results;
+}
+
+svm::transport::SerialWriteQueueSnapshot Win32SerialPort::writeQueueSnapshot() const {
+    WriteLock lock(writeLock_);
+    auto snapshot = writeQueue_.snapshot();
+    if (writeInProgress_) {
+        ++snapshot.pendingCount;
+    }
+    return snapshot;
+}
+
+bool Win32SerialPort::ensureWriteWorkerLocked() {
+    if (writeThread_ != nullptr) {
+        return true;
+    }
+    if (writeWakeEvent_ == nullptr) {
+        writeWakeEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (writeWakeEvent_ == nullptr) {
+            lastErrorText_ = win32SerialErrorText(GetLastError(), "创建串口写入事件");
+            return false;
+        }
+    }
+    writeWorkerStopRequested_ = false;
+    writeThread_ = CreateThread(nullptr, 0, &Win32SerialPort::writeWorkerThreadProc, this, 0, nullptr);
+    if (writeThread_ == nullptr) {
+        lastErrorText_ = win32SerialErrorText(GetLastError(), "启动串口写入线程");
+        return false;
+    }
+    return true;
+}
+
+void Win32SerialPort::stopWriteWorker() {
+    HANDLE thread = nullptr;
+    {
+        WriteLock lock(writeLock_);
+        writeWorkerStopRequested_ = true;
+        thread = writeThread_;
+    }
+    if (writeWakeEvent_ != nullptr) {
+        SetEvent(writeWakeEvent_);
+    }
+    if (thread != nullptr) {
+        WaitForSingleObject(thread, INFINITE);
+        CloseHandle(thread);
+    }
+    {
+        WriteLock lock(writeLock_);
+        if (writeThread_ == thread) {
+            writeThread_ = nullptr;
+        }
+        writeWorkerStopRequested_ = false;
+        writeInProgress_ = false;
+        std::vector<svm::transport::SerialWriteResult> cancelled = writeQueue_.cancelAllPending();
+        for (const auto& result : cancelled) {
+            completedWrites_.push_back(result);
+        }
+    }
+}
+
+void Win32SerialPort::writeWorkerLoop() {
+    while (true) {
+        std::optional<svm::transport::SerialWriteRequest> request;
+        while (true) {
+            {
+                WriteLock lock(writeLock_);
+                if (writeWorkerStopRequested_ && writeQueue_.empty()) {
+                    return;
+                }
+                if (!writeQueue_.empty()) {
+                    request = writeQueue_.takeNext();
+                    if (request.has_value()) {
+                        writeInProgress_ = true;
+                    }
+                    break;
+                }
+            }
+            WaitForSingleObject(writeWakeEvent_, INFINITE);
+        }
+
+        if (!request.has_value()) {
+            continue;
+        }
+
+        svm::transport::SerialWriteResult result;
+        if (request->cancellationRequested()) {
+            result = {
+                .requestId = request->id,
+                .status = svm::transport::SerialWriteResultStatus::Cancelled,
+                .byteCount = request->payload.size(),
+            };
+        } else {
+            const SerialIoResult io = writeBytesInternal(request->payload.data(), request->payload.size(), false);
+            if (io.ok && io.byteCount == request->payload.size()) {
+                result = {
+                    .requestId = request->id,
+                    .status = svm::transport::SerialWriteResultStatus::Sent,
+                    .byteCount = io.byteCount,
+                };
+            } else if (!io.ok && isTimeoutErrorText(io.errorMessage)) {
+                result = {
+                    .requestId = request->id,
+                    .status = svm::transport::SerialWriteResultStatus::Timeout,
+                    .byteCount = io.byteCount,
+                    .message = io.errorMessage,
+                };
+            } else {
+                result = {
+                    .requestId = request->id,
+                    .status = svm::transport::SerialWriteResultStatus::Failed,
+                    .byteCount = io.byteCount,
+                    .message = io.errorMessage.empty() ? "串口写入失败。" : io.errorMessage,
+                };
+            }
+        }
+
+        {
+            WriteLock lock(writeLock_);
+            completedWrites_.push_back(std::move(result));
+            writeInProgress_ = false;
+            if (writeWorkerStopRequested_) {
+                std::vector<svm::transport::SerialWriteResult> cancelled = writeQueue_.cancelAllPending();
+                for (const auto& item : cancelled) {
+                    completedWrites_.push_back(item);
+                }
+                break;
+            }
+        }
+    }
+}
+
+DWORD WINAPI Win32SerialPort::writeWorkerThreadProc(void* parameter) {
+    auto* self = static_cast<Win32SerialPort*>(parameter);
+    if (self == nullptr) {
+        return 1;
+    }
+    self->writeWorkerLoop();
+    return 0;
 }
 
 bool Win32SerialPort::waitForReadyRead(int timeoutMs) {

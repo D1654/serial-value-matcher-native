@@ -70,6 +70,22 @@ private:
         bool settingsRow = false;
     };
 
+    enum class NativePendingSerialWriteSource {
+        Manual,
+        File,
+    };
+
+    struct NativePendingSerialWrite {
+        svm::transport::SerialWriteRequestId requestId = 0;
+        NativePendingSerialWriteSource source = NativePendingSerialWriteSource::Manual;
+        std::vector<std::uint8_t> payload;
+        std::wstring manualText;
+        bool saveHistory = false;
+        int payloadMode = 0;
+        int lineEnding = 0;
+        int textCodePage = CP_UTF8;
+    };
+
     static LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
 
     // Shell/lifecycle: top-level HWND ownership, message loop, and process quit coordination.
@@ -140,6 +156,11 @@ private:
     void releaseModbusScanOwnership();
     void sendPayload();
     bool sendPayloadFromText(const std::wstring& text, bool saveHistory);
+    bool enqueueManualSerialWrite(std::vector<std::uint8_t> payload, const std::wstring& text, bool saveHistory);
+    bool enqueueFileSerialWrite(std::vector<std::uint8_t> payload);
+    void updateSerialWriteQueueStatus();
+    void drainSerialWriteResults();
+    void clearPendingSerialWrites();
     void sendQuickPayload(std::size_t index);
     void updateTimedSendTimer();
     void browseFileSend();
@@ -376,6 +397,7 @@ private:
     std::optional<native_storage::UiPreferences> lastSavedUiPreferences_;
     Win32SerialPort serialPort_;
     NativeSerialIoState serialIoState_;
+    std::deque<NativePendingSerialWrite> pendingSerialWrites_;
     native_storage::NativeSessionStore store_;
     std::vector<SerialPortDescriptor> availablePorts_;
     NativeSendHistoryState sendHistoryState_;

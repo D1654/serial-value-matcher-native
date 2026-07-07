@@ -1,4 +1,5 @@
 #include "win32/native_file_send_state.h"
+#include "transport/serial_write_queue.h"
 
 #include <cassert>
 #include <cstdint>
@@ -104,6 +105,30 @@ void finalChunkIsNotDoneUntilBytesAreMarkedWritten() {
     std::filesystem::remove(path);
 }
 
+void queuedWriteDoesNotAdvanceProgressUntilSentResult() {
+    const std::filesystem::path path = testFilePath("svm-native-file-send-queued-write.bin");
+    writeBytes(path, {1, 2, 3, 4});
+
+    svm::win32::NativeFileSendState state;
+    assert(state.open(path).ok());
+    auto chunk = state.readNextChunk(2);
+    assert(chunk.ready());
+
+    svm::transport::SerialWriteQueue queue(1);
+    const auto accepted = queue.enqueue(chunk.bytes);
+    assert(accepted.status == svm::transport::SerialWriteResultStatus::Accepted);
+    assert(state.sentBytes() == 0);
+    assert(state.progressPermille() == 0);
+
+    const auto sent = queue.completeNextSent(chunk.bytes.size());
+    assert(sent.status == svm::transport::SerialWriteResultStatus::Sent);
+    state.markBytesWritten(sent.byteCount);
+    assert(state.sentBytes() == 2);
+    assert(state.progressPermille() == 500);
+
+    std::filesystem::remove(path);
+}
+
 void writtenBytesAreClampedToFileTotal() {
     const std::filesystem::path path = testFilePath("svm-native-file-send-clamp.bin");
     writeBytes(path, {4, 5});
@@ -162,6 +187,7 @@ int main() {
     readsChunksAndTracksProgress();
     exactChunkCompletionUsesWrittenBytes();
     finalChunkIsNotDoneUntilBytesAreMarkedWritten();
+    queuedWriteDoesNotAdvanceProgressUntilSentResult();
     writtenBytesAreClampedToFileTotal();
     zeroByteFileCannotAccumulateProgress();
     invalidReadRequestsAreRejected();

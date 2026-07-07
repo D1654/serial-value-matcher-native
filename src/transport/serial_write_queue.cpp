@@ -141,6 +141,22 @@ SerialWriteResult SerialWriteQueue::cancelPending(SerialWriteCancellationToken t
     return cancelPending(token.requestId);
 }
 
+std::vector<SerialWriteResult> SerialWriteQueue::cancelAllPending() {
+    std::vector<SerialWriteResult> results;
+    results.reserve(pending_.size());
+    while (!pending_.empty()) {
+        SerialWriteRequest request = std::move(pending_.front());
+        pending_.pop_front();
+        request.cancellationState = SerialWriteCancellationState::Requested;
+        results.push_back({
+            .requestId = request.id,
+            .status = SerialWriteResultStatus::Cancelled,
+            .byteCount = request.payload.size(),
+        });
+    }
+    return results;
+}
+
 SerialWriteResult SerialWriteQueue::completeNextSent(std::size_t byteCount) {
     if (pending_.empty()) {
         return reject(SerialWriteResultStatus::RejectedInvalid, kNoPendingRequestMessage);

@@ -1,8 +1,12 @@
 #include "win32/win32_serial_types.h"
+#if defined(_WIN32)
+#include "win32/win32_serial_port.h"
+#endif
 
 #include <cassert>
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -116,6 +120,19 @@ void translatesCommonWin32ErrorsToActionableChinese() {
     assert(contains(unknown, "123456"));
 }
 
+#if defined(_WIN32)
+void closedPortAsyncWriteFailsWithoutQueueing() {
+    svm::win32::Win32SerialPort port;
+    const auto result = port.enqueueWrite(std::vector<std::uint8_t>{0x01});
+    assert(result.status == svm::transport::SerialWriteResultStatus::Failed);
+    assert(!result.message.empty());
+
+    const auto snapshot = port.writeQueueSnapshot();
+    assert(snapshot.pendingCount == 0);
+    assert(port.takeCompletedWrites().empty());
+}
+#endif
+
 } // namespace
 
 int main() {
@@ -123,6 +140,9 @@ int main() {
     normalizesComPortNamesAndDevicePaths();
     keepsChineseNamesForSettings();
     translatesCommonWin32ErrorsToActionableChinese();
+#if defined(_WIN32)
+    closedPortAsyncWriteFailsWithoutQueueing();
+#endif
 
     std::cout << "native_win32_serial_tests passed\n";
     return 0;
