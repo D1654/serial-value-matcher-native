@@ -135,9 +135,51 @@ if [[ "$found" -ne 1 ]]; then
     exit 4
 fi
 
+load_window_geometry() {
+    local window_id="$1"
+    local key value
+    X=
+    Y=
+    WIDTH=
+    HEIGHT=
+    while IFS="=" read -r key value; do
+        case "$key" in
+        X)
+            [[ "$value" =~ ^-?[0-9]+$ ]] || { echo "窗口几何 X 非法：$value" >&2; exit 7; }
+            X="$value"
+            ;;
+        Y)
+            [[ "$value" =~ ^-?[0-9]+$ ]] || { echo "窗口几何 Y 非法：$value" >&2; exit 7; }
+            Y="$value"
+            ;;
+        WIDTH)
+            [[ "$value" =~ ^[0-9]+$ ]] || { echo "窗口几何 WIDTH 非法：$value" >&2; exit 7; }
+            WIDTH="$value"
+            ;;
+        HEIGHT)
+            [[ "$value" =~ ^[0-9]+$ ]] || { echo "窗口几何 HEIGHT 非法：$value" >&2; exit 7; }
+            HEIGHT="$value"
+            ;;
+        esac
+    done < <(xdotool getwindowgeometry --shell "$window_id")
+    if [[ -z "${X:-}" || -z "${Y:-}" || -z "${WIDTH:-}" || -z "${HEIGHT:-}" ]]; then
+        echo "无法解析窗口几何：$window_id" >&2
+        exit 7
+    fi
+    if (( WIDTH <= 0 || HEIGHT <= 0 )); then
+        echo "窗口尺寸非法：${WIDTH}x${HEIGHT}" >&2
+        exit 7
+    fi
+}
+
+first_window_id="$(head -n 1 "$output_dir/window.ids")"
+default_window_width=1212
+default_window_height=753
+xdotool windowsize --sync "$first_window_id" "$default_window_width" "$default_window_height" >/dev/null 2>&1
 sleep "$stabilize_seconds"
+load_window_geometry "$first_window_id"
 xwd -root -silent | convert xwd:- "$output_dir/root.png"
-printf "%s\n" "PASS default-window file=root.png" >> "$output_dir/capture-status.txt"
+printf "PASS default-window file=root.png requested=%sx%s actual=%sx%s\n" "$default_window_width" "$default_window_height" "$WIDTH" "$HEIGHT" >> "$output_dir/capture-status.txt"
 
 while read -r window_id; do
     xdotool getwindowname "$window_id"
@@ -213,9 +255,7 @@ assert_screenshots_differ() {
     fi
 }
 
-first_window_id="$(head -n 1 "$output_dir/window.ids")"
-geometry="$(xdotool getwindowgeometry --shell "$first_window_id")"
-eval "$geometry"
+load_window_geometry "$first_window_id"
 toolbar_width=$((WIDTH - 180))
 if [[ "$toolbar_width" -lt 240 ]]; then
     toolbar_width=240
@@ -237,9 +277,7 @@ capture_resize_sweep_set() {
         index=$((index + 1))
     done
 
-    local geometry
-    geometry="$(xdotool getwindowgeometry --shell "$window_id")"
-    eval "$geometry"
+    load_window_geometry "$window_id"
     local resize_toolbar_width=$((WIDTH - 180))
     if [[ "$resize_toolbar_width" -lt 240 ]]; then
         resize_toolbar_width=240
@@ -254,9 +292,7 @@ capture_tab_set() {
     local prefix="$2"
     local fast_frames="$3"
     local fast_delay="$4"
-    local geometry
-    geometry="$(xdotool getwindowgeometry --shell "$window_id")"
-    eval "$geometry"
+    load_window_geometry "$window_id"
 
     local compact=0
     if (( WIDTH < 1040 || HEIGHT < 720 )); then
@@ -342,9 +378,7 @@ capture_log_splitter_movement() {
     sleep 1
     capture_checked_screen "$output_dir/log-splitter-before.png"
 
-    local geometry
-    geometry="$(xdotool getwindowgeometry --shell "$window_id")"
-    eval "$geometry"
+    load_window_geometry "$window_id"
 
     local compact=0
     if (( WIDTH < 1040 || HEIGHT < 720 )); then

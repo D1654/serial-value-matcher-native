@@ -54,7 +54,8 @@ NativeWorkbenchTabApplyPlan NativeWorkbenchTabState::beginApply(
     plan.hidePreviousTab = !plan.layoutChanged && activeTabIndex_ >= 0 && activeTabIndex_ != normalizedTabIndex;
     plan.previousTabIndex = activeTabIndex_;
     plan.showRequestedTab = visibilityReady && pageVisible;
-    plan.redrawAfterApply = plan.layoutChanged && !suspendRedraw && canRedraw;
+    const bool visibilityChanged = plan.hideAllControls || plan.hidePreviousTab || plan.showRequestedTab;
+    plan.redrawAfterApply = visibilityChanged && !suspendRedraw && canRedraw;
     return plan;
 }
 

@@ -344,7 +344,9 @@ void NativeMainWindow::applyWorkbenchTabVisibility(int tabIndex) {
     setWorkbenchTabControlsVisible(tabIndex, true);
 
     workbenchTabState_.finishApply(tabIndex, workbenchVisibilityReady_, workbenchVisibility_.pageVisible);
-    scheduleWorkbenchTabRepaint();
+    if (plan.redrawAfterApply) {
+        scheduleWorkbenchTabRepaint();
+    }
 }
 
 void NativeMainWindow::updateWorkbenchTab() {

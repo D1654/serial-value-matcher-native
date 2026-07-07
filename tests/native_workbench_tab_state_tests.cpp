@@ -14,7 +14,7 @@ void firstApplyShowsRequestedTab() {
     assert(!plan.hidePreviousTab);
     assert(plan.previousTabIndex == -1);
     assert(plan.showRequestedTab);
-    assert(!plan.redrawAfterApply);
+    assert(plan.redrawAfterApply);
     assert(state.applyCount() == 1);
 
     state.finishApply(0);
@@ -63,6 +63,7 @@ void switchingTabsHidesPreviousTabOnly() {
     assert(plan.hidePreviousTab);
     assert(plan.previousTabIndex == 0);
     assert(plan.showRequestedTab);
+    assert(plan.redrawAfterApply);
     state.finishApply(3);
     assert(state.activeTabIndex() == 3);
 }
@@ -72,6 +73,7 @@ void hiddenPageStillRecordsAppliedTab() {
     const auto plan = state.beginApply(2, false, false, true, false);
     assert(!plan.skip);
     assert(!plan.showRequestedTab);
+    assert(!plan.redrawAfterApply);
     state.finishApply(2, false, false);
     assert(state.activeTabIndex() == 2);
 }
@@ -88,10 +90,26 @@ void pageVisibilityChangeReappliesCurrentTab() {
     assert(!visible.hidePreviousTab);
     assert(visible.previousTabIndex == 2);
     assert(visible.showRequestedTab);
+    assert(visible.redrawAfterApply);
     state.finishApply(2, true, true);
 
     const auto repeated = state.beginApply(2, true, true, true, false);
     assert(repeated.skip);
+}
+
+void redrawPlanHonorsRedrawAvailability() {
+    svm::win32::NativeWorkbenchTabState state;
+    const auto noRedrawTarget = state.beginApply(0, true, true, false, false);
+    assert(!noRedrawTarget.skip);
+    assert(noRedrawTarget.showRequestedTab);
+    assert(!noRedrawTarget.redrawAfterApply);
+    state.finishApply(0);
+
+    state.noteLayoutChanged();
+    const auto suspended = state.beginApply(0, true, true, true, true);
+    assert(!suspended.skip);
+    assert(suspended.layoutChanged);
+    assert(!suspended.redrawAfterApply);
 }
 
 void invalidTabIndexIsNormalized() {
@@ -136,6 +154,7 @@ int main() {
     switchingTabsHidesPreviousTabOnly();
     hiddenPageStillRecordsAppliedTab();
     pageVisibilityChangeReappliesCurrentTab();
+    redrawPlanHonorsRedrawAvailability();
     invalidTabIndexIsNormalized();
     helpTopicAndUpdateStateTrackTabs();
 

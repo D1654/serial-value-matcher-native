@@ -151,6 +151,44 @@ public static class NativeUiCapture {
 }
 "@
 
+function Set-CaptureWindowSize {
+    param(
+        [IntPtr]$WindowHandle,
+        [int]$Width,
+        [int]$Height,
+        [int]$DelayMilliseconds = 800
+    )
+
+    [NativeUiCapture]::ShowWindow($WindowHandle, [NativeUiCapture]::SW_RESTORE) | Out-Null
+    $setWindowFlags = [NativeUiCapture]::SWP_NOZORDER -bor [NativeUiCapture]::SWP_SHOWWINDOW
+    if (-not [NativeUiCapture]::SetWindowPos(
+            $WindowHandle,
+            [IntPtr]::Zero,
+            0,
+            0,
+            $Width,
+            $Height,
+            $setWindowFlags)) {
+        throw "设置窗口尺寸失败：${Width}x${Height}"
+    }
+    [NativeUiCapture]::SetForegroundWindow($WindowHandle) | Out-Null
+    Start-Sleep -Milliseconds $DelayMilliseconds
+}
+
+function Get-NativeWindowSize {
+    param([IntPtr]$WindowHandle)
+
+    $rect = New-Object NativeUiCapture+RECT
+    if (-not [NativeUiCapture]::GetWindowRect($WindowHandle, [ref]$rect)) {
+        throw "GetWindowRect 失败。"
+    }
+
+    return [PSCustomObject]@{
+        Width = [Math]::Max(1, $rect.Right - $rect.Left)
+        Height = [Math]::Max(1, $rect.Bottom - $rect.Top)
+    }
+}
+
 function Capture-WindowImage {
     param(
         [IntPtr]$WindowHandle,
@@ -651,16 +689,16 @@ Write-Host "启动：$ExePath"
 $process = Start-Process -FilePath $ExePath -PassThru
 try {
     $windowHandle = Wait-MainWindow -Process $process
-    [NativeUiCapture]::ShowWindow($windowHandle, [NativeUiCapture]::SW_RESTORE) | Out-Null
-    [NativeUiCapture]::SetForegroundWindow($windowHandle) | Out-Null
-    Start-Sleep -Milliseconds 1000
+    Set-CaptureWindowSize -WindowHandle $windowHandle -Width $DefaultWidth -Height $DefaultHeight -DelayMilliseconds 1000
 
     $dpiMetrics = Get-NativeDpiMetrics -WindowHandle $windowHandle
+    $defaultWindowSize = Get-NativeWindowSize -WindowHandle $windowHandle
     @(
         "WindowTitle=$WindowTitle",
         "ExePath=$ExePath",
         "WindowHandle=$windowHandle",
         "DefaultSize=${DefaultWidth}x${DefaultHeight}",
+        "DefaultCaptureSize=$($defaultWindowSize.Width)x$($defaultWindowSize.Height)",
         "CompactSize=${CompactWidth}x${CompactHeight}",
         "WindowDpi=$($dpiMetrics.WindowDpi)",
         "ScreenDpiX=$($dpiMetrics.ScreenDpiX)",
@@ -673,7 +711,7 @@ try {
     $rootFile = Join-Path $outputPath "root.png"
     Capture-WindowImage -WindowHandle $windowHandle -Path $rootFile
     Assert-ImageVisible -Path $rootFile
-    Add-CaptureStatus -Scenario "default-window" -Detail "file=root.png size=${DefaultWidth}x${DefaultHeight}"
+    Add-CaptureStatus -Scenario "default-window" -Detail "file=root.png requested=${DefaultWidth}x${DefaultHeight} actual=$($defaultWindowSize.Width)x$($defaultWindowSize.Height)"
     $rootImage = [System.Drawing.Bitmap]::FromFile($rootFile)
     try {
         $rootWidth = $rootImage.Width
