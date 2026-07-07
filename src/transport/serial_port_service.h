@@ -1,10 +1,13 @@
 #pragma once
 
+#include <cstddef>
+
 #include <QObject>
 #include <QSerialPort>
 #include <QString>
 
 #include "capture/capture_bus.h"
+#include "transport/serial_write_queue.h"
 
 namespace svm::transport {
 
@@ -18,6 +21,7 @@ struct SerialOpenOptions {
     QSerialPort::FlowControl flowControl = QSerialPort::NoFlowControl;
     bool dataTerminalReady = false;
     bool requestToSend = false;
+    std::size_t writeQueueCapacity = kDefaultSerialWriteQueueCapacity;
 };
 
 class SerialPortService final : public QObject {
@@ -30,6 +34,7 @@ public:
     void close();
     bool isOpen() const;
     QString lastErrorText() const;
+    std::size_t writeQueueCapacity() const noexcept;
 
 public slots:
     qint64 writeBytes(const QByteArray& payload);

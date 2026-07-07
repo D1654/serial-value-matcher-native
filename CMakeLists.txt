@@ -47,6 +47,7 @@ add_library(svm_slim_core
     src/core/modbus_core.cpp
     src/core/analysis_core.cpp
     src/core/report_core.cpp
+    src/transport/serial_write_queue.cpp
 )
 
 target_include_directories(svm_slim_core PUBLIC src)
@@ -356,6 +357,18 @@ set_target_properties(native_modbus_scan_request_tests PROPERTIES
 target_link_libraries(native_modbus_scan_request_tests PRIVATE svm_slim_core)
 target_include_directories(native_modbus_scan_request_tests PRIVATE src)
 add_test(NAME native_modbus_scan_request_tests COMMAND native_modbus_scan_request_tests)
+
+add_executable(serial_write_queue_tests
+    tests/serial_write_queue_tests.cpp
+)
+set_target_properties(serial_write_queue_tests PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+target_link_libraries(serial_write_queue_tests PRIVATE svm_slim_core)
+target_include_directories(serial_write_queue_tests PRIVATE src)
+add_test(NAME serial_write_queue_tests COMMAND serial_write_queue_tests)
 
 add_executable(native_serial_io_state_tests
     tests/native_serial_io_state_tests.cpp

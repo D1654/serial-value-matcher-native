@@ -1,6 +1,7 @@
 #include "win32/native_serial_io_state.h"
 
 #include <cassert>
+#include <cstddef>
 #include <iostream>
 
 namespace {
@@ -69,6 +70,31 @@ void modbusScanOwnsThePortUntilFinished() {
     assert(state.isIdle());
 }
 
+void writeQueueStatusTracksPendingCapacityAndBackpressure() {
+    NativeSerialIoState state;
+    assert(state.writeQueueStatus().empty());
+    assert(!state.writeQueueStatus().full());
+    assert(!state.hasPendingSerialWrites());
+    assert(!state.serialWriteQueueHasBackpressure());
+
+    state.updateWriteQueueStatus(1, 4);
+    assert(state.writeQueueStatus().pendingCount == 1);
+    assert(state.writeQueueStatus().capacity == 4);
+    assert(state.hasPendingSerialWrites());
+    assert(!state.serialWriteQueueHasBackpressure());
+
+    state.updateWriteQueueStatus(4, 4);
+    assert(state.serialWriteQueueHasBackpressure());
+
+    svm::transport::SerialWriteQueueSnapshot snapshot;
+    snapshot.capacity = 8;
+    snapshot.pendingCount = 2;
+    state.updateWriteQueueStatus(snapshot);
+    assert(state.writeQueueStatus().capacity == 8);
+    assert(state.writeQueueStatus().pendingCount == 2);
+    assert(!state.serialWriteQueueHasBackpressure());
+}
+
 } // namespace
 
 int main() {
@@ -76,6 +102,7 @@ int main() {
     manualSendIsExclusiveAndShortLived();
     fileSendOwnsWritesButKeepsPollingAllowed();
     modbusScanOwnsThePortUntilFinished();
+    writeQueueStatusTracksPendingCapacityAndBackpressure();
 
     std::cout << "native_serial_io_state_tests passed\n";
     return 0;

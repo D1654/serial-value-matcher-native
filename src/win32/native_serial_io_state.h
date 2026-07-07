@@ -1,5 +1,9 @@
 #pragma once
 
+#include "transport/serial_write_queue.h"
+
+#include <cstddef>
+
 namespace svm::win32 {
 
 enum class NativeSerialIoOwner {
@@ -7,6 +11,14 @@ enum class NativeSerialIoOwner {
     ManualSend,
     FileSend,
     ModbusScan,
+};
+
+struct NativeSerialWriteQueueStatus {
+    std::size_t pendingCount = 0;
+    std::size_t capacity = 0;
+
+    bool empty() const noexcept;
+    bool full() const noexcept;
 };
 
 class NativeSerialIoState final {
@@ -29,8 +41,15 @@ public:
     bool allowsLineControl() const noexcept;
     bool shouldDeferDisconnect() const noexcept;
 
+    NativeSerialWriteQueueStatus writeQueueStatus() const noexcept;
+    void updateWriteQueueStatus(std::size_t pendingCount, std::size_t capacity) noexcept;
+    void updateWriteQueueStatus(const svm::transport::SerialWriteQueueSnapshot& snapshot) noexcept;
+    bool hasPendingSerialWrites() const noexcept;
+    bool serialWriteQueueHasBackpressure() const noexcept;
+
 private:
     NativeSerialIoOwner owner_ = NativeSerialIoOwner::None;
+    NativeSerialWriteQueueStatus writeQueueStatus_;
 };
 
 } // namespace svm::win32

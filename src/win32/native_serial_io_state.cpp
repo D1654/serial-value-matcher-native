@@ -2,6 +2,14 @@
 
 namespace svm::win32 {
 
+bool NativeSerialWriteQueueStatus::empty() const noexcept {
+    return pendingCount == 0;
+}
+
+bool NativeSerialWriteQueueStatus::full() const noexcept {
+    return capacity > 0 && pendingCount >= capacity;
+}
+
 NativeSerialIoOwner NativeSerialIoState::owner() const noexcept {
     return owner_;
 }
@@ -79,6 +87,29 @@ bool NativeSerialIoState::allowsLineControl() const noexcept {
 
 bool NativeSerialIoState::shouldDeferDisconnect() const noexcept {
     return owner_ == NativeSerialIoOwner::ModbusScan;
+}
+
+NativeSerialWriteQueueStatus NativeSerialIoState::writeQueueStatus() const noexcept {
+    return writeQueueStatus_;
+}
+
+void NativeSerialIoState::updateWriteQueueStatus(std::size_t pendingCount, std::size_t capacity) noexcept {
+    writeQueueStatus_ = {
+        .pendingCount = pendingCount,
+        .capacity = capacity,
+    };
+}
+
+void NativeSerialIoState::updateWriteQueueStatus(const svm::transport::SerialWriteQueueSnapshot& snapshot) noexcept {
+    updateWriteQueueStatus(snapshot.pendingCount, snapshot.capacity);
+}
+
+bool NativeSerialIoState::hasPendingSerialWrites() const noexcept {
+    return !writeQueueStatus_.empty();
+}
+
+bool NativeSerialIoState::serialWriteQueueHasBackpressure() const noexcept {
+    return writeQueueStatus_.full();
 }
 
 } // namespace svm::win32

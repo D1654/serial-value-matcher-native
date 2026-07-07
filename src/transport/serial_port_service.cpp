@@ -66,6 +66,10 @@ QString SerialPortService::lastErrorText() const {
     return m_lastErrorText;
 }
 
+std::size_t SerialPortService::writeQueueCapacity() const noexcept {
+    return m_options.writeQueueCapacity;
+}
+
 qint64 SerialPortService::writeBytes(const QByteArray& payload) {
     if (!m_port.isOpen()) {
         reportError(QSerialPort::NotOpenError, QStringLiteral("串口未打开，无法发送数据。"));
