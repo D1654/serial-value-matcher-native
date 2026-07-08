@@ -1,7 +1,7 @@
 # Task 07: Add File Commit and Orphan Recovery
 
 > Phase: 2 — Backend Consistency
-> Status: pending
+> Status: completed
 
 ---
 
@@ -15,14 +15,13 @@ Add schema-aware file commit and orphan recovery behavior for native storage rec
 - None
 
 **Modify:**
+- `src/native_storage/native_session_store.h`
+- `src/native_storage/native_session_store.cpp`
 - `src/native_storage/native_store_file_ops.h`
 - `src/native_storage/native_store_file_ops.cpp`
 - `src/native_storage/native_store_record_io.h`
 - `src/native_storage/native_store_record_io.cpp`
-- `src/native_storage/native_store_record_codec.h`
-- `src/native_storage/native_store_record_codec.cpp`
 - `tests/native_storage_tests.cpp`
-- `tests/session_store_tests.cpp`
 
 **Test:**
 - Native storage fault/recovery tests
@@ -59,9 +58,9 @@ ctest --test-dir build-codex --output-on-failure -R "native_storage|session_stor
 
 ## Verification
 
-- [ ] Partial writes do not corrupt committed session records.
-- [ ] Recovery reports orphan handling.
-- [ ] Existing storage fixtures remain compatible.
+- [x] Partial writes do not corrupt committed session records.
+- [x] Recovery reports orphan handling.
+- [x] Existing storage fixtures remain compatible.
 
 **Test command:**
 ```bash

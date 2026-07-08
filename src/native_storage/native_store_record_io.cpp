@@ -327,4 +327,121 @@ bool copyFileTailWithHeader(
     return true;
 }
 
+bool copyFilePrefix(
+    const std::filesystem::path& sourcePath,
+    const std::filesystem::path& tempPath,
+    std::uintmax_t byteCount,
+    std::string* errorText,
+    std::string_view context) {
+    std::ifstream input(sourcePath, std::ios::binary);
+    if (!input) {
+        if (errorText != nullptr) {
+            *errorText = std::string(context) + "失败：无法打开源文件。";
+        }
+        return false;
+    }
+
+    std::ofstream output(tempPath, std::ios::binary | std::ios::trunc);
+    if (!output) {
+        if (errorText != nullptr) {
+            *errorText = std::string(context) + "失败：无法创建临时文件。";
+        }
+        return false;
+    }
+
+    std::array<char, 64 * 1024> buffer = {};
+    std::uintmax_t remaining = byteCount;
+    while (remaining > 0) {
+        const std::uintmax_t chunk = remaining < buffer.size() ? remaining : buffer.size();
+        input.read(buffer.data(), static_cast<std::streamsize>(chunk));
+        if (input.gcount() != static_cast<std::streamsize>(chunk)) {
+            if (errorText != nullptr) {
+                *errorText = std::string(context) + "失败：源文件前缀被截断。";
+            }
+            return false;
+        }
+        output.write(buffer.data(), static_cast<std::streamsize>(chunk));
+        if (!output) {
+            if (errorText != nullptr) {
+                *errorText = std::string(context) + "失败：临时文件写入中断。";
+            }
+            return false;
+        }
+        remaining -= chunk;
+    }
+    output.flush();
+    if (!output) {
+        if (errorText != nullptr) {
+            *errorText = std::string(context) + "失败：临时文件刷新失败。";
+        }
+        return false;
+    }
+    return true;
+}
+
+bool copyFileTail(
+    const std::filesystem::path& sourcePath,
+    const std::filesystem::path& tailPath,
+    std::uintmax_t offset,
+    std::string* errorText,
+    std::string_view context) {
+    std::ifstream input(sourcePath, std::ios::binary);
+    if (!input) {
+        if (errorText != nullptr) {
+            *errorText = std::string(context) + "失败：无法打开源文件。";
+        }
+        return false;
+    }
+    if (offset > static_cast<std::uintmax_t>(std::numeric_limits<std::streamoff>::max())) {
+        if (errorText != nullptr) {
+            *errorText = std::string(context) + "失败：尾部偏移超出平台限制。";
+        }
+        return false;
+    }
+    input.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+    if (!input) {
+        if (errorText != nullptr) {
+            *errorText = std::string(context) + "失败：无法定位尾部数据。";
+        }
+        return false;
+    }
+
+    std::ofstream output(tailPath, std::ios::binary | std::ios::trunc);
+    if (!output) {
+        if (errorText != nullptr) {
+            *errorText = std::string(context) + "失败：无法创建孤儿记录文件。";
+        }
+        return false;
+    }
+
+    std::array<char, 64 * 1024> buffer = {};
+    while (input) {
+        input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        const std::streamsize bytesRead = input.gcount();
+        if (bytesRead > 0) {
+            output.write(buffer.data(), bytesRead);
+            if (!output) {
+                if (errorText != nullptr) {
+                    *errorText = std::string(context) + "失败：孤儿记录写入中断。";
+                }
+                return false;
+            }
+        }
+    }
+    if (input.bad()) {
+        if (errorText != nullptr) {
+            *errorText = std::string(context) + "失败：读取源文件尾部中断。";
+        }
+        return false;
+    }
+    output.flush();
+    if (!output) {
+        if (errorText != nullptr) {
+            *errorText = std::string(context) + "失败：孤儿记录文件刷新失败。";
+        }
+        return false;
+    }
+    return true;
+}
+
 } // namespace svm::native_storage::store_io

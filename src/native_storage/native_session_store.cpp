@@ -16,6 +16,8 @@ namespace svm::native_storage {
 namespace {
 
 using store_io::RecordSpan;
+using store_io::copyFilePrefix;
+using store_io::copyFileTail;
 using store_io::copyFileTailWithHeader;
 using store_io::kHeader;
 using store_io::parseRecords;
@@ -26,6 +28,7 @@ using store_io::writeRecord;
 using store_file_ops::ReplacementTarget;
 using store_file_ops::commitReplacementTargets;
 using store_file_ops::recoverReplacementArtifacts;
+using store_file_ops::recoveryOrphanPath;
 using store_file_ops::replaceFileWithTemp;
 using store_file_ops::replacementBackupPath;
 using store_file_ops::replacementTempPath;
@@ -61,6 +64,7 @@ std::vector<T> recentLastFirstFromDeque(const std::deque<T>& values) {
 } // namespace
 
 bool NativeSessionStore::open(const std::filesystem::path& storeDirectory) {
+    lastRecoveryText_.clear();
     scanSessionsCacheValid_ = false;
     matchRunsCacheValid_ = false;
     ruleVerificationRunsCacheValid_ = false;
@@ -116,6 +120,9 @@ bool NativeSessionStore::initializeSchema() {
             return false;
         }
         if (std::filesystem::exists(path, error)) {
+            if (!recoverRecordFileTail(fileName)) {
+                return false;
+            }
             continue;
         }
         std::ofstream output(path, std::ios::binary);
@@ -139,6 +146,10 @@ bool NativeSessionStore::isOpen() const {
 
 std::string NativeSessionStore::lastErrorText() const {
     return lastErrorText_;
+}
+
+std::string NativeSessionStore::lastRecoveryText() const {
+    return lastRecoveryText_;
 }
 
 bool NativeSessionStore::appendRawEvent(const RawIoEvent& event) {
@@ -804,6 +815,96 @@ bool NativeSessionStore::compactRawEventsIfNeeded() {
         return false;
     }
     return replaceFileWithTemp(tempPath, path, lastErrorText_, "压缩 native 原始记录");
+}
+
+bool NativeSessionStore::recoverRecordFileTail(std::string_view fileName) {
+    const auto path = filePath(fileName);
+    std::error_code error;
+    const bool exists = std::filesystem::exists(path, error);
+    if (error) {
+        lastErrorText_ = "恢复 native 存储记录失败：无法检查 "
+            + path.filename().string() + "：" + error.message();
+        return false;
+    }
+    if (!exists) {
+        return true;
+    }
+
+    const std::uintmax_t fileSize = std::filesystem::file_size(path, error);
+    if (error) {
+        lastErrorText_ = "恢复 native 存储记录失败：无法读取 "
+            + path.filename().string() + " 大小：" + error.message();
+        return false;
+    }
+
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        lastErrorText_ = "恢复 native 存储记录失败：无法打开 "
+            + path.filename().string() + "。";
+        return false;
+    }
+    if (!skipStoreHeader(input)) {
+        lastErrorText_ = "恢复 native 存储记录失败：无法读取 "
+            + path.filename().string() + " 文件头。";
+        return false;
+    }
+
+    std::streampos lastGoodPosition = input.tellg();
+    if (lastGoodPosition == std::streampos(-1)) {
+        lastGoodPosition = 0;
+    }
+    std::uintmax_t lastGoodOffset = static_cast<std::uintmax_t>(lastGoodPosition);
+    std::string parseError;
+    while (true) {
+        std::optional<RecordSpan> span = readNextRecordSpan(input, &parseError, "恢复 native 存储记录");
+        if (!parseError.empty()) {
+            break;
+        }
+        if (!span.has_value()) {
+            return true;
+        }
+        lastGoodOffset = span->offset + span->size;
+    }
+    input.close();
+
+    if (lastGoodOffset >= fileSize) {
+        lastErrorText_ = parseError;
+        return false;
+    }
+
+    const auto tempPath = replacementTempPath(path);
+    const auto orphanPath = recoveryOrphanPath(path);
+    std::filesystem::remove(tempPath, error);
+    error.clear();
+    std::filesystem::remove(orphanPath, error);
+    error.clear();
+
+    if (!copyFileTail(path, orphanPath, lastGoodOffset, &lastErrorText_, "恢复 native 存储记录")) {
+        std::error_code cleanupError;
+        std::filesystem::remove(orphanPath, cleanupError);
+        return false;
+    }
+    if (!copyFilePrefix(path, tempPath, lastGoodOffset, &lastErrorText_, "恢复 native 存储记录")) {
+        std::error_code cleanupError;
+        std::filesystem::remove(tempPath, cleanupError);
+        std::filesystem::remove(orphanPath, cleanupError);
+        return false;
+    }
+
+    if (!replaceFileWithTemp(tempPath, path, lastErrorText_, "恢复 native 存储记录")) {
+        std::error_code cleanupError;
+        std::filesystem::remove(tempPath, cleanupError);
+        return false;
+    }
+
+    if (!lastRecoveryText_.empty()) {
+        lastRecoveryText_.push_back('\n');
+    }
+    lastRecoveryText_ += "已恢复 " + path.filename().string()
+        + "：保留完整记录前缀，隔离 "
+        + std::to_string(fileSize - lastGoodOffset) + " 字节孤儿记录。";
+    lastErrorText_.clear();
+    return true;
 }
 
 bool NativeSessionStore::visitRecords(std::string_view fileName, const std::function<bool(const Record&)>& visitor) const {

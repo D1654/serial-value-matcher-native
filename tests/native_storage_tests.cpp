@@ -1,5 +1,6 @@
 #include "native_storage/native_session_store.h"
 #include "native_storage/native_store_files.h"
+#include "native_storage/native_store_record_io.h"
 #include "storage/session_store_port.h"
 
 #ifdef NDEBUG
@@ -79,6 +80,18 @@ void writeEmptyStoreFile(const std::filesystem::path& path) {
     assert(output);
 }
 
+void writeStoreRecords(
+    const std::filesystem::path& path,
+    const std::vector<svm::native_storage::NativeSessionStore::Record>& records) {
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    assert(output);
+    output << svm::native_storage::store_io::kHeader;
+    for (const auto& record : records) {
+        assert(svm::native_storage::store_io::writeRecord(output, record));
+    }
+    assert(output);
+}
+
 void rawEventsAreBatchedAndReopened() {
     const auto path = temporaryStorePath();
     auto store = openStore(path);
@@ -154,6 +167,81 @@ void replacementArtifactsAreRecoveredOnOpen() {
     std::cerr << "native_storage_tests:   recovered history size=" << history.size() << std::endl;
     assert(history.size() == 1);
     assert(history[0].content == "AA55");
+
+    std::filesystem::remove_all(path);
+}
+
+void interruptedReplacementRollsBackLiveFileToBackup() {
+    const auto path = temporaryStorePath();
+    {
+        auto store = openStore(path);
+        svm::native_storage::SendHistoryEntry entry;
+        entry.content = "OLD";
+        entry.payloadMode = 1;
+        entry.sentAtUtc = "2026-06-12T10:01:00Z";
+        assert(store.saveSendHistory(entry, 10));
+    }
+
+    const auto historyPath = path / "send_history.svmr";
+    const auto backupPath = path / "send_history.svmr.bak";
+    const auto tempPath = path / "send_history.svmr.tmp";
+    std::error_code error;
+    std::filesystem::rename(historyPath, backupPath, error);
+    assert(!error);
+    writeStoreRecords(historyPath, {{
+        "99",
+        "NEW",
+        "1",
+        "0",
+        "2026-06-12T10:01:01Z",
+        "65001",
+    }});
+    writeEmptyStoreFile(tempPath);
+
+    auto reopened = openStore(path);
+    const auto history = reopened.recentSendHistory(10);
+    assert(history.size() == 1);
+    assert(history[0].content == "OLD");
+    assert(!pathExists(backupPath));
+    assert(!pathExists(tempPath));
+
+    std::filesystem::remove_all(path);
+}
+
+void truncatedAppendTailIsIsolatedOnOpen() {
+    const auto path = temporaryStorePath();
+    {
+        auto store = openStore(path);
+        svm::native_storage::RawIoEvent first;
+        first.sessionId = "tail-recovery";
+        first.direction = "Tx";
+        first.timestampUtc = "2026-06-12T10:02:00Z";
+        first.endpoint = "COM4";
+        first.payload = {0x01};
+
+        svm::native_storage::RawIoEvent second = first;
+        second.direction = "Rx";
+        second.payload = {0x02};
+        assert(store.appendRawEvents({first, second}));
+        assert(store.rawEventCount() == 2);
+    }
+
+    const auto rawPath = path / "raw_io_events.svmr";
+    {
+        std::ofstream output(rawPath, std::ios::binary | std::ios::app);
+        assert(output);
+        output << "6|2:9913:tail-recovery";
+        assert(output);
+    }
+
+    svm::native_storage::NativeSessionStore reopened;
+    assert(reopened.open(path));
+    assert(reopened.rawEventCount() == 2);
+    const auto recent = reopened.recentRawEvents(2);
+    assert(recent.size() == 2);
+    assert(recent[0].direction == "Rx");
+    assert(reopened.lastRecoveryText().find("raw_io_events.svmr") != std::string::npos);
+    assert(pathExists(rawPath.string() + ".orphan"));
 
     std::filesystem::remove_all(path);
 }
@@ -1335,6 +1423,8 @@ void protocolRulesAndVerificationRoundTrip() {
 int main() {
     runStorageTest("rawEventsAreBatchedAndReopened", rawEventsAreBatchedAndReopened);
     runStorageTest("replacementArtifactsAreRecoveredOnOpen", replacementArtifactsAreRecoveredOnOpen);
+    runStorageTest("interruptedReplacementRollsBackLiveFileToBackup", interruptedReplacementRollsBackLiveFileToBackup);
+    runStorageTest("truncatedAppendTailIsIsolatedOnOpen", truncatedAppendTailIsIsolatedOnOpen);
     runStorageTest("idCountersPersistAcrossReopen", idCountersPersistAcrossReopen);
     runStorageTest("missingOrCorruptIdCountersAreRebuilt", missingOrCorruptIdCountersAreRebuilt);
     runStorageTest("presetRecordIdsAdvancePersistedCounters", presetRecordIdsAdvancePersistedCounters);

@@ -231,6 +231,7 @@ public:
     bool initializeSchema();
     bool isOpen() const;
     std::string lastErrorText() const;
+    std::string lastRecoveryText() const;
 
     bool appendRawEvent(const RawIoEvent& event);
     bool appendRawEvents(const std::vector<RawIoEvent>& events);
@@ -282,6 +283,7 @@ private:
     bool ensureOpen(std::string_view operation) const;
     bool appendRecords(std::string_view fileName, const std::vector<Record>& records);
     bool compactRawEventsIfNeeded();
+    bool recoverRecordFileTail(std::string_view fileName);
     bool visitRecords(std::string_view fileName, const std::function<bool(const Record&)>& visitor) const;
     std::vector<Record> loadRecords(std::string_view fileName) const;
     bool rewriteRecords(std::string_view fileName, const std::vector<Record>& records);
@@ -309,6 +311,7 @@ private:
     std::filesystem::path storeDirectory_;
     bool opened_ = false;
     mutable std::string lastErrorText_;
+    std::string lastRecoveryText_;
     std::unordered_map<std::string, std::int64_t> nextIds_;
     bool countersDirty_ = false;
     std::uintmax_t rawEventSoftLimitBytes_ = 100ULL * 1024ULL * 1024ULL;

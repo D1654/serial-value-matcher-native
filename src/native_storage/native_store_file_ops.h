@@ -18,6 +18,7 @@ struct ReplacementTarget {
 
 std::filesystem::path replacementTempPath(const std::filesystem::path& path);
 std::filesystem::path replacementBackupPath(const std::filesystem::path& path);
+std::filesystem::path recoveryOrphanPath(const std::filesystem::path& path);
 bool recoverReplacementArtifacts(const std::filesystem::path& path, std::string& errorText);
 bool replaceFileWithTemp(
     const std::filesystem::path& tempPath,

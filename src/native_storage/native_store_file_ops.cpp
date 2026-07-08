@@ -60,6 +60,10 @@ std::filesystem::path replacementBackupPath(const std::filesystem::path& path) {
     return path.string() + ".bak";
 }
 
+std::filesystem::path recoveryOrphanPath(const std::filesystem::path& path) {
+    return path.string() + ".orphan";
+}
+
 bool recoverReplacementArtifacts(const std::filesystem::path& path, std::string& errorText) {
     const auto backupPath = replacementBackupPath(path);
     const auto tempPath = replacementTempPath(path);
@@ -76,16 +80,18 @@ bool recoverReplacementArtifacts(const std::filesystem::path& path, std::string&
         return false;
     }
 
-    if (!hasPath && hasBackup) {
+    if (hasBackup) {
+        if (hasPath) {
+            std::filesystem::remove(path, error);
+            if (error) {
+                errorText = "恢复 native 存储替换状态失败：无法移除未提交文件 "
+                    + path.filename().string() + "：" + error.message();
+                return false;
+            }
+        }
         std::filesystem::rename(backupPath, path, error);
         if (error) {
             errorText = "恢复 native 存储替换状态失败：无法还原备份 " + backupPath.filename().string() + "：" + error.message();
-            return false;
-        }
-    } else if (hasPath && hasBackup) {
-        std::filesystem::remove(backupPath, error);
-        if (error) {
-            errorText = "恢复 native 存储替换状态失败：无法清理旧备份 " + backupPath.filename().string() + "：" + error.message();
             return false;
         }
     }

@@ -35,5 +35,17 @@ bool copyFileTailWithHeader(
     const std::filesystem::path& tempPath,
     std::uintmax_t offset,
     std::string* errorText);
+bool copyFilePrefix(
+    const std::filesystem::path& sourcePath,
+    const std::filesystem::path& tempPath,
+    std::uintmax_t byteCount,
+    std::string* errorText,
+    std::string_view context);
+bool copyFileTail(
+    const std::filesystem::path& sourcePath,
+    const std::filesystem::path& tailPath,
+    std::uintmax_t offset,
+    std::string* errorText,
+    std::string_view context);
 
 } // namespace svm::native_storage::store_io
