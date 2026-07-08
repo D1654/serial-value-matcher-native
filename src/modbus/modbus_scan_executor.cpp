@@ -1,12 +1,73 @@
 #include "modbus/modbus_scan_executor.h"
 
+#include "core/modbus_scan_executor_core.h"
 #include "modbus/modbus_read_request.h"
 
-#include <algorithm>
 #include <utility>
 
 namespace svm::modbus {
 namespace {
+
+using CoreAttemptStatus = core::modbus::ScanAttemptStatus;
+using CoreExecutionStatus = core::modbus::ScanExecutionStatus;
+using CoreExchangeStatus = core::modbus::RtuTransportExchangeStatus;
+
+QString fromCoreText(const core::Text& text) {
+    return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
+}
+
+core::Text toCoreText(const QString& text) {
+    const QByteArray utf8 = text.toUtf8();
+    return core::Text(utf8.constData(), static_cast<std::size_t>(utf8.size()));
+}
+
+QByteArray fromCoreBytes(const core::ByteBuffer& bytes) {
+    if (bytes.empty()) {
+        return {};
+    }
+    return QByteArray(reinterpret_cast<const char*>(bytes.data()), static_cast<qsizetype>(bytes.size()));
+}
+
+QByteArray fromCoreBytes(core::ByteSpan bytes) {
+    if (bytes.empty()) {
+        return {};
+    }
+    return QByteArray(reinterpret_cast<const char*>(bytes.data()), static_cast<qsizetype>(bytes.size()));
+}
+
+core::ByteBuffer toCoreBytes(const QByteArray& bytes) {
+    core::ByteBuffer result;
+    result.reserve(static_cast<std::size_t>(bytes.size()));
+    for (const char value : bytes) {
+        result.push_back(static_cast<core::Byte>(static_cast<unsigned char>(value)));
+    }
+    return result;
+}
+
+core::ByteBuffer toCoreBytes(core::ByteSpan bytes) {
+    return core::ByteBuffer(bytes.begin(), bytes.end());
+}
+
+core::Text toCoreTimestampText(const QDateTime& dateTime) {
+    if (!dateTime.isValid()) {
+        return {};
+    }
+    const QByteArray utf8 = dateTime.toUTC().toString(Qt::ISODateWithMs).toUtf8();
+    return core::Text(utf8.constData(), static_cast<std::size_t>(utf8.size()));
+}
+
+QDateTime fromCoreTimestampText(const core::Text& text) {
+    if (text.empty()) {
+        return {};
+    }
+
+    const QString value = fromCoreText(text);
+    QDateTime dateTime = QDateTime::fromString(value, Qt::ISODateWithMs);
+    if (!dateTime.isValid()) {
+        dateTime = QDateTime::fromString(value, Qt::ISODate);
+    }
+    return dateTime.isValid() ? dateTime.toUTC() : QDateTime{};
+}
 
 QString invalidPlanMessage(const ScanPlan& plan, const ScanExecutionOptions& options) {
     if (plan.slaveId < 1 || plan.slaveId > 247) {
@@ -43,71 +104,248 @@ QString invalidPlanMessage(const ScanPlan& plan, const ScanExecutionOptions& opt
     return {};
 }
 
-bool shouldRetry(ScanAttemptStatus status, const ScanExecutionOptions& options) {
+core::modbus::ScanSafetyLevel toCoreSafetyLevel(ScanSafetyLevel level) {
+    switch (level) {
+    case ScanSafetyLevel::Conservative:
+        return core::modbus::ScanSafetyLevel::Conservative;
+    case ScanSafetyLevel::Balanced:
+        return core::modbus::ScanSafetyLevel::Balanced;
+    case ScanSafetyLevel::Aggressive:
+        return core::modbus::ScanSafetyLevel::Aggressive;
+    case ScanSafetyLevel::Custom:
+        return core::modbus::ScanSafetyLevel::Custom;
+    }
+
+    return core::modbus::ScanSafetyLevel::Conservative;
+}
+
+core::modbus::ScanPlan toCorePlan(const ScanPlan& plan) {
+    core::modbus::ScanPlan corePlan;
+    corePlan.slaveId = plan.slaveId;
+    corePlan.functionCode = plan.functionCode;
+    corePlan.range = core::modbus::ScanRange{plan.range.startAddress, plan.range.endAddress};
+    corePlan.blockSize = plan.blockSize;
+    corePlan.requestIntervalMs = plan.requestIntervalMs;
+    corePlan.retryCount = plan.retryCount;
+    corePlan.safetyLevel = toCoreSafetyLevel(plan.safetyLevel);
+    corePlan.blocks.reserve(static_cast<std::size_t>(plan.blocks.size()));
+    for (const auto& block : plan.blocks) {
+        corePlan.blocks.push_back(core::modbus::ScanBlock{
+            block.index,
+            block.startAddress,
+            block.endAddress,
+            block.quantity,
+            toCoreBytes(block.requestFrame)
+        });
+    }
+    return corePlan;
+}
+
+ScanBlock fromCoreBlock(const core::modbus::ScanBlock& block) {
+    ScanBlock result;
+    result.index = block.index;
+    result.startAddress = block.startAddress;
+    result.endAddress = block.endAddress;
+    result.quantity = block.quantity;
+    result.requestFrame = fromCoreBytes(block.requestFrame);
+    return result;
+}
+
+CoreExchangeStatus toCoreExchangeStatus(ModbusTransportStatus status) {
     switch (status) {
-    case ScanAttemptStatus::Success:
-        return false;
-    case ScanAttemptStatus::Timeout:
-        return options.retryOnTimeout;
-    case ScanAttemptStatus::TransportError:
-        return options.retryOnTransportError;
-    case ScanAttemptStatus::ParseError:
-        return options.retryOnParseError;
-    case ScanAttemptStatus::ModbusException:
-        return options.retryOnModbusException;
-    }
-
-    return false;
-}
-
-ScanAttemptResult attemptFromExchange(
-    const ScanBlock& block,
-    int attemptIndex,
-    const QByteArray& fallbackRequestFrame,
-    const ModbusTransportExchange& exchange) {
-    ScanAttemptResult attempt;
-    attempt.blockIndex = block.index;
-    attempt.attemptIndex = attemptIndex;
-    attempt.requestFrame = exchange.requestFrame.isEmpty() ? fallbackRequestFrame : exchange.requestFrame;
-    attempt.responseFrame = exchange.responseFrame;
-    attempt.errorMessage = exchange.errorMessage;
-    attempt.sentAtUtc = exchange.sentAtUtc;
-    attempt.receivedAtUtc = exchange.receivedAtUtc;
-    attempt.endpoint = exchange.endpoint;
-
-    switch (exchange.status) {
     case ModbusTransportStatus::Success:
-        attempt.status = ScanAttemptStatus::ParseError;
-        break;
+        return CoreExchangeStatus::Success;
     case ModbusTransportStatus::Timeout:
-        attempt.status = ScanAttemptStatus::Timeout;
-        if (attempt.errorMessage.isEmpty()) {
-            attempt.errorMessage = QStringLiteral("等待 Modbus 响应超时。");
-        }
-        break;
+        return CoreExchangeStatus::Timeout;
     case ModbusTransportStatus::TransportError:
-        attempt.status = ScanAttemptStatus::TransportError;
-        if (attempt.errorMessage.isEmpty()) {
-            attempt.errorMessage = QStringLiteral("Modbus 传输失败。");
+        return CoreExchangeStatus::TransportError;
+    }
+
+    return CoreExchangeStatus::TransportError;
+}
+
+ScanAttemptStatus fromCoreAttemptStatus(CoreAttemptStatus status) {
+    switch (status) {
+    case CoreAttemptStatus::Success:
+        return ScanAttemptStatus::Success;
+    case CoreAttemptStatus::ModbusException:
+        return ScanAttemptStatus::ModbusException;
+    case CoreAttemptStatus::ParseError:
+        return ScanAttemptStatus::ParseError;
+    case CoreAttemptStatus::Timeout:
+        return ScanAttemptStatus::Timeout;
+    case CoreAttemptStatus::TransportError:
+        return ScanAttemptStatus::TransportError;
+    }
+
+    return ScanAttemptStatus::TransportError;
+}
+
+ScanExecutionStatus fromCoreExecutionStatus(CoreExecutionStatus status) {
+    switch (status) {
+    case CoreExecutionStatus::Completed:
+        return ScanExecutionStatus::Completed;
+    case CoreExecutionStatus::CompletedWithErrors:
+        return ScanExecutionStatus::CompletedWithErrors;
+    case CoreExecutionStatus::Failed:
+        return ScanExecutionStatus::Failed;
+    }
+
+    return ScanExecutionStatus::Failed;
+}
+
+QString localizedExecutionError(const core::Text& errorMessage) {
+    if (errorMessage == "Scan was cancelled.") {
+        return QStringLiteral("扫描已取消。");
+    }
+    return fromCoreText(errorMessage);
+}
+
+class CoreTransportAdapter final : public core::modbus::RtuTransport {
+public:
+    explicit CoreTransportAdapter(ModbusRtuTransport& transport)
+        : transport_(transport) {}
+
+    core::modbus::RtuTransportExchange exchange(core::ByteSpan requestFrame, int responseTimeoutMs) override {
+        const QByteArray qtRequest = fromCoreBytes(requestFrame);
+        const ModbusTransportExchange qtExchange = transport_.exchange(qtRequest, responseTimeoutMs);
+
+        core::modbus::RtuTransportExchange exchange;
+        exchange.status = toCoreExchangeStatus(qtExchange.status);
+        exchange.requestFrame = qtExchange.requestFrame.isEmpty() ? toCoreBytes(requestFrame) : toCoreBytes(qtExchange.requestFrame);
+        exchange.responseFrame = toCoreBytes(qtExchange.responseFrame);
+        exchange.errorMessage = toCoreText(qtExchange.errorMessage);
+        exchange.sentAtUtc = toCoreTimestampText(qtExchange.sentAtUtc);
+        exchange.receivedAtUtc = toCoreTimestampText(qtExchange.receivedAtUtc);
+        exchange.endpoint = toCoreText(qtExchange.endpoint);
+        return exchange;
+    }
+
+private:
+    ModbusRtuTransport& transport_;
+};
+
+void localizeParseFields(ScanAttemptResult& attempt, const ScanPlan& plan, const ScanBlock& block) {
+    if (attempt.responseFrame.isEmpty()
+        || (attempt.status != ScanAttemptStatus::ParseError && attempt.status != ScanAttemptStatus::ModbusException)) {
+        return;
+    }
+
+    const auto parsed = parseReadResponse(
+        attempt.responseFrame,
+        plan.slaveId,
+        plan.functionCode,
+        block.startAddress,
+        block.quantity);
+    if (parsed.ok) {
+        return;
+    }
+
+    attempt.errorMessage = parsed.errorMessage;
+    attempt.isModbusException = parsed.isException;
+    attempt.exceptionCode = parsed.exceptionCode;
+    attempt.exceptionDescription = parsed.exceptionDescription;
+}
+
+ScanAttemptResult fromCoreAttempt(
+    const core::modbus::ScanAttemptResult& attempt,
+    const ScanPlan& plan,
+    const ScanBlock& block) {
+    ScanAttemptResult result;
+    result.blockIndex = attempt.blockIndex;
+    result.attemptIndex = attempt.attemptIndex;
+    result.status = fromCoreAttemptStatus(attempt.status);
+    result.requestFrame = fromCoreBytes(attempt.requestFrame);
+    result.responseFrame = fromCoreBytes(attempt.responseFrame);
+    result.errorMessage = fromCoreText(attempt.errorMessage);
+    result.isModbusException = attempt.isModbusException;
+    result.exceptionCode = attempt.exceptionCode;
+    result.exceptionDescription = fromCoreText(attempt.exceptionDescription);
+    result.sentAtUtc = fromCoreTimestampText(attempt.sentAtUtc);
+    result.receivedAtUtc = fromCoreTimestampText(attempt.receivedAtUtc);
+    result.endpoint = fromCoreText(attempt.endpoint);
+    localizeParseFields(result, plan, block);
+    return result;
+}
+
+ScanObservation fromCoreObservation(const core::modbus::ScanObservation& observation) {
+    ScanObservation result;
+    result.blockIndex = observation.blockIndex;
+    result.attemptIndex = observation.attemptIndex;
+    result.slaveId = observation.slaveId;
+    result.functionCode = observation.functionCode;
+    result.address = observation.address;
+    result.value = observation.value;
+    result.observedAtUtc = fromCoreTimestampText(observation.observedAtUtc);
+    return result;
+}
+
+ScanExecutionResult fromCoreResult(
+    const ScanPlan& plan,
+    const core::modbus::ScanExecutionResult& coreResult) {
+    ScanExecutionResult result;
+    result.status = fromCoreExecutionStatus(coreResult.status);
+    result.errorMessage = localizedExecutionError(coreResult.errorMessage);
+    result.startedAtUtc = fromCoreTimestampText(coreResult.startedAtUtc);
+    result.finishedAtUtc = fromCoreTimestampText(coreResult.finishedAtUtc);
+    result.plan = plan;
+    result.successBlockCount = coreResult.successBlockCount;
+    result.failedBlockCount = coreResult.failedBlockCount;
+    result.blocks.reserve(static_cast<qsizetype>(coreResult.blocks.size()));
+    result.observations.reserve(static_cast<qsizetype>(coreResult.observations.size()));
+
+    for (const auto& coreBlock : coreResult.blocks) {
+        ScanBlockResult block;
+        block.block = fromCoreBlock(coreBlock.block);
+        block.ok = coreBlock.ok;
+        block.finalErrorMessage = fromCoreText(coreBlock.finalErrorMessage);
+        block.attempts.reserve(static_cast<qsizetype>(coreBlock.attempts.size()));
+        block.observations.reserve(static_cast<qsizetype>(coreBlock.observations.size()));
+
+        for (const auto& coreAttempt : coreBlock.attempts) {
+            block.attempts.append(fromCoreAttempt(coreAttempt, plan, block.block));
         }
-        break;
+
+        if (!block.ok && !block.attempts.isEmpty()) {
+            block.finalErrorMessage = block.attempts.back().errorMessage;
+        }
+
+        for (const auto& coreObservation : coreBlock.observations) {
+            block.observations.append(fromCoreObservation(coreObservation));
+        }
+
+        result.blocks.append(std::move(block));
     }
 
-    return attempt;
+    for (const auto& coreObservation : coreResult.observations) {
+        result.observations.append(fromCoreObservation(coreObservation));
+    }
+
+    if (!result.errorMessage.isEmpty()) {
+        for (const auto& block : result.blocks) {
+            if (!block.ok && !block.finalErrorMessage.isEmpty()) {
+                result.errorMessage = block.finalErrorMessage;
+                break;
+            }
+        }
+    }
+
+    return result;
 }
 
-QDateTime bestObservedAtUtc(const ScanAttemptResult& attempt) {
-    if (attempt.receivedAtUtc.isValid()) {
-        return attempt.receivedAtUtc;
-    }
-    if (attempt.sentAtUtc.isValid()) {
-        return attempt.sentAtUtc;
-    }
-    return QDateTime::currentDateTimeUtc();
-}
-
-bool isCancellationRequested(const ScanExecutionOptions& options) {
-    return options.shouldCancel && options.shouldCancel();
+core::modbus::ScanExecutionOptions toCoreOptions(const ScanExecutionOptions& options) {
+    core::modbus::ScanExecutionOptions coreOptions;
+    coreOptions.responseTimeoutMs = options.responseTimeoutMs;
+    coreOptions.continueOnBlockError = options.continueOnBlockError;
+    coreOptions.retryOnTimeout = options.retryOnTimeout;
+    coreOptions.retryOnTransportError = options.retryOnTransportError;
+    coreOptions.retryOnParseError = options.retryOnParseError;
+    coreOptions.retryOnModbusException = options.retryOnModbusException;
+    coreOptions.shouldCancel = options.shouldCancel;
+    coreOptions.nowUtc = []() {
+        return toCoreTimestampText(QDateTime::currentDateTimeUtc());
+    };
+    return coreOptions;
 }
 
 } // namespace
@@ -157,123 +395,9 @@ ScanExecutionResult ModbusScanExecutor::execute(const ScanPlan& plan, const Scan
         return result;
     }
 
-    result.blocks.reserve(plan.blocks.size());
-    result.observations.reserve(plan.registerCount());
-    bool cancelled = false;
-
-    auto markCancelled = [&cancelled, &result]() {
-        cancelled = true;
-        result.errorMessage = QStringLiteral("扫描已取消。");
-    };
-
-    for (const auto& block : plan.blocks) {
-        if (isCancellationRequested(options)) {
-            markCancelled();
-            break;
-        }
-
-        ScanBlockResult blockResult;
-        blockResult.block = block;
-        const int maxAttempts = plan.retryCount + 1;
-        blockResult.attempts.reserve(maxAttempts);
-
-        for (int attemptIndex = 0; attemptIndex < maxAttempts; ++attemptIndex) {
-            if (isCancellationRequested(options)) {
-                markCancelled();
-                break;
-            }
-
-            const auto exchange = transport_.exchange(block.requestFrame, options.responseTimeoutMs);
-            auto attempt = attemptFromExchange(block, attemptIndex, block.requestFrame, exchange);
-
-            if (exchange.status == ModbusTransportStatus::Success) {
-                const auto parsed = parseReadResponse(
-                    exchange.responseFrame,
-                    plan.slaveId,
-                    plan.functionCode,
-                    block.startAddress,
-                    block.quantity);
-
-                if (parsed.ok) {
-                    attempt.status = ScanAttemptStatus::Success;
-                    attempt.errorMessage.clear();
-                    blockResult.ok = true;
-
-                    const QDateTime observedAtUtc = bestObservedAtUtc(attempt);
-                    blockResult.observations.reserve(parsed.observations.size());
-                    for (const auto& observation : parsed.observations) {
-                        blockResult.observations.append(ScanObservation{
-                            block.index,
-                            attemptIndex,
-                            plan.slaveId,
-                            plan.functionCode,
-                            observation.address,
-                            observation.value,
-                            observedAtUtc
-                        });
-                    }
-                } else if (parsed.isException) {
-                    attempt.status = ScanAttemptStatus::ModbusException;
-                    attempt.isModbusException = true;
-                    attempt.exceptionCode = parsed.exceptionCode;
-                    attempt.exceptionDescription = parsed.exceptionDescription;
-                    attempt.errorMessage = parsed.errorMessage;
-                } else {
-                    attempt.status = ScanAttemptStatus::ParseError;
-                    attempt.errorMessage = parsed.errorMessage;
-                }
-            }
-
-            const bool success = attempt.status == ScanAttemptStatus::Success;
-            const bool retryAllowed = attemptIndex + 1 < maxAttempts && shouldRetry(attempt.status, options);
-            if (!success && attempt.errorMessage.isEmpty()) {
-                attempt.errorMessage = describeScanAttemptStatus(attempt.status);
-            }
-
-            blockResult.finalErrorMessage = attempt.errorMessage;
-            blockResult.attempts.append(attempt);
-
-            if (success || !retryAllowed) {
-                break;
-            }
-        }
-
-        if (cancelled && blockResult.attempts.isEmpty()) {
-            break;
-        }
-
-        if (blockResult.ok) {
-            ++result.successBlockCount;
-            result.observations += blockResult.observations;
-        } else {
-            ++result.failedBlockCount;
-            if (result.errorMessage.isEmpty()) {
-                result.errorMessage = blockResult.finalErrorMessage;
-            }
-        }
-
-        result.blocks.append(blockResult);
-
-        if (cancelled || (!blockResult.ok && !options.continueOnBlockError)) {
-            break;
-        }
-    }
-
-    if (cancelled) {
-        result.status = result.successBlockCount > 0
-            ? ScanExecutionStatus::CompletedWithErrors
-            : ScanExecutionStatus::Failed;
-    } else if (result.failedBlockCount == 0) {
-        result.status = ScanExecutionStatus::Completed;
-        result.errorMessage.clear();
-    } else if (result.successBlockCount > 0) {
-        result.status = ScanExecutionStatus::CompletedWithErrors;
-    } else {
-        result.status = ScanExecutionStatus::Failed;
-    }
-
-    result.finishedAtUtc = QDateTime::currentDateTimeUtc();
-    return result;
+    CoreTransportAdapter transportAdapter(transport_);
+    core::modbus::ScanExecutor executor(transportAdapter);
+    return fromCoreResult(plan, executor.execute(toCorePlan(plan), toCoreOptions(options)));
 }
 
 } // namespace svm::modbus

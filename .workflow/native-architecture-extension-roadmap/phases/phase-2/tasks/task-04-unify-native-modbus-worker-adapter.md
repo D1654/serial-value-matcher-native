@@ -1,7 +1,7 @@
 # Task 04: Unify Native Modbus Worker Adapter
 
 > Phase: 2 — Backend Consistency
-> Status: pending
+> Status: completed
 
 ---
 
@@ -61,9 +61,9 @@ ctest --test-dir build-codex --output-on-failure -R "modbus_scan_executor|modbus
 
 ## Verification
 
-- [ ] Worker no longer owns protocol interpretation.
-- [ ] Shared executor handles Modbus transaction behavior.
-- [ ] Focused tests pass.
+- [x] Worker no longer owns protocol interpretation.
+- [x] Shared executor handles Modbus transaction behavior.
+- [x] Focused tests pass.
 
 **Test command:**
 ```bash

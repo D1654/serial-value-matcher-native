@@ -45,6 +45,7 @@ endif()
 add_library(svm_slim_core
     src/core/protocol_core.cpp
     src/core/modbus_core.cpp
+    src/core/modbus_scan_executor_core.cpp
     src/core/analysis_core.cpp
     src/core/report_core.cpp
     src/transport/serial_write_queue.cpp
@@ -242,6 +243,7 @@ if(SVM_BUILD_QT_APP OR SVM_BUILD_QT_TESTS)
 
     target_link_libraries(svm_native_core
         PUBLIC
+            svm_slim_core
             Qt6::Core
             Qt6::SerialPort
             Qt6::Sql
