@@ -1,7 +1,7 @@
 # Task 03: Clarify Fake and PTY Stress Gates
 
 > Phase: 2 — Backend Consistency
-> Status: pending
+> Status: completed
 
 ---
 
@@ -56,9 +56,9 @@ python3 scripts/check-docs-artifact-consistency.py
 
 ## Verification
 
-- [ ] CI-blocking and local-only evidence are clearly separated.
-- [ ] Workflow summary does not imply PTY is fully CI-blocking.
-- [ ] Docs consistency passes.
+- [x] CI-blocking and local-only evidence are clearly separated.
+- [x] Workflow summary does not imply PTY is fully CI-blocking.
+- [x] Docs consistency passes.
 
 **Test command:**
 ```bash

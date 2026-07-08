@@ -14,6 +14,10 @@ from pathlib import Path
 REQUEST = bytes([0x01, 0x03, 0x00, 0x00, 0x00, 0x02, 0xC4, 0x0B])
 RESPONSE = bytes([0x01, 0x03, 0x04, 0x41, 0x48, 0x00, 0x00, 0x7B, 0xF3])
 VALID_SCENARIOS = {"normal", "reopen", "timeout", "cancel", "stress"}
+LOCAL_ONLY_GATE_NOTICE = (
+    "python serial matrix gate classification: local-only release-candidate evidence; "
+    "Windows GitHub Actions package workflow records this requirement but does not execute POSIX PTY scenarios"
+)
 
 
 def positive_int_env(name: str, default: int, maximum: int):
@@ -314,6 +318,12 @@ def main() -> int:
 
     if not initialize_wineprefix(wineprefix, wineboot_timeout):
         return 2
+
+    print(LOCAL_ONLY_GATE_NOTICE)
+    print(
+        "python serial matrix scenarios="
+        f"{','.join(scenarios)} exe={exe_path} wineprefix={wineprefix} com={com_name}"
+    )
 
     master_fd, slave_fd = os.openpty()
     slave_path = os.ttyname(slave_fd)
