@@ -16,6 +16,18 @@ enum class ScanSafetyLevel {
     Custom
 };
 
+enum class ScanPlanBuildStatus {
+    Success,
+    InvalidSlaveId,
+    UnsupportedFunction,
+    InvalidAddressRange,
+    InvalidBlockSize,
+    InvalidRequestInterval,
+    InvalidRetryCount,
+    PlanTooLarge,
+    RequestBuildFailed
+};
+
 struct ScanRange {
     int startAddress = 0;
     int endAddress = 0;
@@ -57,11 +69,13 @@ struct ScanPlan {
 
 struct BuildScanPlanResult {
     bool ok = false;
+    ScanPlanBuildStatus status = ScanPlanBuildStatus::InvalidAddressRange;
     QString errorMessage;
     ScanPlan plan;
 };
 
 QString describeScanSafetyLevel(ScanSafetyLevel level);
+QString describeScanPlanBuildStatus(ScanPlanBuildStatus status);
 BuildScanPlanResult buildScanPlan(const ScanPlanOptions& options);
 
 } // namespace svm::modbus

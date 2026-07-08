@@ -14,8 +14,9 @@ constexpr int MaximumPlanRegisters = 4096;
 constexpr int MinimumRetryCount = 0;
 constexpr int MaximumRetryCount = 5;
 
-BuildScanPlanResult fail(QString message) {
+BuildScanPlanResult fail(ScanPlanBuildStatus status, QString message) {
     BuildScanPlanResult result;
+    result.status = status;
     result.errorMessage = std::move(message);
     return result;
 }
@@ -56,43 +57,74 @@ QString describeScanSafetyLevel(ScanSafetyLevel level) {
     return QStringLiteral("未知安全等级");
 }
 
+QString describeScanPlanBuildStatus(ScanPlanBuildStatus status) {
+    switch (status) {
+    case ScanPlanBuildStatus::Success:
+        return QStringLiteral("扫描计划有效");
+    case ScanPlanBuildStatus::InvalidSlaveId:
+        return QStringLiteral("从站 ID 无效");
+    case ScanPlanBuildStatus::UnsupportedFunction:
+        return QStringLiteral("功能码不支持");
+    case ScanPlanBuildStatus::InvalidAddressRange:
+        return QStringLiteral("地址范围无效");
+    case ScanPlanBuildStatus::InvalidBlockSize:
+        return QStringLiteral("块大小无效");
+    case ScanPlanBuildStatus::InvalidRequestInterval:
+        return QStringLiteral("请求间隔无效");
+    case ScanPlanBuildStatus::InvalidRetryCount:
+        return QStringLiteral("重试次数无效");
+    case ScanPlanBuildStatus::PlanTooLarge:
+        return QStringLiteral("扫描计划过大");
+    case ScanPlanBuildStatus::RequestBuildFailed:
+        return QStringLiteral("请求帧构造失败");
+    }
+
+    return QStringLiteral("未知扫描计划状态");
+}
+
 BuildScanPlanResult buildScanPlan(const ScanPlanOptions& options) {
     if (options.slaveId < 1 || options.slaveId > 247) {
-        return fail(QStringLiteral("扫描计划无效：从站 ID 必须是 1-247，不能使用广播地址 0。"));
+        return fail(
+            ScanPlanBuildStatus::InvalidSlaveId,
+            QStringLiteral("扫描计划无效：从站 ID 必须是 1-247，不能使用广播地址 0。"));
     }
 
     if (!isSupportedReadFunction(options.functionCode)) {
-        return fail(QStringLiteral("扫描计划无效：只允许 FC03/FC04 只读功能码，当前为 %1。")
+        return fail(ScanPlanBuildStatus::UnsupportedFunction, QStringLiteral("扫描计划无效：只允许 FC03/FC04 只读功能码，当前为 %1。")
             .arg(describeReadFunction(options.functionCode)));
     }
 
     if (options.range.startAddress < MinimumAddress || options.range.startAddress > MaximumAddress) {
-        return fail(QStringLiteral("扫描计划无效：起始地址必须在 0-65535 范围内。"));
+        return fail(ScanPlanBuildStatus::InvalidAddressRange, QStringLiteral("扫描计划无效：起始地址必须在 0-65535 范围内。"));
     }
 
     if (options.range.endAddress < MinimumAddress || options.range.endAddress > MaximumAddress) {
-        return fail(QStringLiteral("扫描计划无效：结束地址必须在 0-65535 范围内。"));
+        return fail(ScanPlanBuildStatus::InvalidAddressRange, QStringLiteral("扫描计划无效：结束地址必须在 0-65535 范围内。"));
     }
 
     if (options.range.endAddress < options.range.startAddress) {
-        return fail(QStringLiteral("扫描计划无效：结束地址不能小于起始地址。"));
+        return fail(ScanPlanBuildStatus::InvalidAddressRange, QStringLiteral("扫描计划无效：结束地址不能小于起始地址。"));
     }
 
     if (options.blockSize < MinimumBlockSize || options.blockSize > MaximumSafeBlockSize) {
-        return fail(QStringLiteral("扫描计划无效：块大小必须在 1-64 个寄存器之间，避免单次请求过大。"));
+        return fail(
+            ScanPlanBuildStatus::InvalidBlockSize,
+            QStringLiteral("扫描计划无效：块大小必须在 1-64 个寄存器之间，避免单次请求过大。"));
     }
 
     if (options.requestIntervalMs < 0) {
-        return fail(QStringLiteral("扫描计划无效：请求间隔不能为负数。"));
+        return fail(ScanPlanBuildStatus::InvalidRequestInterval, QStringLiteral("扫描计划无效：请求间隔不能为负数。"));
     }
 
     if (options.retryCount < MinimumRetryCount || options.retryCount > MaximumRetryCount) {
-        return fail(QStringLiteral("扫描计划无效：重试次数必须在 0-5 之间。"));
+        return fail(ScanPlanBuildStatus::InvalidRetryCount, QStringLiteral("扫描计划无效：重试次数必须在 0-5 之间。"));
     }
 
     const int totalRegisters = options.range.endAddress - options.range.startAddress + 1;
     if (totalRegisters > MaximumPlanRegisters) {
-        return fail(QStringLiteral("扫描计划无效：一次计划最多允许 %1 个寄存器；请缩小扫描范围后分批扫描。").arg(MaximumPlanRegisters));
+        return fail(
+            ScanPlanBuildStatus::PlanTooLarge,
+            QStringLiteral("扫描计划无效：一次计划最多允许 %1 个寄存器；请缩小扫描范围后分批扫描。").arg(MaximumPlanRegisters));
     }
 
     ScanPlan plan;
@@ -111,7 +143,7 @@ BuildScanPlanResult buildScanPlan(const ScanPlanOptions& options) {
         const int quantity = std::min(options.blockSize, options.range.endAddress - currentAddress + 1);
         const auto request = buildReadRequest(options.slaveId, options.functionCode, currentAddress, quantity);
         if (!request.ok) {
-            return fail(QStringLiteral("扫描计划无效：第 %1 个请求块构造失败：%2")
+            return fail(ScanPlanBuildStatus::RequestBuildFailed, QStringLiteral("扫描计划无效：第 %1 个请求块构造失败：%2")
                 .arg(blockIndex + 1)
                 .arg(request.errorMessage));
         }
@@ -130,6 +162,7 @@ BuildScanPlanResult buildScanPlan(const ScanPlanOptions& options) {
 
     BuildScanPlanResult result;
     result.ok = true;
+    result.status = ScanPlanBuildStatus::Success;
     result.plan = plan;
     return result;
 }

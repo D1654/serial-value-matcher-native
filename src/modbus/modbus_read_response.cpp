@@ -8,8 +8,9 @@
 namespace svm::modbus {
 namespace {
 
-ParseReadResponseResult fail(QString message) {
+ParseReadResponseResult fail(ModbusReadResponseKind kind, QString message) {
     ParseReadResponseResult result;
+    result.kind = kind;
     result.errorMessage = std::move(message);
     return result;
 }
@@ -32,12 +33,14 @@ ParseReadResponseResult parseReadResponse(
     int expectedQuantity) {
     const auto frameCheck = validateRtuFrame(frame);
     if (!frameCheck.ok) {
-        return fail(frameCheck.errorMessage);
+        return fail(frame.size() < 4 ? ModbusReadResponseKind::FrameTooShort : ModbusReadResponseKind::CrcError, frameCheck.errorMessage);
     }
 
     const QByteArray& body = frameCheck.bodyWithoutCrc;
     if (body.size() < 3) {
-        return fail(QStringLiteral("Modbus 响应太短：至少需要从站地址、功能码和数据长度或异常码。"));
+        return fail(
+            ModbusReadResponseKind::FrameTooShort,
+            QStringLiteral("Modbus 响应太短：至少需要从站地址、功能码和数据长度或异常码。"));
     }
 
     ParseReadResponseResult result;
@@ -46,19 +49,19 @@ ParseReadResponseResult parseReadResponse(
     result.functionCode = byteAt(body, 1);
 
     if (expectedSlaveId < 1 || expectedSlaveId > 247) {
-        return fail(QStringLiteral("期望从站 ID 无效：必须是 1-247。"));
+        return fail(ModbusReadResponseKind::InvalidExpectedRequest, QStringLiteral("期望从站 ID 无效：必须是 1-247。"));
     }
 
     if (!isSupportedReadFunction(expectedFunctionCode)) {
-        return fail(QStringLiteral("期望功能码无效：只支持 FC03/FC04。"));
+        return fail(ModbusReadResponseKind::InvalidExpectedRequest, QStringLiteral("期望功能码无效：只支持 FC03/FC04。"));
     }
 
     if (expectedStartAddress < 0 || expectedStartAddress > 0xFFFF || expectedQuantity < 1) {
-        return fail(QStringLiteral("期望地址或寄存器数量无效。"));
+        return fail(ModbusReadResponseKind::InvalidExpectedRequest, QStringLiteral("期望地址或寄存器数量无效。"));
     }
 
     if (result.slaveId != static_cast<quint8>(expectedSlaveId)) {
-        return fail(QStringLiteral("从站 ID 不匹配：响应来自 %1，期望 %2。")
+        return fail(ModbusReadResponseKind::SlaveIdMismatch, QStringLiteral("从站 ID 不匹配：响应来自 %1，期望 %2。")
             .arg(result.slaveId)
             .arg(expectedSlaveId));
     }
@@ -66,9 +69,12 @@ ParseReadResponseResult parseReadResponse(
     const quint8 expectedExceptionFunction = static_cast<quint8>(expectedFunctionCode | 0x80u);
     if (result.functionCode == expectedExceptionFunction) {
         if (body.size() != 3) {
-            return fail(QStringLiteral("Modbus 异常响应长度无效：异常响应应包含从站、功能码和异常码。"));
+            return fail(
+                ModbusReadResponseKind::ModbusExceptionLength,
+                QStringLiteral("Modbus 异常响应长度无效：异常响应应包含从站、功能码和异常码。"));
         }
         result.isException = true;
+        result.kind = ModbusReadResponseKind::ModbusException;
         result.exceptionCode = byteAt(body, 2);
         result.exceptionDescription = describeModbusException(result.exceptionCode);
         result.errorMessage = QStringLiteral("设备返回 Modbus 异常：%1。").arg(result.exceptionDescription);
@@ -76,7 +82,7 @@ ParseReadResponseResult parseReadResponse(
     }
 
     if (result.functionCode != expectedFunctionCode) {
-        return fail(QStringLiteral("功能码不匹配：响应为 0x%1，期望 0x%2。")
+        return fail(ModbusReadResponseKind::FunctionCodeMismatch, QStringLiteral("功能码不匹配：响应为 0x%1，期望 0x%2。")
             .arg(result.functionCode, 2, 16, QLatin1Char('0'))
             .arg(expectedFunctionCode, 2, 16, QLatin1Char('0')));
     }
@@ -84,24 +90,26 @@ ParseReadResponseResult parseReadResponse(
     const int byteCount = byteAt(body, 2);
     const int payloadSize = body.size() - 3;
     if (byteCount != payloadSize) {
-        return fail(QStringLiteral("响应字节数不匹配：声明 %1 字节，实际 %2 字节。")
+        return fail(ModbusReadResponseKind::ByteCountMismatch, QStringLiteral("响应字节数不匹配：声明 %1 字节，实际 %2 字节。")
             .arg(byteCount)
             .arg(payloadSize));
     }
 
     if (byteCount % 2 != 0) {
-        return fail(QStringLiteral("响应字节数无效：寄存器数据必须是偶数字节。"));
+        return fail(ModbusReadResponseKind::OddByteCount, QStringLiteral("响应字节数无效：寄存器数据必须是偶数字节。"));
     }
 
     const int registerCount = byteCount / 2;
     if (registerCount != expectedQuantity) {
-        return fail(QStringLiteral("响应寄存器数量不匹配：解析到 %1 个，期望 %2 个。")
+        return fail(ModbusReadResponseKind::RegisterQuantityMismatch, QStringLiteral("响应寄存器数量不匹配：解析到 %1 个，期望 %2 个。")
             .arg(registerCount)
             .arg(expectedQuantity));
     }
 
     if (expectedStartAddress + registerCount - 1 > 0xFFFF) {
-        return fail(QStringLiteral("响应地址范围无效：起始地址加寄存器数量超出 65535。"));
+        return fail(
+            ModbusReadResponseKind::AddressRangeInvalid,
+            QStringLiteral("响应地址范围无效：起始地址加寄存器数量超出 65535。"));
     }
 
     result.registers.reserve(registerCount);
@@ -116,6 +124,7 @@ ParseReadResponseResult parseReadResponse(
     }
 
     result.ok = true;
+    result.kind = ModbusReadResponseKind::Success;
     return result;
 }
 
@@ -138,6 +147,58 @@ QString describeModbusException(quint8 exceptionCode) {
         return QStringLiteral("未知异常码 0x%1").arg(digits);
     }
     }
+}
+
+QString describeModbusReadResponseKind(ModbusReadResponseKind kind) {
+    switch (kind) {
+    case ModbusReadResponseKind::Success:
+        return QStringLiteral("成功响应");
+    case ModbusReadResponseKind::CrcError:
+        return QStringLiteral("CRC 或 RTU 帧校验错误");
+    case ModbusReadResponseKind::FrameTooShort:
+        return QStringLiteral("响应帧过短");
+    case ModbusReadResponseKind::InvalidExpectedRequest:
+        return QStringLiteral("期望请求参数无效");
+    case ModbusReadResponseKind::SlaveIdMismatch:
+        return QStringLiteral("从站 ID 不匹配");
+    case ModbusReadResponseKind::ModbusException:
+        return QStringLiteral("Modbus 异常响应");
+    case ModbusReadResponseKind::ModbusExceptionLength:
+        return QStringLiteral("Modbus 异常响应长度无效");
+    case ModbusReadResponseKind::FunctionCodeMismatch:
+        return QStringLiteral("功能码不匹配");
+    case ModbusReadResponseKind::ByteCountMismatch:
+        return QStringLiteral("响应字节数不匹配");
+    case ModbusReadResponseKind::OddByteCount:
+        return QStringLiteral("响应字节数不是偶数");
+    case ModbusReadResponseKind::RegisterQuantityMismatch:
+        return QStringLiteral("响应寄存器数量不匹配");
+    case ModbusReadResponseKind::AddressRangeInvalid:
+        return QStringLiteral("响应地址范围无效");
+    }
+
+    return QStringLiteral("未知响应结果");
+}
+
+bool isModbusReadResponseDataFormatFailure(ModbusReadResponseKind kind) {
+    switch (kind) {
+    case ModbusReadResponseKind::ByteCountMismatch:
+    case ModbusReadResponseKind::OddByteCount:
+    case ModbusReadResponseKind::RegisterQuantityMismatch:
+    case ModbusReadResponseKind::AddressRangeInvalid:
+        return true;
+    case ModbusReadResponseKind::Success:
+    case ModbusReadResponseKind::CrcError:
+    case ModbusReadResponseKind::FrameTooShort:
+    case ModbusReadResponseKind::InvalidExpectedRequest:
+    case ModbusReadResponseKind::SlaveIdMismatch:
+    case ModbusReadResponseKind::ModbusException:
+    case ModbusReadResponseKind::ModbusExceptionLength:
+    case ModbusReadResponseKind::FunctionCodeMismatch:
+        return false;
+    }
+
+    return false;
 }
 
 } // namespace svm::modbus

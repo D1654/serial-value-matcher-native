@@ -1,6 +1,7 @@
 #include <QtTest/QtTest>
 
 #include "modbus/modbus_read_response.h"
+#include "modbus/modbus_rtu_codec.h"
 
 class ModbusReadResponseTests final : public QObject {
     Q_OBJECT
@@ -12,6 +13,7 @@ private slots:
         const auto result = svm::modbus::parseReadResponse(frame, 1, 0x03, 0x006B, 3);
 
         QVERIFY2(result.ok, qPrintable(result.errorMessage));
+        QCOMPARE(result.kind, svm::modbus::ModbusReadResponseKind::Success);
         QCOMPARE(result.slaveId, static_cast<quint8>(1));
         QCOMPARE(result.functionCode, static_cast<quint8>(0x03));
         QCOMPARE(result.registers.size(), 3);
@@ -40,6 +42,7 @@ private slots:
         const auto result = svm::modbus::parseReadResponse(frame, 1, 0x03, 0, 1);
 
         QVERIFY(!result.ok);
+        QCOMPARE(result.kind, svm::modbus::ModbusReadResponseKind::ModbusException);
         QVERIFY(result.isException);
         QCOMPARE(result.exceptionCode, static_cast<quint8>(0x02));
         QCOMPARE(result.exceptionDescription, QStringLiteral("非法数据地址"));
@@ -50,6 +53,7 @@ private slots:
         const auto result = svm::modbus::parseReadResponse(QByteArray::fromHex("010306022B000000640000"), 1, 0x03, 0x006B, 3);
 
         QVERIFY(!result.ok);
+        QCOMPARE(result.kind, svm::modbus::ModbusReadResponseKind::CrcError);
         QVERIFY(result.errorMessage.contains(QStringLiteral("CRC")));
     }
 
@@ -57,6 +61,7 @@ private slots:
         const auto result = svm::modbus::parseReadResponse(QByteArray::fromHex("010306022B00000064057A"), 2, 0x03, 0x006B, 3);
 
         QVERIFY(!result.ok);
+        QCOMPARE(result.kind, svm::modbus::ModbusReadResponseKind::SlaveIdMismatch);
         QVERIFY(result.errorMessage.contains(QStringLiteral("从站 ID 不匹配")));
     }
 
@@ -64,6 +69,7 @@ private slots:
         const auto result = svm::modbus::parseReadResponse(QByteArray::fromHex("010306022B00000064057A"), 1, 0x04, 0x006B, 3);
 
         QVERIFY(!result.ok);
+        QCOMPARE(result.kind, svm::modbus::ModbusReadResponseKind::FunctionCodeMismatch);
         QVERIFY(result.errorMessage.contains(QStringLiteral("功能码不匹配")));
     }
 
@@ -71,6 +77,8 @@ private slots:
         const auto result = svm::modbus::parseReadResponse(QByteArray::fromHex("010304022B0000006426BA"), 1, 0x03, 0x006B, 3);
 
         QVERIFY(!result.ok);
+        QCOMPARE(result.kind, svm::modbus::ModbusReadResponseKind::ByteCountMismatch);
+        QVERIFY(svm::modbus::isModbusReadResponseDataFormatFailure(result.kind));
         QVERIFY(result.errorMessage.contains(QStringLiteral("字节数不匹配")));
     }
 
@@ -78,7 +86,29 @@ private slots:
         const auto result = svm::modbus::parseReadResponse(QByteArray::fromHex("010306022B00000064057A"), 1, 0x03, 0x006B, 2);
 
         QVERIFY(!result.ok);
+        QCOMPARE(result.kind, svm::modbus::ModbusReadResponseKind::RegisterQuantityMismatch);
+        QVERIFY(svm::modbus::isModbusReadResponseDataFormatFailure(result.kind));
         QVERIFY(result.errorMessage.contains(QStringLiteral("寄存器数量不匹配")));
+    }
+
+    void rejectsOddByteCountAsDataFormatFailure() {
+        const QByteArray frame = svm::modbus::appendCrc16Modbus(QByteArray::fromHex("010303010203"));
+
+        const auto result = svm::modbus::parseReadResponse(frame, 1, 0x03, 0, 1);
+
+        QVERIFY(!result.ok);
+        QCOMPARE(result.kind, svm::modbus::ModbusReadResponseKind::OddByteCount);
+        QVERIFY(svm::modbus::isModbusReadResponseDataFormatFailure(result.kind));
+        QCOMPARE(svm::modbus::describeModbusReadResponseKind(result.kind), QStringLiteral("响应字节数不是偶数"));
+    }
+
+    void rejectsInvalidExpectedRequestWithStableKind() {
+        const QByteArray frame = QByteArray::fromHex("01030200017984");
+
+        const auto result = svm::modbus::parseReadResponse(frame, 0, 0x03, 0, 1);
+
+        QVERIFY(!result.ok);
+        QCOMPARE(result.kind, svm::modbus::ModbusReadResponseKind::InvalidExpectedRequest);
     }
 
     void describesCommonExceptionCodesInChinese() {

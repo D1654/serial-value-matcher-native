@@ -2,6 +2,7 @@
 #include "win32/native_modbus_scan_ui_state.h"
 
 #include <cassert>
+#include <cwchar>
 #include <iostream>
 
 namespace {
@@ -18,6 +19,34 @@ void runningSnapshotSwitchesToStopAndLocksExclusiveControls() {
     const auto ui = state.snapshot(true);
     assert(ui.buttonMode == svm::win32::NativeModbusScanButtonMode::Stop);
     assert(!ui.exclusiveControlsEnabled);
+}
+
+void attemptResultClassifierNormalizesNativeStatuses() {
+    using svm::win32::NativeModbusAttemptResultKind;
+    using svm::win32::classifyNativeModbusAttemptResult;
+
+    assert(classifyNativeModbusAttemptResult("success", false, "") == NativeModbusAttemptResultKind::Success);
+    assert(classifyNativeModbusAttemptResult("timeout", false, "等待 Modbus 响应超时。") == NativeModbusAttemptResultKind::Timeout);
+    assert(classifyNativeModbusAttemptResult("retry-exhausted", false, "timeout") == NativeModbusAttemptResultKind::RetryExhausted);
+    assert(classifyNativeModbusAttemptResult("parse-error", true, "设备返回 Modbus 异常") == NativeModbusAttemptResultKind::ModbusException);
+    assert(classifyNativeModbusAttemptResult("parse-error", false, "RTU CRC check failed.") == NativeModbusAttemptResultKind::FrameError);
+    assert(classifyNativeModbusAttemptResult("parse-error", false, "响应寄存器数量不匹配") == NativeModbusAttemptResultKind::DataFormatError);
+    assert(classifyNativeModbusAttemptResult("parse-error", false, "功能码不匹配") == NativeModbusAttemptResultKind::ProtocolMismatch);
+    assert(classifyNativeModbusAttemptResult("transport-error", false, "串口未打开") == NativeModbusAttemptResultKind::TransportError);
+    assert(classifyNativeModbusAttemptResult("cancelled", false, "") == NativeModbusAttemptResultKind::Cancelled);
+}
+
+void attemptResultLabelsAndCountersAreStable() {
+    using svm::win32::NativeModbusAttemptResultKind;
+
+    assert(std::wcscmp(
+        svm::win32::nativeModbusAttemptResultLabel(NativeModbusAttemptResultKind::ModbusException),
+        L"Modbus 异常") == 0);
+    assert(svm::win32::nativeModbusAttemptCountsAsSuccess(NativeModbusAttemptResultKind::Success));
+    assert(!svm::win32::nativeModbusAttemptCountsAsFailure(NativeModbusAttemptResultKind::Success));
+    assert(!svm::win32::nativeModbusAttemptCountsAsFailure(NativeModbusAttemptResultKind::Cancelled));
+    assert(svm::win32::nativeModbusAttemptCountsAsFailure(NativeModbusAttemptResultKind::Timeout));
+    assert(svm::win32::nativeModbusAttemptCountsAsFailure(NativeModbusAttemptResultKind::TransportError));
 }
 
 void controllerRoutesScanStartCancelAndGates() {
@@ -75,6 +104,8 @@ void controllerKeepsAnalysisAndReportDecisionsPure() {
 int main() {
     idleSnapshotKeepsControlsEditable();
     runningSnapshotSwitchesToStopAndLocksExclusiveControls();
+    attemptResultClassifierNormalizesNativeStatuses();
+    attemptResultLabelsAndCountersAreStable();
     controllerRoutesScanStartCancelAndGates();
     controllerKeepsAnalysisAndReportDecisionsPure();
 

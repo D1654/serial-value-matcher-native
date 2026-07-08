@@ -18,6 +18,7 @@ private slots:
         const auto result = svm::modbus::buildScanPlan(options);
 
         QVERIFY2(result.ok, qPrintable(result.errorMessage));
+        QCOMPARE(result.status, svm::modbus::ScanPlanBuildStatus::Success);
         QCOMPARE(result.plan.registerCount(), 3);
         QCOMPARE(result.plan.requestCount(), 1);
         QCOMPARE(result.plan.estimatedAttemptCount(), 2);
@@ -83,6 +84,7 @@ private slots:
         const auto result = svm::modbus::buildScanPlan(options);
 
         QVERIFY(!result.ok);
+        QCOMPARE(result.status, svm::modbus::ScanPlanBuildStatus::InvalidAddressRange);
         QVERIFY(result.errorMessage.contains(QStringLiteral("结束地址不能小于起始地址")));
     }
 
@@ -97,6 +99,8 @@ private slots:
 
         QVERIFY(!zeroResult.ok);
         QVERIFY(!tooLargeResult.ok);
+        QCOMPARE(zeroResult.status, svm::modbus::ScanPlanBuildStatus::InvalidBlockSize);
+        QCOMPARE(tooLargeResult.status, svm::modbus::ScanPlanBuildStatus::InvalidBlockSize);
         QVERIFY(zeroResult.errorMessage.contains(QStringLiteral("块大小")));
         QVERIFY(tooLargeResult.errorMessage.contains(QStringLiteral("1-64")));
     }
@@ -109,6 +113,7 @@ private slots:
         const auto result = svm::modbus::buildScanPlan(options);
 
         QVERIFY(!result.ok);
+        QCOMPARE(result.status, svm::modbus::ScanPlanBuildStatus::PlanTooLarge);
         QVERIFY(result.errorMessage.contains(QStringLiteral("最多允许 4096 个寄存器")));
     }
 
@@ -122,9 +127,29 @@ private slots:
         const auto broadcastResult = svm::modbus::buildScanPlan(broadcast);
 
         QVERIFY(!invalidFunctionResult.ok);
+        QCOMPARE(invalidFunctionResult.status, svm::modbus::ScanPlanBuildStatus::UnsupportedFunction);
         QVERIFY(invalidFunctionResult.errorMessage.contains(QStringLiteral("只允许 FC03/FC04")));
         QVERIFY(!broadcastResult.ok);
+        QCOMPARE(broadcastResult.status, svm::modbus::ScanPlanBuildStatus::InvalidSlaveId);
         QVERIFY(broadcastResult.errorMessage.contains(QStringLiteral("广播地址 0")));
+    }
+
+    void rejectsInvalidRequestIntervalAndRetryCountWithStableStatus() {
+        svm::modbus::ScanPlanOptions invalidInterval;
+        invalidInterval.requestIntervalMs = -1;
+        const auto invalidIntervalResult = svm::modbus::buildScanPlan(invalidInterval);
+
+        svm::modbus::ScanPlanOptions invalidRetry;
+        invalidRetry.retryCount = 6;
+        const auto invalidRetryResult = svm::modbus::buildScanPlan(invalidRetry);
+
+        QVERIFY(!invalidIntervalResult.ok);
+        QCOMPARE(invalidIntervalResult.status, svm::modbus::ScanPlanBuildStatus::InvalidRequestInterval);
+        QVERIFY(!invalidRetryResult.ok);
+        QCOMPARE(invalidRetryResult.status, svm::modbus::ScanPlanBuildStatus::InvalidRetryCount);
+        QCOMPARE(
+            svm::modbus::describeScanPlanBuildStatus(invalidRetryResult.status),
+            QStringLiteral("重试次数无效"));
     }
 
     void describesSafetyLevelsInChinese() {

@@ -7,6 +7,21 @@
 
 namespace svm::modbus {
 
+enum class ModbusReadResponseKind {
+    Success,
+    CrcError,
+    FrameTooShort,
+    InvalidExpectedRequest,
+    SlaveIdMismatch,
+    ModbusException,
+    ModbusExceptionLength,
+    FunctionCodeMismatch,
+    ByteCountMismatch,
+    OddByteCount,
+    RegisterQuantityMismatch,
+    AddressRangeInvalid
+};
+
 struct RegisterObservation {
     quint16 address = 0;
     quint16 value = 0;
@@ -14,6 +29,7 @@ struct RegisterObservation {
 
 struct ParseReadResponseResult {
     bool ok = false;
+    ModbusReadResponseKind kind = ModbusReadResponseKind::FrameTooShort;
     QString errorMessage;
     quint8 slaveId = 0;
     quint8 functionCode = 0;
@@ -33,5 +49,7 @@ ParseReadResponseResult parseReadResponse(
     int expectedQuantity);
 
 QString describeModbusException(quint8 exceptionCode);
+QString describeModbusReadResponseKind(ModbusReadResponseKind kind);
+bool isModbusReadResponseDataFormatFailure(ModbusReadResponseKind kind);
 
 } // namespace svm::modbus

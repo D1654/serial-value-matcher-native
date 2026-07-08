@@ -1,7 +1,7 @@
 # Task 05: Normalize Modbus Result Semantics
 
 > Phase: 2 — Backend Consistency
-> Status: pending
+> Status: completed
 
 ---
 
@@ -60,9 +60,9 @@ ctest --test-dir build-codex --output-on-failure -R "modbus_read_response|modbus
 
 ## Verification
 
-- [ ] Every Modbus result category has one internal meaning.
-- [ ] UI text/status mapping is consistent.
-- [ ] Focused tests pass.
+- [x] Every Modbus result category has one internal meaning.
+- [x] UI text/status mapping is consistent.
+- [x] Focused tests pass.
 
 **Test command:**
 ```bash
