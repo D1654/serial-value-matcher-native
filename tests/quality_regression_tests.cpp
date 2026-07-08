@@ -1,10 +1,15 @@
 #include <QtTest/QtTest>
 #include <QElapsedTimer>
 
+#include "core/modbus_scan_executor_core.h"
 #include "matching/candidate_stability_analyzer.h"
 #include "matching/protocol_rule_verifier.h"
 #include "matching/value_candidate_generator.h"
 #include "storage/protocol_rule_records.h"
+#include "transport/serial_write_queue.h"
+
+#include <cstdint>
+#include <vector>
 
 using namespace svm::matching;
 
@@ -83,6 +88,54 @@ CandidateObservation stabilityObservation(int runIndex, int candidateIndex)
     return observation;
 }
 
+svm::core::ByteBuffer modbusReadResponse(
+    int slaveId,
+    svm::core::Byte functionCode,
+    int startAddress,
+    int quantity)
+{
+    svm::core::ByteBuffer body;
+    body.push_back(static_cast<svm::core::Byte>(slaveId));
+    body.push_back(functionCode);
+    body.push_back(static_cast<svm::core::Byte>(quantity * 2));
+    for (int offset = 0; offset < quantity; ++offset) {
+        const auto value = static_cast<std::uint16_t>(startAddress + offset);
+        body.push_back(static_cast<svm::core::Byte>((value >> 8) & 0xFF));
+        body.push_back(static_cast<svm::core::Byte>(value & 0xFF));
+    }
+    return svm::core::modbus::appendCrc16Modbus(body);
+}
+
+class QualityRegressionModbusTransport final : public svm::core::modbus::RtuTransport {
+public:
+    svm::core::modbus::RtuTransportExchange exchange(svm::core::ByteSpan requestFrame, int responseTimeoutMs) override
+    {
+        Q_UNUSED(responseTimeoutMs);
+        ++requestCount;
+        svm::core::modbus::RtuTransportExchange result;
+        result.status = svm::core::modbus::RtuTransportExchangeStatus::Success;
+        result.requestFrame = svm::core::ByteBuffer(requestFrame.begin(), requestFrame.end());
+        result.sentAtUtc = "2026-06-12T00:00:00Z";
+        result.receivedAtUtc = "2026-06-12T00:00:00Z";
+        result.endpoint = "quality://modbus";
+
+        if (requestFrame.size() < 6) {
+            result.status = svm::core::modbus::RtuTransportExchangeStatus::TransportError;
+            result.errorMessage = "bad request";
+            return result;
+        }
+
+        const int slaveId = requestFrame[0];
+        const svm::core::Byte functionCode = requestFrame[1];
+        const int startAddress = (static_cast<int>(requestFrame[2]) << 8) | static_cast<int>(requestFrame[3]);
+        const int quantity = (static_cast<int>(requestFrame[4]) << 8) | static_cast<int>(requestFrame[5]);
+        result.responseFrame = modbusReadResponse(slaveId, functionCode, startAddress, quantity);
+        return result;
+    }
+
+    int requestCount = 0;
+};
+
 } // namespace
 
 class QualityRegressionTests final : public QObject {
@@ -156,6 +209,65 @@ private slots:
         QCOMPARE(result.candidates.size(), 100);
         QVERIFY(result.candidates.first().sampleCount >= options.strongSampleCount);
         QVERIFY2(timer.elapsed() < 3000, "稳定性分析大样本回归超过 3 秒，分组路径可能退化。");
+    }
+
+    void serialWriteQueueKeepsBoundedThroughputForLargeBurst()
+    {
+        svm::transport::SerialWriteQueue queue(256);
+
+        QElapsedTimer timer;
+        timer.start();
+        for (int batch = 0; batch < 32; ++batch) {
+            for (int index = 0; index < 256; ++index) {
+                const auto accepted = queue.enqueue({
+                    static_cast<std::uint8_t>(index & 0xFF),
+                    static_cast<std::uint8_t>((index >> 8) & 0xFF),
+                }, 250);
+                QVERIFY(accepted.status == svm::transport::SerialWriteResultStatus::Accepted);
+            }
+            QVERIFY(queue.pendingCount() == std::size_t{256});
+            for (int index = 0; index < 256; ++index) {
+                const auto sent = queue.completeNextSent(2);
+                QVERIFY(sent.status == svm::transport::SerialWriteResultStatus::Sent);
+                QVERIFY(sent.terminal());
+            }
+            QVERIFY(queue.empty());
+        }
+
+        QVERIFY2(timer.elapsed() < 1000, "串口写队列大批量入队/完成回归超过 1 秒，队列路径可能退化。");
+    }
+
+    void coreModbusScanExecutorKeepsMultiBlockExecutionBounded()
+    {
+        svm::core::modbus::ScanPlanOptions planOptions;
+        planOptions.slaveId = 1;
+        planOptions.functionCode = static_cast<svm::core::Byte>(svm::core::modbus::ModbusReadFunction::HoldingRegisters);
+        planOptions.range = {0, 511};
+        planOptions.blockSize = 16;
+        planOptions.requestIntervalMs = 0;
+        planOptions.retryCount = 0;
+        const auto planResult = svm::core::modbus::buildScanPlan(planOptions);
+        QVERIFY2(planResult.ok, planResult.errorMessage.c_str());
+        QVERIFY(planResult.plan.blocks.size() == std::size_t{32});
+
+        QualityRegressionModbusTransport transport;
+        svm::core::modbus::ScanExecutionOptions executionOptions;
+        executionOptions.responseTimeoutMs = 250;
+        executionOptions.nowUtc = [] {
+            return svm::core::Text("2026-06-12T00:00:00Z");
+        };
+
+        QElapsedTimer timer;
+        timer.start();
+        svm::core::modbus::ScanExecutor executor(transport);
+        const auto result = executor.execute(planResult.plan, executionOptions);
+
+        QVERIFY(result.status == svm::core::modbus::ScanExecutionStatus::Completed);
+        QCOMPARE(result.successBlockCount, 32);
+        QCOMPARE(result.failedBlockCount, 0);
+        QVERIFY(result.observations.size() == std::size_t{512});
+        QCOMPARE(transport.requestCount, 32);
+        QVERIFY2(timer.elapsed() < 1000, "Modbus 扫描 executor 多块回归超过 1 秒，执行路径可能退化。");
     }
 };
 

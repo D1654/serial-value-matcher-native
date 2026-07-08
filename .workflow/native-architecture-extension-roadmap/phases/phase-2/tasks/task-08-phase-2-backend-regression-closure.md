@@ -1,7 +1,7 @@
 # Task 08: Phase 2 Backend Regression Closure
 
 > Phase: 2 — Backend Consistency
-> Status: pending
+> Status: completed
 
 ---
 
@@ -60,10 +60,12 @@ SVM_SERIAL_LOOPBACK_SCENARIOS=normal,reopen,timeout,cancel,stress python3 script
 
 ## Verification
 
-- [ ] Full CTest passes.
-- [ ] Backend stress evidence exists.
-- [ ] PTY loopback is either run locally or documented as environment-blocked.
-- [ ] Native package workflow remains green.
+- [x] Full CTest passes.
+- [x] Backend stress evidence exists.
+- [x] PTY loopback is either run locally or documented as environment-blocked.
+- [x] Native package workflow remains green.
+
+Local PTY note: attempted `normal,reopen,timeout,cancel,stress` with `SVM_SERIAL_LOOPBACK_STRESS_ITERATIONS=25`; current environment blocked at Wine prefix initialization (`wineboot` timeout). The Windows package workflow still records PTY as local-only release-candidate evidence, and `docs/测试与验证.md` documents this boundary.
 
 **Test command:**
 ```bash

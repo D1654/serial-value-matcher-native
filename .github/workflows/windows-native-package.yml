@@ -41,7 +41,36 @@ jobs:
 
       - name: Run native tests
         shell: pwsh
-        run: ctest --test-dir $env:BUILD_DIR --output-on-failure -C Release
+        run: |
+          New-Item -ItemType Directory -Path $env:PACKAGE_ARTIFACT_DIR -Force | Out-Null
+          $ctestLog = Join-Path $env:PACKAGE_ARTIFACT_DIR "native-ctest.log"
+          $ctestOutput = & ctest --test-dir $env:BUILD_DIR --output-on-failure -C Release 2>&1
+          $ctestExit = $LASTEXITCODE
+          $ctestOutput | Tee-Object -FilePath $ctestLog
+          if ($ctestExit -ne 0) {
+            exit $ctestExit
+          }
+
+      - name: Report Phase 2 backend regression closure
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path $env:PACKAGE_ARTIFACT_DIR -Force | Out-Null
+          $backendLog = Join-Path $env:PACKAGE_ARTIFACT_DIR "phase-2-backend-regression.txt"
+          $backendLines = @(
+            "Phase 2 backend regression closure",
+            "Status: CI-blocking native CTest passed before packaging.",
+            "Covered backend gates:",
+            "- serial write queue contract and native serial state tests",
+            "- Modbus core/executor/request/UI state tests",
+            "- native storage replacement rollback and orphan-tail recovery tests",
+            "- native package self-test and UI performance gates later in this workflow",
+            "Local-only release-candidate evidence remains separate:",
+            "- PTY normal/reopen/timeout/cancel/stress matrix is documented in serial-pty-matrix.txt"
+          )
+          $backendLines | Set-Content -Path $backendLog -Encoding UTF8
+          "## Phase 2 backend regression closure" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          $backendLines | ForEach-Object { $_ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append }
 
       - name: Report native serial PTY matrix gate
         shell: pwsh
@@ -149,8 +178,10 @@ jobs:
             artifacts/windows-native/${{ env.PACKAGE_NAME }}.zip
             artifacts/windows-native/${{ env.PACKAGE_NAME }}.zip.sha256.txt
             artifacts/windows-native/${{ env.PACKAGE_NAME }}.package-summary.txt
+            artifacts/windows-native/native-ctest.log
             artifacts/windows-native/native-self-test.log
             artifacts/windows-native/native-ui-perf-test.log
+            artifacts/windows-native/phase-2-backend-regression.txt
             artifacts/windows-native/serial-pty-matrix.txt
           if-no-files-found: error
           retention-days: 14

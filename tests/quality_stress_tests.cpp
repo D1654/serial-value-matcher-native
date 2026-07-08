@@ -4,6 +4,9 @@
 #include "matching/scan_observation_adapter.h"
 #include "matching/value_candidate_generator.h"
 #include "storage/session_store.h"
+#include "transport/serial_write_queue.h"
+
+#include <cstdint>
 
 namespace {
 
@@ -70,6 +73,30 @@ private slots:
             const auto result = svm::matching::generateValueCandidates(samples, target, options);
             QVERIFY2(result.success, qPrintable(result.errorMessage));
             QVERIFY(result.candidates.size() <= options.maxCandidates);
+        }
+    }
+
+    void repeatedSerialWriteQueueBurstCycles()
+    {
+        svm::transport::SerialWriteQueue queue(64);
+
+        for (int cycle = 0; cycle < 500; ++cycle) {
+            for (int index = 0; index < 64; ++index) {
+                const auto accepted = queue.enqueue({
+                    static_cast<std::uint8_t>(index),
+                    static_cast<std::uint8_t>(cycle & 0xFF),
+                    static_cast<std::uint8_t>((cycle >> 8) & 0xFF),
+                }, 250);
+                QVERIFY(accepted.status == svm::transport::SerialWriteResultStatus::Accepted);
+            }
+            QVERIFY(queue.full());
+
+            for (int index = 0; index < 64; ++index) {
+                const auto sent = queue.completeNextSent(3);
+                QVERIFY(sent.status == svm::transport::SerialWriteResultStatus::Sent);
+                QVERIFY(sent.terminal());
+            }
+            QVERIFY(queue.empty());
         }
     }
 };
