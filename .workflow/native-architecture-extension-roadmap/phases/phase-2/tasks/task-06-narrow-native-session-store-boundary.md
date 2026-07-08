@@ -1,7 +1,7 @@
 # Task 06: Narrow Native Session Store Boundary
 
 > Phase: 2 — Backend Consistency
-> Status: pending
+> Status: completed
 
 ---
 
@@ -16,11 +16,9 @@ Separate storage interface expectations from native file backend behavior withou
 
 **Modify:**
 - `src/native_storage/native_session_store.h`
-- `src/native_storage/native_session_store.cpp`
 - `src/native_storage/native_store_files.h`
 - `src/native_storage/native_store_files.cpp`
 - `src/storage/session_store.h`
-- `src/storage/session_store.cpp`
 - `tests/native_storage_tests.cpp`
 - `tests/session_store_tests.cpp`
 
@@ -57,9 +55,9 @@ Test current store operations through the narrow boundary.
 
 ## Verification
 
-- [ ] Native file backend remains compatible.
-- [ ] Storage interface is narrower than the facade.
-- [ ] Tests pass without adding SQLite.
+- [x] Native file backend remains compatible.
+- [x] Storage interface is narrower than the facade.
+- [x] Tests pass without adding SQLite.
 
 **Test command:**
 ```bash

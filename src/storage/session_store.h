@@ -17,6 +17,7 @@
 #include "storage/rule_verification_persistence_records.h"
 #include "storage/send_history_entry.h"
 #include "storage/serial_profile.h"
+#include "storage/session_store_port.h"
 #include "storage/scan_persistence_records.h"
 #include "storage/stability_persistence_records.h"
 
@@ -89,5 +90,51 @@ private:
     QString m_lastErrorText;
     mutable QString m_lastReadErrorText;
 };
+
+template <>
+struct SessionStorePortTraits<SessionStore> {
+    static constexpr SessionStorePortDescriptor descriptor{
+        "qt-sql-session-store",
+        SessionStoreBackendKind::QtSql,
+        true,
+        false,
+        true,
+        true,
+        false,
+        true,
+        true,
+        true,
+        true,
+        false,
+    };
+
+    using OpenLocation = QString;
+    using ErrorText = QString;
+    using RawIoEvent = capture::RawIoEvent;
+    using RawIoEventBatch = QList<capture::RawIoEvent>;
+    using RawIoCount = qint64;
+    using SerialProfile = ::svm::storage::SerialProfile;
+    using ScanExecution = ScanExecutionPersistenceRecord;
+    using ScanSessionId = QString;
+    using ScanSession = ScanSessionRecord;
+    using ScanSessionList = QList<ScanSessionRecord>;
+    using ScanAttemptList = QList<ScanAttemptRecord>;
+    using ScanObservationList = QList<ScanObservationRecord>;
+    using MatchRun = MatchRunRecord;
+    using MatchRunId = QString;
+    using MatchCandidatesInput = QList<matching::ValueMatchCandidate>;
+    using MatchRunList = QList<MatchRunRecord>;
+    using MatchCandidateList = QList<MatchCandidateRecord>;
+    using ProtocolFieldRule = ProtocolFieldRuleRecord;
+    using RuleId = QString;
+    using ProtocolFieldRuleList = QList<ProtocolFieldRuleRecord>;
+    using RuleVerificationRun = RuleVerificationRunRecord;
+    using RuleVerificationRunId = QString;
+    using RuleVerificationResultsInput = matching::ProtocolRuleVerificationSummary;
+    using RuleVerificationResultList = QList<RuleVerificationResultRecord>;
+};
+
+static_assert(SessionStorePort<SessionStore>);
+static_assert(SessionStoreReadDiagnosticsPort<SessionStore>);
 
 } // namespace svm::storage

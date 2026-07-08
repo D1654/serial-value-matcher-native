@@ -10,6 +10,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "storage/session_store_port.h"
+
 namespace svm::native_storage {
 
 struct RawIoEvent {
@@ -332,3 +334,58 @@ private:
 };
 
 } // namespace svm::native_storage
+
+namespace svm::storage {
+
+template <>
+struct SessionStorePortTraits<native_storage::NativeSessionStore> {
+    static constexpr SessionStorePortDescriptor descriptor{
+        "native-file-session-store",
+        SessionStoreBackendKind::NativeFile,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+    };
+
+    using OpenLocation = std::filesystem::path;
+    using ErrorText = std::string;
+    using RawIoEvent = native_storage::RawIoEvent;
+    using RawIoEventBatch = std::vector<native_storage::RawIoEvent>;
+    using RawIoEventList = std::vector<native_storage::RawIoEvent>;
+    using RawIoCount = std::int64_t;
+    using SerialProfile = native_storage::SerialProfile;
+    using UiPreferences = native_storage::UiPreferences;
+    using ScanExecution = native_storage::ScanExecutionRecord;
+    using ScanSessionId = std::string_view;
+    using ScanSession = native_storage::ScanSessionRecord;
+    using ScanSessionList = std::vector<native_storage::ScanSessionRecord>;
+    using ScanAttemptList = std::vector<native_storage::ScanAttemptRecord>;
+    using ScanObservationList = std::vector<native_storage::ScanObservationRecord>;
+    using MatchRun = native_storage::MatchRunRecord;
+    using MatchRunId = std::string_view;
+    using MatchCandidatesInput = std::vector<native_storage::MatchCandidateRecord>;
+    using MatchRunList = std::vector<native_storage::MatchRunRecord>;
+    using MatchCandidateList = std::vector<native_storage::MatchCandidateRecord>;
+    using ProtocolFieldRule = native_storage::ProtocolFieldRuleRecord;
+    using RuleId = std::string_view;
+    using ProtocolFieldRuleList = std::vector<native_storage::ProtocolFieldRuleRecord>;
+    using RuleVerificationRun = native_storage::RuleVerificationRunRecord;
+    using RuleVerificationRunId = std::string_view;
+    using RuleVerificationResultsInput = std::vector<native_storage::RuleVerificationResultRecord>;
+    using RuleVerificationResultList = std::vector<native_storage::RuleVerificationResultRecord>;
+};
+
+static_assert(SessionStorePort<native_storage::NativeSessionStore>);
+static_assert(SessionStoreOpenStatePort<native_storage::NativeSessionStore>);
+static_assert(SessionStoreRecentRawIoPort<native_storage::NativeSessionStore>);
+static_assert(SessionStoreRawRetentionPort<native_storage::NativeSessionStore>);
+static_assert(SessionStoreUiPreferencesPort<native_storage::NativeSessionStore>);
+
+} // namespace svm::storage

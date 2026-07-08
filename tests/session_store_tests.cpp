@@ -173,6 +173,81 @@ private slots:
         QCOMPARE(store.rawEventCount(), 3);
     }
 
+    void exposesNarrowSessionStorePort() {
+        using Store = svm::storage::SessionStore;
+        using Traits = svm::storage::SessionStorePortTraits<Store>;
+        static_assert(svm::storage::SessionStorePort<Store>);
+        static_assert(svm::storage::SessionStoreReadDiagnosticsPort<Store>);
+
+        const auto descriptor = Traits::descriptor;
+        QVERIFY(descriptor.backendKind == svm::storage::SessionStoreBackendKind::QtSql);
+        QVERIFY(descriptor.supportsRawIo);
+        QVERIFY(descriptor.supportsModbusScans);
+        QVERIFY(!descriptor.supportsUiPreferences);
+        QVERIFY(!descriptor.exposesBackendFiles);
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        Store store;
+        QVERIFY2(store.open(dir.filePath(QStringLiteral("port.sqlite"))), qPrintable(store.lastErrorText()));
+
+        Traits::RawIoEvent event;
+        event.sessionId = QStringLiteral("port-session");
+        event.direction = svm::capture::Direction::Rx;
+        event.timestampUtc = QDateTime::fromString(QStringLiteral("2026-06-01T00:00:00.000Z"), Qt::ISODateWithMs);
+        event.endpoint = QStringLiteral("COM9");
+        event.payload = QByteArray::fromHex("0103021234");
+
+        QVERIFY2(store.appendRawEvent(event), qPrintable(store.lastErrorText()));
+        QCOMPARE(store.rawEventCount(), 1);
+
+        Traits::ScanExecution execution;
+        execution.session.sessionId = QStringLiteral("port-scan");
+        execution.session.slaveId = 1;
+        execution.session.functionCode = 3;
+        execution.session.startAddress = 400;
+        execution.session.endAddress = 401;
+        execution.session.blockSize = 2;
+        execution.session.requestCount = 1;
+        execution.session.status = QStringLiteral("completed");
+        execution.session.startedAtUtc = QDateTime::fromString(QStringLiteral("2026-06-01T00:00:01.000Z"), Qt::ISODateWithMs);
+        execution.session.finishedAtUtc = QDateTime::fromString(QStringLiteral("2026-06-01T00:00:02.000Z"), Qt::ISODateWithMs);
+        execution.session.successBlockCount = 1;
+
+        svm::storage::ScanAttemptRecord attempt;
+        attempt.blockIndex = 0;
+        attempt.attemptIndex = 0;
+        attempt.startAddress = 400;
+        attempt.quantity = 2;
+        attempt.status = QStringLiteral("success");
+        attempt.requestFrame = QByteArray::fromHex("010301900002");
+        attempt.responseFrame = QByteArray::fromHex("01030400010002");
+        attempt.sentAtUtc = execution.session.startedAtUtc;
+        attempt.receivedAtUtc = execution.session.finishedAtUtc;
+        attempt.endpoint = QStringLiteral("COM9");
+        execution.attempts.append(attempt);
+
+        for (int offset = 0; offset < 2; ++offset) {
+            svm::storage::ScanObservationRecord observation;
+            observation.blockIndex = 0;
+            observation.attemptIndex = 0;
+            observation.slaveId = 1;
+            observation.functionCode = 3;
+            observation.address = 400 + offset;
+            observation.value = 100 + offset;
+            observation.observedAtUtc = execution.session.finishedAtUtc;
+            execution.observations.append(observation);
+        }
+
+        QVERIFY2(store.saveScanExecution(execution), qPrintable(store.lastErrorText()));
+        const auto loaded = store.scanSession(QStringLiteral("port-scan"));
+        QVERIFY(loaded.has_value());
+        QCOMPARE(loaded->startAddress, 400);
+        QCOMPARE(static_cast<int>(store.scanAttempts(QStringLiteral("port-scan")).size()), 1);
+        QCOMPARE(static_cast<int>(store.scanObservations(QStringLiteral("port-scan")).size()), 2);
+    }
+
     void removesSqlConnectionWhenDestroyed()
     {
         QTemporaryDir dir;

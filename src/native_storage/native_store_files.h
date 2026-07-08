@@ -21,5 +21,7 @@ inline constexpr std::string_view kRuleVerificationRunsFile = "rule_verification
 inline constexpr std::string_view kRuleVerificationResultsFile = "rule_verification_results.svmr";
 
 const std::vector<std::string_view>& storeFiles();
+bool isStoreDataFile(std::string_view fileName);
+bool isStoreManagedFile(std::string_view fileName);
 
 } // namespace svm::native_storage::store_files

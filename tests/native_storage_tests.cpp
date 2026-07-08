@@ -1,4 +1,6 @@
 #include "native_storage/native_session_store.h"
+#include "native_storage/native_store_files.h"
+#include "storage/session_store_port.h"
 
 #ifdef NDEBUG
 #undef NDEBUG
@@ -49,6 +51,13 @@ svm::native_storage::NativeSessionStore openStore(const std::filesystem::path& p
     assert(std::filesystem::exists(path / "schema.txt"));
     assert(std::filesystem::exists(path / "id_counters.svmr"));
     return store;
+}
+
+template <svm::storage::SessionStoreScanPort Store>
+bool saveScanExecutionThroughPort(
+    Store& store,
+    const typename svm::storage::SessionStorePortTraits<Store>::ScanExecution& execution) {
+    return store.saveScanExecution(execution);
 }
 
 void setReplaceFailureInjection(const char* fileName) {
@@ -488,6 +497,49 @@ svm::native_storage::ScanExecutionRecord scanExecution(std::string sessionId, in
         execution.observations.push_back(std::move(observation));
     }
     return execution;
+}
+
+void narrowSessionStorePortKeepsBackendFilesSeparated() {
+    using Store = svm::native_storage::NativeSessionStore;
+    using Traits = svm::storage::SessionStorePortTraits<Store>;
+    static_assert(svm::storage::SessionStorePort<Store>);
+    static_assert(svm::storage::SessionStoreOpenStatePort<Store>);
+    static_assert(svm::storage::SessionStoreRecentRawIoPort<Store>);
+    static_assert(svm::storage::SessionStoreRawRetentionPort<Store>);
+    static_assert(svm::storage::SessionStoreUiPreferencesPort<Store>);
+
+    const auto descriptor = Traits::descriptor;
+    assert(descriptor.backendKind == svm::storage::SessionStoreBackendKind::NativeFile);
+    assert(descriptor.supportsRawIo);
+    assert(descriptor.supportsRawRetention);
+    assert(descriptor.supportsUiPreferences);
+    assert(descriptor.supportsModbusScans);
+    assert(!descriptor.exposesBackendFiles);
+    assert(svm::native_storage::store_files::isStoreDataFile("raw_io_events.svmr"));
+    assert(svm::native_storage::store_files::isStoreManagedFile("schema.txt"));
+    assert(!svm::native_storage::store_files::isStoreManagedFile("port-contract.txt"));
+
+    const auto path = temporaryStorePath();
+    auto store = openStore(path);
+
+    Traits::RawIoEvent event;
+    event.sessionId = "port-session";
+    event.direction = "Rx";
+    event.timestampUtc = "2026-06-12T10:03:00Z";
+    event.endpoint = "COM9";
+    event.payload = {0x01, 0x03, 0x02, 0x12, 0x34};
+    assert(store.appendRawEvent(event));
+    assert(store.rawEventCount() == 1);
+
+    const auto execution = scanExecution("port-scan", 400, 2);
+    assert(saveScanExecutionThroughPort(store, execution));
+    const auto loaded = store.scanSession("port-scan");
+    assert(loaded.has_value());
+    assert(loaded->startAddress == 400);
+    assert(store.scanAttempts("port-scan").size() == 1);
+    assert(store.scanObservations("port-scan").size() == 2);
+
+    std::filesystem::remove_all(path);
 }
 
 void scanAndMatchRecordsRoundTrip() {
@@ -1290,6 +1342,7 @@ int main() {
     runStorageTest("rawEventRetentionKeepsBinaryPayloadBoundaries", rawEventRetentionKeepsBinaryPayloadBoundaries);
     runStorageTest("sendHistoryAndProfilesKeepLatestRecords", sendHistoryAndProfilesKeepLatestRecords);
     runStorageTest("uiPreferencesRoundTrip", uiPreferencesRoundTrip);
+    runStorageTest("narrowSessionStorePortKeepsBackendFilesSeparated", narrowSessionStorePortKeepsBackendFilesSeparated);
     runStorageTest("scanAndMatchRecordsRoundTrip", scanAndMatchRecordsRoundTrip);
     runStorageTest("scanObservationReadsTargetSessionFromLargeHistory", scanObservationReadsTargetSessionFromLargeHistory);
     runStorageTest("recentAndLatestReadsStayBoundedAcrossLargeHistory", recentAndLatestReadsStayBoundedAcrossLargeHistory);
