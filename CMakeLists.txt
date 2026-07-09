@@ -44,6 +44,7 @@ endif()
 
 add_library(svm_slim_core
     src/command_sequence/command_sequence.cpp
+    src/core/dangerous_operation_policy.cpp
     src/core/protocol_core.cpp
     src/core/modbus_core.cpp
     src/core/modbus_scan_executor_core.cpp
@@ -335,6 +336,18 @@ set_target_properties(command_sequence_tests PROPERTIES
 target_link_libraries(command_sequence_tests PRIVATE svm_slim_core)
 target_include_directories(command_sequence_tests PRIVATE src)
 add_test(NAME command_sequence_tests COMMAND command_sequence_tests)
+
+add_executable(dangerous_operation_policy_tests
+    tests/dangerous_operation_policy_tests.cpp
+)
+set_target_properties(dangerous_operation_policy_tests PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+target_link_libraries(dangerous_operation_policy_tests PRIVATE svm_slim_core)
+target_include_directories(dangerous_operation_policy_tests PRIVATE src)
+add_test(NAME dangerous_operation_policy_tests COMMAND dangerous_operation_policy_tests)
 
 add_executable(native_candidate_cache_state_tests
     tests/native_candidate_cache_state_tests.cpp

@@ -219,6 +219,9 @@ std::optional<LRESULT> NativeMainWindow::handleSendControlCommand(WORD commandId
     case IDC_TIMED_SEND_CHECK:
         if (notificationCode == BN_CLICKED) {
             sendControlState_.setTimedSendEnabled(SendMessageW(timedSendCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED);
+            if (!sendControlState_.timedSendEnabled()) {
+                timedSendConfirmed_ = false;
+            }
             updateTimedSendTimer();
             saveUiPreferences();
             setStatus(sendControlState_.timedSendEnabled() ? tx(T::TimedSendEnabledStatus) : tx(T::TimedSendDisabledStatus));

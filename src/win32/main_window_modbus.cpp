@@ -96,6 +96,16 @@ void NativeMainWindow::runModbusScan() {
         return;
     }
 
+    core::DangerousOperationRequest dangerousRequest;
+    dangerousRequest.kind = core::DangerousOperationKind::ManualSerialWrite;
+    dangerousRequest.slaveId = requestInput.slaveId;
+    dangerousRequest.functionCode = requestInput.functionCode;
+    dangerousRequest.address = requestInput.startAddress;
+    dangerousRequest.quantity = requestInput.endAddress - requestInput.startAddress + 1;
+    if (!confirmDangerousOperation(dangerousRequest, L"Modbus 写操作会在创建执行线程前要求确认；当前只读扫描不会弹出确认。")) {
+        return;
+    }
+
     appendLog(uiString(T::SystemModbusStartPrefix) + utf8ToWide(requestInput.scanSessionId));
     closeModbusScanThread();
     modbusScanCancelRequested_ = false;

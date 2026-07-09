@@ -275,6 +275,24 @@ void recentRawEventsChronologicalKeepsRecentEventsInOriginalOrder() {
     std::filesystem::remove_all(path);
 }
 
+void auditRawEventsPreserveDirectionAndPayload() {
+    const auto path = temporaryStorePath();
+    auto store = openStore(path);
+
+    assert(store.appendRawEvent(rawEvent(
+        "Audit",
+        {'d', 'a', 'n', 'g', 'e', 'r', 'o', 'u', 's', '_', 'o', 'p', 'e', 'r', 'a', 't', 'i', 'o', 'n'})));
+
+    const auto events = store.recentRawEventsChronological(1);
+
+    assert(events.size() == 1);
+    assert(events[0].direction == "Audit");
+    assert((events[0].payload == std::vector<std::uint8_t>{
+        'd', 'a', 'n', 'g', 'e', 'r', 'o', 'u', 's', '_', 'o', 'p', 'e', 'r', 'a', 't', 'i', 'o', 'n'}));
+
+    std::filesystem::remove_all(path);
+}
+
 void idCountersPersistAcrossReopen() {
     const auto path = temporaryStorePath();
     {
@@ -1442,6 +1460,7 @@ void protocolRulesAndVerificationRoundTrip() {
 int main() {
     runStorageTest("rawEventsAreBatchedAndReopened", rawEventsAreBatchedAndReopened);
     runStorageTest("recentRawEventsChronologicalKeepsRecentEventsInOriginalOrder", recentRawEventsChronologicalKeepsRecentEventsInOriginalOrder);
+    runStorageTest("auditRawEventsPreserveDirectionAndPayload", auditRawEventsPreserveDirectionAndPayload);
     runStorageTest("replacementArtifactsAreRecoveredOnOpen", replacementArtifactsAreRecoveredOnOpen);
     runStorageTest("interruptedReplacementRollsBackLiveFileToBackup", interruptedReplacementRollsBackLiveFileToBackup);
     runStorageTest("truncatedAppendTailIsIsolatedOnOpen", truncatedAppendTailIsIsolatedOnOpen);

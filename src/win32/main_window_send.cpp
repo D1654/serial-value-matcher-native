@@ -16,6 +16,7 @@
 #include <commctrl.h>
 #include <commdlg.h>
 #include <filesystem>
+#include <sstream>
 
 namespace svm::win32 {
 namespace {
@@ -26,7 +27,91 @@ const wchar_t* tx(T id) {
     return uiText(id);
 }
 
+std::string auditPayloadText(const svm::core::DangerousOperationAuditEvent& event) {
+    std::ostringstream output;
+    output << "dangerous_operation_confirmation"
+           << "\nstate=" << svm::core::dangerousOperationConfirmationStateName(event.state)
+           << "\nsummary=" << event.summary;
+    for (const auto& [key, value] : event.metadata) {
+        output << "\n" << key << "=" << value;
+    }
+    const std::string text = output.str();
+    return text;
+}
+
+std::vector<std::uint8_t> auditPayloadBytes(const svm::core::DangerousOperationAuditEvent& event) {
+    const std::string text = auditPayloadText(event);
+    return std::vector<std::uint8_t>(text.begin(), text.end());
+}
+
+std::wstring dangerousOperationTitle() {
+    return L"确认危险操作";
+}
+
+std::wstring dangerousOperationPrompt(
+    const svm::core::DangerousOperationPolicyResult& policy,
+    const std::wstring& promptDetail) {
+    std::wstring prompt = L"此操作可能持续写入或改变外部设备状态。\r\n\r\n";
+    prompt += L"操作摘要：";
+    prompt += utf8ToWide(policy.summary);
+    if (!policy.reason.empty()) {
+        prompt += L"\r\n原因：";
+        prompt += utf8ToWide(policy.reason);
+    }
+    if (!promptDetail.empty()) {
+        prompt += L"\r\n";
+        prompt += promptDetail;
+    }
+    prompt += L"\r\n\r\n选择“是”才会继续执行；选择“否”、关闭窗口或提示失败都会取消。";
+    return prompt;
+}
+
 } // namespace
+
+bool NativeMainWindow::confirmDangerousOperation(const core::DangerousOperationRequest& request, const std::wstring& promptDetail) {
+    const core::DangerousOperationPolicyResult policy = core::evaluateDangerousOperation(request);
+    if (!policy.requiresConfirmation) {
+        return true;
+    }
+
+    const int dialogResult = MessageBoxW(
+        window_,
+        dangerousOperationPrompt(policy, promptDetail).c_str(),
+        dangerousOperationTitle().c_str(),
+        MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2 | MB_APPLMODAL);
+    const core::DangerousOperationConfirmationState state = core::dangerousOperationConfirmationStateFromDialogResult(dialogResult);
+    recordDangerousOperationAudit(policy, request.kind, state);
+    if (core::dangerousOperationConfirmationSatisfied(state)) {
+        return true;
+    }
+
+    setStatus(state == core::DangerousOperationConfirmationState::PromptFailed
+        ? L"危险操作确认提示失败，已取消执行。"
+        : L"危险操作已取消，未执行。");
+    return false;
+}
+
+void NativeMainWindow::recordDangerousOperationAudit(
+    const core::DangerousOperationPolicyResult& policy,
+    core::DangerousOperationKind kind,
+    core::DangerousOperationConfirmationState state) {
+    const core::DangerousOperationAuditEvent audit = core::makeDangerousOperationAuditEvent(policy, kind, state);
+    const std::wstring logLine = std::wstring(L"[审计] 危险操作确认：")
+        + utf8ToWide(policy.summary)
+        + L" -> "
+        + utf8ToWide(core::dangerousOperationConfirmationStateName(state));
+    appendLog(NativeLogKind::System, logLine);
+
+    native_storage::RawIoEvent event;
+    event.sessionId = sessionId_;
+    event.direction = "Audit";
+    event.timestampUtc = nativeUtcTimestampText();
+    event.endpoint = "local://dangerous-operation";
+    event.payload = auditPayloadBytes(audit);
+    if (store_.isOpen()) {
+        store_.appendRawEvent(event);
+    }
+}
 
 void NativeMainWindow::setSendModeStatus() {
     const int mode = static_cast<int>(selectedComboData(sendModeCombo_, 0));
@@ -141,6 +226,23 @@ bool NativeMainWindow::sendPayloadFromText(const std::wstring& text, bool saveHi
     if (payloadDecision.kind == NativeSerialSendDecisionKind::PayloadEmpty) {
         setStatus(tx(T::EmptyPayload));
         return false;
+    }
+
+    if (sendControlState_.timedSendEnabled() && !timedSendConfirmed_) {
+        core::DangerousOperationRequest request;
+        request.kind = core::DangerousOperationKind::TimedSerialWrite;
+        request.payloadBytes = payload.size();
+        request.repeatCount = 2;
+        if (!confirmDangerousOperation(request, L"定时发送会按当前周期重复写入串口。")) {
+            SendMessageW(timedSendCheck_, BM_SETCHECK, BST_UNCHECKED, 0);
+            sendControlState_.setTimedSendEnabled(false);
+            updateTimedSendTimer();
+            saveUiPreferences();
+            return false;
+        }
+        timedSendConfirmed_ = true;
+    } else if (!sendControlState_.timedSendEnabled()) {
+        timedSendConfirmed_ = false;
     }
 
     const NativeSerialSendDecision acquireDecision = serialSendController_.manualAcquireDecision(serialIoState_.tryAcquire(availability.owner));
@@ -265,6 +367,13 @@ void NativeMainWindow::startFileSend() {
         return;
     }
 
+    core::DangerousOperationRequest request;
+    request.kind = core::DangerousOperationKind::FileSerialSend;
+    request.payloadBytes = 0;
+    if (!confirmDangerousOperation(request, L"文件发送会按分块方式连续写入串口。")) {
+        return;
+    }
+
     const NativeFileSendOpenResult openResult = fileSend_.open(std::filesystem::path(pathText));
     if (!openResult.ok()) {
         setStatus(uiString(T::FileSendOpenFailedPrefix) + pathText);
@@ -278,6 +387,7 @@ void NativeMainWindow::startFileSend() {
     }
 
     KillTimer(window_, IDT_TIMED_SEND);
+    timedSendConfirmed_ = false;
     updateFileSendProgress();
     enableControl(fileSendButton_, false);
     enableControl(fileBrowseButton_, false);

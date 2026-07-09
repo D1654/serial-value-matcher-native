@@ -153,6 +153,7 @@ void NativeMainWindow::connectSerial() {
 
     reconnectState_.rememberSuccessfulOpen(options);
     disconnectAfterModbusScan_ = false;
+    timedSendConfirmed_ = false;
     KillTimer(window_, IDT_RECONNECT);
     appendLog(uiString(T::SystemConnectedPrefix) + utf8ToWide(serialPort_.endpoint()));
     updateConnectionButtonState();
@@ -177,6 +178,7 @@ void NativeMainWindow::closeSerialPort(const std::wstring& statusText) {
         return;
     }
     KillTimer(window_, IDT_TIMED_SEND);
+    timedSendConfirmed_ = false;
     stopFileSend({});
     const std::wstring endpoint = utf8ToWide(serialPort_.endpoint());
     serialPort_.close();
@@ -192,6 +194,7 @@ void NativeMainWindow::shutdownSerialPort() {
     if (serialPort_.isOpen()) {
         serialPort_.close();
     }
+    timedSendConfirmed_ = false;
     clearPendingSerialWrites();
 }
 

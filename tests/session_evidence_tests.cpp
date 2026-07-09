@@ -23,6 +23,7 @@ private slots:
             SessionEvidenceEventType::ModbusScanSettings,
             SessionEvidenceEventType::CommandSequenceStep,
             SessionEvidenceEventType::CommandSequenceAssertion,
+            SessionEvidenceEventType::DangerousOperationConfirmation,
             SessionEvidenceEventType::MatchResult,
             SessionEvidenceEventType::ReportMetadata,
             SessionEvidenceEventType::AppVersion,

@@ -22,6 +22,7 @@ enum class SessionEvidenceEventType {
     ModbusScanSettings,
     CommandSequenceStep,
     CommandSequenceAssertion,
+    DangerousOperationConfirmation,
     MatchResult,
     ReportMetadata,
     AppVersion,

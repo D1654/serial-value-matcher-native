@@ -1,7 +1,7 @@
 # Task 04: Add Dangerous Operation Confirmation and Audit
 
 > Phase: 3 — Extension Capability & Production Hardening
-> Status: pending
+> Status: completed
 
 ---
 
@@ -57,9 +57,9 @@ Ensure cancelled dangerous operations do not enqueue writes or execute Modbus co
 
 ## Verification
 
-- [ ] Dangerous operations require explicit confirmation.
-- [ ] Cancelled operations do not execute.
-- [ ] Confirmation/cancellation evidence is recorded.
+- [x] Dangerous operations require explicit confirmation.
+- [x] Cancelled operations do not execute.
+- [x] Confirmation/cancellation evidence is recorded.
 
 **Test command:**
 ```bash
@@ -70,6 +70,14 @@ ctest --test-dir build-codex --output-on-failure -R "dangerous_operation_policy|
 ```
 100% tests passed
 ```
+
+## Completion Notes
+
+- Added a pure C++ dangerous-operation policy for timed send, file send, command-sequence write, Modbus broadcast write, and Modbus register write classification.
+- Added fail-closed Win32 confirmation using `MessageBoxW` with owner window, warning icon, Yes/No buttons, and safe default button.
+- Added redaction-safe audit records for confirmed/cancelled/prompt-failed dangerous operations.
+- Fixed Modbus confirmation classification so current read-only scans do not prompt, while future write/broadcast requests are still gated before worker thread creation.
+- Verification completed: build-codex 54/54, build-windows-native-mingw 31/31, docs consistency, diff check, and local MinGW package/Wine gate.
 
 ## Commit
 

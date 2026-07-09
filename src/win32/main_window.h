@@ -10,6 +10,7 @@
 #endif
 #include <windows.h>
 
+#include "core/dangerous_operation_policy.h"
 #include "native_storage/native_session_store.h"
 #include "win32/native_candidate_cache_state.h"
 #include "win32/native_connection_ui_state.h"
@@ -168,6 +169,11 @@ private:
     void stopFileSend(const std::wstring& statusText = {});
     void pumpFileSend();
     void updateFileSendProgress();
+    bool confirmDangerousOperation(const core::DangerousOperationRequest& request, const std::wstring& promptDetail);
+    void recordDangerousOperationAudit(
+        const core::DangerousOperationPolicyResult& policy,
+        core::DangerousOperationKind kind,
+        core::DangerousOperationConfirmationState state);
     void pollSerial();
     void handleSerialFailure(const std::string& message);
     void tryAutoReconnect();
@@ -417,6 +423,7 @@ private:
     std::atomic_bool modbusScanCancelRequested_ = false;
     std::atomic_bool modbusScanRunning_ = false;
     bool disconnectAfterModbusScan_ = false;
+    bool timedSendConfirmed_ = false;
 };
 
 } // namespace svm::win32
