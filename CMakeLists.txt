@@ -209,6 +209,7 @@ if(SVM_BUILD_QT_APP OR SVM_BUILD_QT_TESTS)
     add_library(svm_native_core
         src/analysis/stability_analysis_workflow.cpp
         src/capture/capture_bus.cpp
+        src/capture/session_evidence.cpp
         src/session/console_model.cpp
         src/transport/serial_error_translator.cpp
         src/transport/serial_port_enumerator.cpp
@@ -686,6 +687,7 @@ if(SVM_BUILD_QT_TESTS)
     add_svm_qt_test(rule_verification_report_tests tests/rule_verification_report_tests.cpp)
     add_svm_qt_test(checksum_tests tests/checksum_tests.cpp)
     add_svm_qt_test(session_store_tests tests/session_store_tests.cpp)
+    add_svm_qt_test(session_evidence_tests tests/session_evidence_tests.cpp)
     add_svm_qt_test(console_model_tests tests/console_model_tests.cpp)
     add_svm_qt_test(payload_codec_tests tests/payload_codec_tests.cpp)
     add_svm_qt_test(send_history_tests tests/send_history_tests.cpp)

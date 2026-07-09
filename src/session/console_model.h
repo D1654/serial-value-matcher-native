@@ -3,13 +3,18 @@
 #include <QObject>
 #include <QString>
 #include <QVector>
+#include <QtGlobal>
 
 #include "capture/raw_io_event.h"
+#include "capture/session_evidence.h"
 
 namespace svm::session {
 
 struct ConsoleLine {
     capture::RawIoEvent event;
+    quint64 evidenceOrder = 0;
+    QString sessionId;
+    QString sourceSubsystem;
     QString directionText;
     QString timestampText;
     QString hexText;
@@ -24,6 +29,7 @@ public:
     explicit ConsoleModel(QObject* parent = nullptr);
 
     void appendEvent(const capture::RawIoEvent& event);
+    void appendEvidence(const capture::SessionEvidenceEvent& evidence);
     void clear();
     const QVector<ConsoleLine>& lines() const;
     void setMaximumLineCount(int maximumLineCount);
@@ -33,6 +39,7 @@ public:
     static QString formatHex(const QByteArray& payload);
     static QString formatTextPreview(const QByteArray& payload);
     static ConsoleLine makeLine(const capture::RawIoEvent& event);
+    static ConsoleLine makeLine(const capture::SessionEvidenceEvent& evidence);
 
 signals:
     void lineAdded(const svm::session::ConsoleLine& line);

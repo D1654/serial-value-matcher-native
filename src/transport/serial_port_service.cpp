@@ -86,6 +86,7 @@ qint64 SerialPortService::writeBytes(const QByteArray& payload) {
         event.sessionId = m_options.sessionId;
         event.direction = capture::Direction::Tx;
         event.timestampUtc = QDateTime::currentDateTimeUtc();
+        event.sourceSubsystem = QStringLiteral("serial_port_service");
         event.endpoint = endpoint();
         event.payload = payload.left(static_cast<int>(written));
         m_captureBus.publish(event);
@@ -111,6 +112,7 @@ void SerialPortService::onReadyRead() {
     event.sessionId = m_options.sessionId;
     event.direction = capture::Direction::Rx;
     event.timestampUtc = QDateTime::currentDateTimeUtc();
+    event.sourceSubsystem = QStringLiteral("serial_port_service");
     event.endpoint = endpoint();
     event.payload = payload;
     m_captureBus.publish(event);

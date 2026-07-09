@@ -135,6 +135,7 @@ void ModbusRtuSerialTransport::publishRawEvent(
     event.sessionId = options_.sessionId;
     event.direction = direction;
     event.timestampUtc = timestampUtc;
+    event.sourceSubsystem = QStringLiteral("modbus_rtu_serial_transport");
     event.endpoint = channel_.endpoint();
     event.payload = payload;
     captureBus_->publish(event);

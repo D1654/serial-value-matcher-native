@@ -3,6 +3,22 @@
 #include <QMetaType>
 
 namespace svm::session {
+namespace {
+
+svm::capture::RawIoEvent rawEventFromEvidence(const capture::SessionEvidenceEvent& evidence) {
+    svm::capture::RawIoEvent event;
+    event.sessionId = evidence.sessionId;
+    event.timestampUtc = evidence.timestampUtc;
+    event.sourceSubsystem = evidence.sourceSubsystem;
+    event.endpoint = evidence.endpoint;
+    event.payload = evidence.rawPayload;
+    if (const auto direction = capture::rawIoDirection(evidence.type)) {
+        event.direction = *direction;
+    }
+    return event;
+}
+
+} // namespace
 
 ConsoleModel::ConsoleModel(QObject* parent) : QObject(parent) {
     qRegisterMetaType<svm::session::ConsoleLine>("svm::session::ConsoleLine");
@@ -10,6 +26,13 @@ ConsoleModel::ConsoleModel(QObject* parent) : QObject(parent) {
 
 void ConsoleModel::appendEvent(const capture::RawIoEvent& event) {
     ConsoleLine line = makeLine(event);
+    m_lines.append(line);
+    trimToMaximumLineCount();
+    emit lineAdded(line);
+}
+
+void ConsoleModel::appendEvidence(const capture::SessionEvidenceEvent& evidence) {
+    ConsoleLine line = makeLine(evidence);
     m_lines.append(line);
     trimToMaximumLineCount();
     emit lineAdded(line);
@@ -51,12 +74,35 @@ QString ConsoleModel::formatTextPreview(const QByteArray& payload) {
 ConsoleLine ConsoleModel::makeLine(const capture::RawIoEvent& event) {
     ConsoleLine line;
     line.event = event;
+    line.sessionId = event.sessionId;
+    line.sourceSubsystem = event.sourceSubsystem;
     line.directionText = directionText(event.direction);
     line.timestampText = event.timestampUtc.toLocalTime().toString(QStringLiteral("HH:mm:ss.zzz"));
     line.hexText = formatHex(event.payload);
     line.textPreview = formatTextPreview(event.payload);
     line.displayLine = QStringLiteral("[%1] %2 %3 HEX=%4 TEXT=%5")
         .arg(line.timestampText, line.directionText, event.endpoint, line.hexText, line.textPreview);
+    return line;
+}
+
+ConsoleLine ConsoleModel::makeLine(const capture::SessionEvidenceEvent& evidence) {
+    if (evidence.isRawIo()) {
+        ConsoleLine line = makeLine(rawEventFromEvidence(evidence));
+        line.evidenceOrder = evidence.order;
+        line.sessionId = evidence.sessionId;
+        line.sourceSubsystem = evidence.sourceSubsystem;
+        return line;
+    }
+
+    ConsoleLine line;
+    line.evidenceOrder = evidence.order;
+    line.sessionId = evidence.sessionId;
+    line.sourceSubsystem = evidence.sourceSubsystem;
+    line.directionText = capture::sessionEvidenceEventTypeKey(evidence.type).toUpper();
+    line.timestampText = evidence.timestampUtc.toLocalTime().toString(QStringLiteral("HH:mm:ss.zzz"));
+    line.textPreview = evidence.metadata.value(QStringLiteral("summary"));
+    line.displayLine = QStringLiteral("[%1] %2 %3")
+        .arg(line.timestampText, line.directionText, line.textPreview);
     return line;
 }
 

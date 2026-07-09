@@ -1,7 +1,7 @@
 # Task 01: Define Session Evidence Model
 
 > Phase: 3 — Extension Capability & Production Hardening
-> Status: pending
+> Status: completed
 
 ---
 
@@ -59,9 +59,17 @@ ctest --test-dir build-codex --output-on-failure -R "session_evidence|console_mo
 
 ## Verification
 
-- [ ] Evidence model is local and structured.
-- [ ] Raw TX/RX can be preserved independent of UI refresh.
-- [ ] Focused tests pass.
+- [x] Evidence model is local and structured.
+- [x] Raw TX/RX can be preserved independent of UI refresh.
+- [x] Focused tests pass.
+
+Additional verification:
+
+- `ctest --test-dir build-codex --output-on-failure -R "session_evidence|console_model"`: 2/2 passed.
+- `ctest --test-dir build-codex --output-on-failure`: 51/51 passed.
+- `ctest --test-dir build-windows-native-mingw --output-on-failure`: 28/28 passed.
+- `python3 scripts/check-docs-artifact-consistency.py`: passed.
+- `bash scripts/package-windows-native-mingw.sh`: passed; zip 849627 bytes, extracted 2130336 bytes, Wine gate passed.
 
 **Test command:**
 ```bash

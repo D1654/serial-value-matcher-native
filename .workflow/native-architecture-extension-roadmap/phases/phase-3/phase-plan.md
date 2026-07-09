@@ -1,7 +1,7 @@
 # Phase 3: Extension Capability & Production Hardening
 
 > Parent: [Project Plan](../../project-plan.md)
-> Status: pending
+> Status: in_progress
 
 ---
 
@@ -11,9 +11,9 @@ Add evidence and command-sequence foundations while hardening release, diagnosti
 
 ## Prerequisites
 
-- [ ] Phase 1 and Phase 2 completed.
-- [ ] UI, serial, Modbus, and storage foundations are stable.
-- [ ] No TCP UI/runtime, SQLite backend, broad plugin system, or full script engine is introduced.
+- [x] Phase 1 and Phase 2 completed.
+- [x] UI, serial, Modbus, and storage foundations are stable.
+- [x] No TCP UI/runtime, SQLite backend, broad plugin system, or full script engine is introduced.
 
 ## Libraries & Dependencies
 

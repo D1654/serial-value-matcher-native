@@ -9,6 +9,7 @@
 #include <QString>
 
 #include "capture/raw_io_event.h"
+#include "capture/session_evidence.h"
 #include "matching/candidate_stability_analyzer.h"
 #include "matching/protocol_rule_verifier.h"
 #include "matching/value_candidate_generator.h"
@@ -113,6 +114,8 @@ struct SessionStorePortTraits<SessionStore> {
     using RawIoEvent = capture::RawIoEvent;
     using RawIoEventBatch = QList<capture::RawIoEvent>;
     using RawIoCount = qint64;
+    using SessionEvidenceEvent = capture::SessionEvidenceEvent;
+    using SessionEvidenceEventBatch = QList<capture::SessionEvidenceEvent>;
     using SerialProfile = ::svm::storage::SerialProfile;
     using ScanExecution = ScanExecutionPersistenceRecord;
     using ScanSessionId = QString;

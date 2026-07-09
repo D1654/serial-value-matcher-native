@@ -12,6 +12,7 @@ struct RawIoEvent {
     QString sessionId;
     Direction direction = Direction::Rx;
     QDateTime timestampUtc = QDateTime::currentDateTimeUtc();
+    QString sourceSubsystem;
     QString endpoint;
     QByteArray payload;
 };

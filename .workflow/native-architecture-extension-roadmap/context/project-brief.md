@@ -70,3 +70,4 @@ Updated: 2026-07-07T16:16:55+08:00
 - Phase 2 已进入 Backend Consistency，Task 01 完成了纯标准 C++ bounded serial write queue 契约、native 串口 IO 状态快照和 focused/full CTest 验证。
 - Phase 2 Task 04 完成了纯 C++ Modbus scan executor 抽取：Qt executor 变为兼容适配层，native worker 变为 Win32 transport/UI/storage 薄适配层；build-codex 50/50、MinGW native 28/28 和 native DLL 依赖快检均通过。
 - Phase 2 Task 05 完成了 Modbus 响应解析、扫描计划构建、native attempt UI 映射的稳定结果分类；focused 3/3、build-codex 50/50、MinGW native 28/28 和 native DLL 依赖快检均通过。
+- Phase 3 Task 01 完成了 Qt-side 本地结构化 session evidence model、raw TX/RX 证据优先捕获、source subsystem、单调顺序、metadata/隐私字段和 focused 测试；build-codex 51/51、MinGW native 28/28、本地 MinGW package/Wine gate 均通过。
