@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <shlobj.h>
 #include <string>
 
 namespace svm::win32 {
@@ -22,6 +23,46 @@ using T = TextId;
 
 const wchar_t* tx(T id) {
     return uiText(id);
+}
+
+std::optional<std::filesystem::path> chooseEvidenceBundleDirectory(HWND owner) {
+    wchar_t selectedPath[MAX_PATH] = {};
+    BROWSEINFOW dialog = {};
+    dialog.hwndOwner = owner;
+    dialog.lpszTitle = tx(T::EvidenceBundleDialogTitle);
+    dialog.pszDisplayName = selectedPath;
+    dialog.ulFlags = BIF_RETURNONLYFSDIRS | BIF_EDITBOX;
+
+    LPITEMIDLIST item = SHBrowseForFolderW(&dialog);
+    if (item == nullptr) {
+        return std::nullopt;
+    }
+
+    const BOOL ok = SHGetPathFromIDListW(item, selectedPath);
+    CoTaskMemFree(item);
+    if (ok == FALSE || selectedPath[0] == L'\0') {
+        return std::nullopt;
+    }
+    return std::filesystem::path(selectedPath);
+}
+
+std::optional<svm::report::EvidenceBundleRedactionOptions> chooseEvidenceBundleRedaction(HWND owner) {
+    const int decision = MessageBoxW(
+        owner,
+        tx(T::EvidenceBundleRedactionPrompt),
+        tx(T::EvidenceBundleRedactionTitle),
+        MB_ICONQUESTION | MB_YESNOCANCEL | MB_DEFBUTTON1);
+    if (decision == IDCANCEL) {
+        return std::nullopt;
+    }
+
+    svm::report::EvidenceBundleRedactionOptions redaction;
+    if (decision == IDYES) {
+        redaction.redactAbsolutePaths = true;
+        redaction.redactDeviceIdentifiers = true;
+        redaction.redactRawPayload = true;
+    }
+    return redaction;
 }
 
 } // namespace
@@ -176,6 +217,58 @@ void NativeMainWindow::exportReport() {
         return;
     }
     setStatus(uiString(T::ExportOkPrefix) + std::wstring(fileName) + uiString(T::ChinesePeriod));
+}
+
+void NativeMainWindow::exportEvidenceBundle() {
+    if (!store_.isOpen()) {
+        setStatus(tx(T::RuleNoStore));
+        return;
+    }
+
+    const auto directory = chooseEvidenceBundleDirectory(window_);
+    if (!directory.has_value()) {
+        return;
+    }
+    const auto redaction = chooseEvidenceBundleRedaction(window_);
+    if (!redaction.has_value()) {
+        return;
+    }
+
+    NativeEvidenceBundleContext context;
+    context.generatedAtUtc = nativeUtcTimestampText();
+    context.appVersion = "1.0.0";
+    context.selectedPortName = selectedPortName();
+    context.rawEvents = store_.recentRawEventsChronological(5000);
+    context.latestScanSession = store_.latestScanSession();
+    if (candidateCacheState_.hasLatestVerificationRunId()) {
+        context.latestVerificationRun = store_.ruleVerificationRun(candidateCacheState_.latestVerificationRunId());
+    }
+    if (!context.latestVerificationRun.has_value()) {
+        context.latestVerificationRun = store_.latestRuleVerificationRun();
+    }
+    if (context.latestVerificationRun.has_value()) {
+        context.latestVerificationResults = store_.ruleVerificationResults(context.latestVerificationRun->verificationRunId);
+    }
+
+    svm::report::EvidenceBundleWriteOptions options;
+    options.outputDirectory = *directory;
+    options.redaction = *redaction;
+    options.includeRawEvents = true;
+
+    const svm::report::EvidenceBundleWriteResult result = svm::report::writeEvidenceBundle(
+        nativeBuildEvidenceBundleInput(context),
+        options);
+    if (!result.success) {
+        setStatus(uiString(T::EvidenceBundleFailedPrefix) + utf8ToWide(result.errorMessage));
+        return;
+    }
+
+    setStatus(uiString(T::EvidenceBundleOkPrefix)
+        + directory->wstring()
+        + L" ("
+        + std::to_wstring(result.writtenFiles.size())
+        + L" \u4E2A\u6587\u4EF6)"
+        + uiString(T::ChinesePeriod));
 }
 
 void NativeMainWindow::refreshCandidateCombo(const std::string& runId) {

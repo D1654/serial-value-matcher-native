@@ -44,6 +44,7 @@ void NativeMainWindow::createMenus() {
     AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_FIND_LOG, tx(T::ToolsFindLogMenu));
     AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_COPY_LOG, tx(T::ToolsCopyLogMenu));
     AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_EXPORT_LOG, tx(T::ToolsExportLogMenu));
+    AppendMenuW(toolsMenu, MF_STRING, IDM_TOOLS_EXPORT_EVIDENCE_BUNDLE, tx(T::ToolsExportEvidenceBundleMenu));
 
     AppendMenuW(analysisMenu, MF_STRING, IDM_ANALYSIS_MODBUS_SCAN, tx(T::AnalysisModbusScanMenu));
     AppendMenuW(analysisMenu, MF_STRING, IDM_ANALYSIS_WORKSPACE, tx(T::AnalysisWorkspaceMenu));

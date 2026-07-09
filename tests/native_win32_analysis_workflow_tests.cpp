@@ -234,6 +234,58 @@ void markdownReportRendersFromNativeRecords() {
     assert(markdown.find("不会修改原始扫描") != std::string::npos);
 }
 
+void evidenceBundleInputRendersNativeStorageContext() {
+    storage::RawIoEvent raw;
+    raw.id = 7;
+    raw.sessionId = "serial-session";
+    raw.direction = "Tx";
+    raw.timestampUtc = "2026-07-09T06:00:00Z";
+    raw.endpoint = "COM7";
+    raw.payload = {0x01, 0x03};
+
+    storage::RuleVerificationRunRecord run;
+    run.verificationRunId = "verify-1";
+    run.sourceScanSessionId = "scan-1";
+    run.ruleCount = 1;
+    run.verifiedCount = 1;
+    run.createdAtUtc = "created-at";
+
+    storage::RuleVerificationResultRecord result;
+    result.verificationRunId = "verify-1";
+    result.ruleId = "rule-ok";
+    result.fieldName = "temperature";
+    result.unit = "C";
+    result.verified = true;
+    result.statusText = "已验证";
+    result.slaveId = 1;
+    result.functionCode = 3;
+    result.startAddress = 100;
+    result.registerCount = 1;
+    result.rawRegisters = {0x1234};
+    result.engineeringValue = 46.60;
+    result.evidenceText = "字段验证成功：temperature。";
+
+    win32::NativeEvidenceBundleContext context;
+    context.generatedAtUtc = "2026-07-09T06:01:00Z";
+    context.appVersion = "1.0.0";
+    context.selectedPortName = "COM7";
+    context.rawEvents = {raw};
+    context.latestScanSession = scanSession();
+    context.latestVerificationRun = run;
+    context.latestVerificationResults = {result};
+
+    const auto input = win32::nativeBuildEvidenceBundleInput(context);
+    assert(input.generatedAtUtc == "2026-07-09T06:01:00Z");
+    assert(input.appVersion.size() == 3);
+    assert(input.scanSettings.size() >= 2);
+    assert(input.reportMetadata.size() == 7);
+    assert(input.rawEvents.size() == 1);
+    assert(input.rawEvents.front().endpoint == "COM7");
+    assert(input.rawEvents.front().payload == std::vector<std::uint8_t>({0x01, 0x03}));
+    assert(input.ruleVerificationReportMarkdown.find("verify-1") != std::string::npos);
+    assert(input.ruleVerificationReportMarkdown.find("temperature") != std::string::npos);
+}
+
 } // namespace
 
 int main() {
@@ -241,6 +293,7 @@ int main() {
     ruleVerificationClassifiesVerifiedMissingAndUnsupported();
     ruleVerificationDecodesMultiRegisterAndInterpretationMaps();
     markdownReportRendersFromNativeRecords();
+    evidenceBundleInputRendersNativeStorageContext();
 
     std::cout << "native_win32_analysis_workflow_tests passed\n";
     return 0;

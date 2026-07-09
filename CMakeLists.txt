@@ -48,6 +48,7 @@ add_library(svm_slim_core
     src/core/modbus_scan_executor_core.cpp
     src/core/analysis_core.cpp
     src/core/report_core.cpp
+    src/report/evidence_bundle_writer.cpp
     src/transport/serial_write_queue.cpp
 )
 
@@ -156,6 +157,7 @@ if(SVM_BUILD_WIN32_APP)
             comctl32
             comdlg32
             shell32
+            ole32
     )
 
     target_include_directories(svm-native-win32
@@ -309,6 +311,17 @@ set_target_properties(native_analysis_report_tests PROPERTIES
 )
 target_link_libraries(native_analysis_report_tests PRIVATE svm_slim_core)
 add_test(NAME native_analysis_report_tests COMMAND native_analysis_report_tests)
+
+add_executable(evidence_bundle_writer_tests
+    tests/evidence_bundle_writer_tests.cpp
+)
+set_target_properties(evidence_bundle_writer_tests PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+target_link_libraries(evidence_bundle_writer_tests PRIVATE svm_slim_core)
+add_test(NAME evidence_bundle_writer_tests COMMAND evidence_bundle_writer_tests)
 
 add_executable(native_candidate_cache_state_tests
     tests/native_candidate_cache_state_tests.cpp

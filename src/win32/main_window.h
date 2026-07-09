@@ -190,6 +190,7 @@ private:
     void showAnalysisWorkspace();
     void showRuleVerification();
     void exportReport();
+    void exportEvidenceBundle();
     void showAbout();
     void showDeferredFeature(const std::wstring& title, const std::wstring& message);
     void refreshCandidateCombo(const std::string& runId);

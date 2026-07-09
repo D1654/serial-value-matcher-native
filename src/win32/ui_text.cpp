@@ -23,6 +23,7 @@ const wchar_t* uiText(TextId id) {
     case TextId::ToolsCopyLogMenu: return L"\u590D\u5236\u53EF\u89C1\u65E5\u5FD7(&C)";
     case TextId::ToolsExportLogMenu: return L"\u5BFC\u51FA\u53EF\u89C1\u65E5\u5FD7(&G)";
     case TextId::ToolsFindLogMenu: return L"\u67E5\u627E\u65E5\u5FD7(&F)";
+    case TextId::ToolsExportEvidenceBundleMenu: return L"\u5BFC\u51FA\u8BCA\u65AD\u8BC1\u636E\u5305(&B)";
     case TextId::AnalysisModbusScanMenu: return L"Modbus \u626B\u63CF(&M)";
     case TextId::AnalysisWorkspaceMenu: return L"\u5206\u6790\u5DE5\u4F5C\u533A(&W)";
     case TextId::AnalysisRuleVerifyMenu: return L"\u89C4\u5219\u9A8C\u8BC1(&V)";
@@ -275,6 +276,11 @@ const wchar_t* uiText(TextId id) {
     case TextId::ExportDefaultPrefix: return L"\u534F\u8BAE\u89C4\u5219\u9A8C\u8BC1\u62A5\u544A-";
     case TextId::ExportFailedPrefix: return L"\u5BFC\u51FA\u9A8C\u8BC1\u62A5\u544A\u5931\u8D25\uFF1A";
     case TextId::ExportOkPrefix: return L"\u5DF2\u5BFC\u51FA\u89C4\u5219\u9A8C\u8BC1\u62A5\u544A\uFF1A";
+    case TextId::EvidenceBundleDialogTitle: return L"\u9009\u62E9\u8BCA\u65AD\u8BC1\u636E\u5305\u8F93\u51FA\u76EE\u5F55";
+    case TextId::EvidenceBundleRedactionTitle: return L"\u8BCA\u65AD\u8BC1\u636E\u5305";
+    case TextId::EvidenceBundleRedactionPrompt: return L"\u662F\u5426\u5BFC\u51FA\u8131\u654F\u8BCA\u65AD\u8BC1\u636E\u5305\uFF1F\r\n\r\n\u201C\u662F\u201D\uFF1A\u8131\u654F\uFF0C\u79FB\u9664\u8DEF\u5F84\u3001\u8BBE\u5907\u6807\u8BC6\u548C\u539F\u59CB\u4E1A\u52A1\u8F7D\u8377\u3002\r\n\u201C\u5426\u201D\uFF1A\u5B8C\u6574\u5BFC\u51FA\uFF0C\u4EC5\u9002\u5408\u53EF\u4FE1\u672C\u673A\u6216\u5185\u90E8\u6392\u67E5\u3002";
+    case TextId::EvidenceBundleFailedPrefix: return L"\u5BFC\u51FA\u8BCA\u65AD\u8BC1\u636E\u5305\u5931\u8D25\uFF1A";
+    case TextId::EvidenceBundleOkPrefix: return L"\u5DF2\u5BFC\u51FA\u8BCA\u65AD\u8BC1\u636E\u5305\uFF1A";
     case TextId::AboutTitle: return L"\u5173\u4E8E\u4E32\u53E3\u503C\u5339\u914D\u5668";
     case TextId::AboutText: return L"\u4E32\u53E3\u503C\u5339\u914D\u5668 Win32 Native\n\n\u4F5C\u8005\uFF1Aw\n\u9762\u5411\u4E2D\u6587\u7528\u6237\u7684 Windows \u539F\u751F\u4E32\u53E3\u8C03\u8BD5\u3001Modbus \u626B\u63CF\u548C\u503C\u5019\u9009\u5206\u6790\u5DE5\u5177\u3002\n\n\u5F53\u524D\u76EE\u6807\uFF1A\u4E0D\u4F9D\u8D56 C#/.NET/Qt \u8FD0\u884C\u5E93\uFF0C\u5E76\u9010\u6B65\u8865\u9F50 Qt baseline \u529F\u80FD\u3002";
     case TextId::SelfTestText: return L"\u4E32\u53E3\u503C\u5339\u914D\u5668";

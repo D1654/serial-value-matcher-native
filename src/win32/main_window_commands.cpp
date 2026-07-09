@@ -373,6 +373,9 @@ std::optional<LRESULT> NativeMainWindow::handleToolsMenuCommand(WORD commandId) 
     case IDM_TOOLS_EXPORT_LOG:
         exportVisibleLog();
         return 0;
+    case IDM_TOOLS_EXPORT_EVIDENCE_BUNDLE:
+        exportEvidenceBundle();
+        return 0;
     case IDM_TOOLS_FIND_LOG:
         findNextLogMatch();
         return 0;

@@ -270,6 +270,12 @@ std::vector<RawIoEvent> NativeSessionStore::recentRawEvents(std::size_t limit) c
     return events;
 }
 
+std::vector<RawIoEvent> NativeSessionStore::recentRawEventsChronological(std::size_t limit) const {
+    std::vector<RawIoEvent> events = recentRawEvents(limit);
+    std::reverse(events.begin(), events.end());
+    return events;
+}
+
 bool NativeSessionStore::saveSendHistory(SendHistoryEntry entry, int limit) {
     if (!ensureOpen("保存发送历史")) {
         return false;

@@ -238,6 +238,7 @@ public:
     void setRawEventRetentionLimit(std::uintmax_t softLimitBytes, std::uintmax_t targetBytes);
     std::int64_t rawEventCount() const;
     std::vector<RawIoEvent> recentRawEvents(std::size_t limit = 100) const;
+    std::vector<RawIoEvent> recentRawEventsChronological(std::size_t limit = 5000) const;
 
     bool saveSendHistory(SendHistoryEntry entry, int limit = 100);
     std::vector<SendHistoryEntry> recentSendHistory(int limit = 100) const;

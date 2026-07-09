@@ -173,6 +173,74 @@ std::string nativeRenderRuleVerificationMarkdownReport(
     return core::report::renderRuleVerificationMarkdownReport(reportRun, reportResults);
 }
 
+svm::report::EvidenceBundleRawEvent nativeEvidenceRawEventFromRecord(const native_storage::RawIoEvent& record) {
+    svm::report::EvidenceBundleRawEvent event;
+    event.id = record.id;
+    event.sessionId = record.sessionId;
+    event.direction = record.direction;
+    event.timestampUtc = record.timestampUtc;
+    event.endpoint = record.endpoint;
+    event.payload = record.payload;
+    return event;
+}
+
+svm::report::EvidenceBundleInput nativeBuildEvidenceBundleInput(const NativeEvidenceBundleContext& context) {
+    svm::report::EvidenceBundleInput input;
+    input.title = wideToUtf8(L"\u4E32\u53E3\u503C\u5339\u914D\u5668\u8BCA\u65AD\u8BC1\u636E\u5305");
+    input.generatedAtUtc = context.generatedAtUtc;
+    input.appVersion = {
+        {"product", "SerialValueMatcher Native"},
+        {"exe_name", "svm-native-win32.exe"},
+    };
+    if (!context.appVersion.empty()) {
+        input.appVersion.push_back({"app_version", context.appVersion});
+    }
+
+    if (!context.selectedPortName.empty()) {
+        input.scanSettings.push_back({"selected_port", context.selectedPortName});
+    }
+    if (context.latestScanSession.has_value()) {
+        const native_storage::ScanSessionRecord& session = *context.latestScanSession;
+        input.scanSettings.insert(input.scanSettings.end(), {
+            {"scan_session_id", session.sessionId},
+            {"slave_id", std::to_string(session.slaveId)},
+            {"function_code", std::to_string(session.functionCode)},
+            {"start_address", std::to_string(session.startAddress)},
+            {"end_address", std::to_string(session.endAddress)},
+            {"block_size", std::to_string(session.blockSize)},
+            {"request_count", std::to_string(session.requestCount)},
+            {"status", session.status},
+            {"started_at_utc", session.startedAtUtc},
+            {"finished_at_utc", session.finishedAtUtc},
+            {"success_block_count", std::to_string(session.successBlockCount)},
+            {"failed_block_count", std::to_string(session.failedBlockCount)},
+            {"error_message", session.errorMessage},
+        });
+    }
+
+    if (context.latestVerificationRun.has_value()) {
+        const native_storage::RuleVerificationRunRecord& run = *context.latestVerificationRun;
+        input.reportMetadata = {
+            {"verification_run_id", run.verificationRunId},
+            {"source_scan_session_id", run.sourceScanSessionId},
+            {"rule_count", std::to_string(run.ruleCount)},
+            {"verified_count", std::to_string(run.verifiedCount)},
+            {"missing_count", std::to_string(run.missingCount)},
+            {"unsupported_count", std::to_string(run.unsupportedCount)},
+            {"created_at_utc", run.createdAtUtc},
+        };
+        input.ruleVerificationReportMarkdown = nativeRenderRuleVerificationMarkdownReport(
+            run,
+            context.latestVerificationResults);
+    }
+
+    input.rawEvents.reserve(context.rawEvents.size());
+    for (const native_storage::RawIoEvent& record : context.rawEvents) {
+        input.rawEvents.push_back(nativeEvidenceRawEventFromRecord(record));
+    }
+    return input;
+}
+
 NativeCandidateAnalysisBuildResult nativeBuildCandidateAnalysisRun(
     const native_storage::ScanSessionRecord& session,
     const std::vector<native_storage::ScanObservationRecord>& observations,

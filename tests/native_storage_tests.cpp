@@ -256,6 +256,25 @@ svm::native_storage::RawIoEvent rawEvent(std::string direction, std::vector<std:
     return event;
 }
 
+void recentRawEventsChronologicalKeepsRecentEventsInOriginalOrder() {
+    const auto path = temporaryStorePath();
+    auto store = openStore(path);
+
+    assert(store.appendRawEvent(rawEvent("Tx", {0x01})));
+    assert(store.appendRawEvent(rawEvent("Rx", {0x02})));
+    assert(store.appendRawEvent(rawEvent("Tx", {0x03})));
+
+    const auto events = store.recentRawEventsChronological(2);
+
+    assert(events.size() == 2);
+    assert(events[0].direction == "Rx");
+    assert((events[0].payload == std::vector<std::uint8_t>{0x02}));
+    assert(events[1].direction == "Tx");
+    assert((events[1].payload == std::vector<std::uint8_t>{0x03}));
+
+    std::filesystem::remove_all(path);
+}
+
 void idCountersPersistAcrossReopen() {
     const auto path = temporaryStorePath();
     {
@@ -1422,6 +1441,7 @@ void protocolRulesAndVerificationRoundTrip() {
 
 int main() {
     runStorageTest("rawEventsAreBatchedAndReopened", rawEventsAreBatchedAndReopened);
+    runStorageTest("recentRawEventsChronologicalKeepsRecentEventsInOriginalOrder", recentRawEventsChronologicalKeepsRecentEventsInOriginalOrder);
     runStorageTest("replacementArtifactsAreRecoveredOnOpen", replacementArtifactsAreRecoveredOnOpen);
     runStorageTest("interruptedReplacementRollsBackLiveFileToBackup", interruptedReplacementRollsBackLiveFileToBackup);
     runStorageTest("truncatedAppendTailIsIsolatedOnOpen", truncatedAppendTailIsIsolatedOnOpen);

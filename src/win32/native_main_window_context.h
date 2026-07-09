@@ -144,6 +144,7 @@ inline NativeMainMenuCommandDomain nativeMainMenuCommandDomain(WORD commandId) n
     case IDM_TOOLS_COPY_LOG:
     case IDM_TOOLS_EXPORT_LOG:
     case IDM_TOOLS_FIND_LOG:
+    case IDM_TOOLS_EXPORT_EVIDENCE_BUNDLE:
         return NativeMainMenuCommandDomain::tools;
 
     case IDM_ANALYSIS_MODBUS_SCAN:

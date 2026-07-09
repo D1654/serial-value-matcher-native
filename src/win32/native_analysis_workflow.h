@@ -5,7 +5,9 @@
 #include "core/analysis_core.h"
 #include "core/report_core.h"
 #include "native_storage/native_session_store.h"
+#include "report/evidence_bundle_writer.h"
 
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -41,6 +43,16 @@ struct NativeCandidateAnalysisBuildResult {
     std::vector<native_storage::MatchCandidateRecord> candidates;
 };
 
+struct NativeEvidenceBundleContext {
+    std::string generatedAtUtc;
+    std::string appVersion;
+    std::string selectedPortName;
+    std::vector<native_storage::RawIoEvent> rawEvents;
+    std::optional<native_storage::ScanSessionRecord> latestScanSession;
+    std::optional<native_storage::RuleVerificationRunRecord> latestVerificationRun;
+    std::vector<native_storage::RuleVerificationResultRecord> latestVerificationResults;
+};
+
 core::analysis::RegisterSample nativeSampleFromObservation(const native_storage::ScanObservationRecord& observation);
 NativeObservationAddressIndex nativeBuildObservationAddressIndex(const std::vector<native_storage::ScanObservationRecord>& observations);
 const native_storage::ScanObservationRecord* nativeFindIndexedObservation(
@@ -59,6 +71,8 @@ core::report::RuleVerificationResult nativeReportResultFromRecord(const native_s
 std::string nativeRenderRuleVerificationMarkdownReport(
     const native_storage::RuleVerificationRunRecord& run,
     const std::vector<native_storage::RuleVerificationResultRecord>& results);
+svm::report::EvidenceBundleRawEvent nativeEvidenceRawEventFromRecord(const native_storage::RawIoEvent& record);
+svm::report::EvidenceBundleInput nativeBuildEvidenceBundleInput(const NativeEvidenceBundleContext& context);
 NativeRuleVerificationBuildResult nativeBuildRuleVerificationResult(
     const native_storage::ScanSessionRecord& session,
     const std::vector<native_storage::ProtocolFieldRuleRecord>& rules,
