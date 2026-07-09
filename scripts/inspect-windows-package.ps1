@@ -8,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
 function Get-FileLengthSum($Files) {
     $sum = ($Files | Measure-Object -Property Length -Sum).Sum
@@ -24,6 +25,20 @@ function Get-RelativePackagePath($Root, $Path) {
         return $normalizedPath.Substring($normalizedRoot.Length).TrimStart('\', '/')
     }
     return $normalizedPath
+}
+
+function Get-CmakeVersionMetadata($Root) {
+    $metadata = @{}
+    $versionFile = Join-Path $Root "cmake\svm_version.cmake"
+    if (-not (Test-Path $versionFile)) {
+        return $metadata
+    }
+    foreach ($line in Get-Content -Path $versionFile -Encoding UTF8) {
+        if ($line -match '^\s*set\(\s*([A-Za-z0-9_]+)\s+"([^"]*)"\s*\)') {
+            $metadata[$Matches[1]] = $Matches[2]
+        }
+    }
+    return $metadata
 }
 
 function Get-DocumentationPackageLinkFailures($StageRoot, $MarkdownFiles) {
@@ -225,6 +240,7 @@ if (-not (Test-Path $HashPath)) {
 }
 
 $packageFiles = @(Get-ChildItem -Path $StageDir -Recurse -File)
+$versionMetadata = Get-CmakeVersionMetadata $repoRoot
 $packageBytes = Get-FileLengthSum $packageFiles
 $zipBytes = (Get-Item $ZipPath).Length
 $zipHash = (Get-FileHash -Algorithm SHA256 $ZipPath).Hash.ToUpperInvariant()
@@ -302,12 +318,18 @@ $missingUnicodeTerms = New-Object System.Collections.Generic.List[string]
 $nativeExeHash = ""
 $importedDlls = @()
 $importScanError = $null
+$nativeVersionInfo = $null
+$nativeFixedFileVersion = ""
+$nativeFixedProductVersion = ""
 if ($null -eq $nativeExe) {
     foreach ($term in $unicodeProbeTerms) {
         $missingUnicodeTerms.Add($term)
     }
 } else {
     $nativeExeHash = (Get-FileHash -Algorithm SHA256 $nativeExe.FullName).Hash.ToUpperInvariant()
+    $nativeVersionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($nativeExe.FullName)
+    $nativeFixedFileVersion = "$($nativeVersionInfo.FileMajorPart).$($nativeVersionInfo.FileMinorPart).$($nativeVersionInfo.FileBuildPart).$($nativeVersionInfo.FilePrivatePart)"
+    $nativeFixedProductVersion = "$($nativeVersionInfo.ProductMajorPart).$($nativeVersionInfo.ProductMinorPart).$($nativeVersionInfo.ProductBuildPart).$($nativeVersionInfo.ProductPrivatePart)"
     try {
         $importedDlls = @(Get-PeImportedDlls $nativeExe.FullName)
     } catch {
@@ -354,6 +376,19 @@ if ($null -eq $nativeExe) {
     $summary.Add("Native exe bytes: $($nativeExe.Length)")
     $summary.Add("Native exe sha256: $nativeExeHash")
 }
+$summary.Add("")
+$summary.Add("Version metadata:")
+$summary.Add("  Source: cmake/svm_version.cmake")
+$summary.Add("  Expected version: $($versionMetadata['SVM_VERSION'])")
+$summary.Add("  Expected release tag: $($versionMetadata['SVM_RELEASE_TAG'])")
+$summary.Add("  Expected package artifact: $($versionMetadata['SVM_PACKAGE_ARTIFACT'])")
+$summary.Add("  Expected MinGW package artifact: $($versionMetadata['SVM_MINGW_PACKAGE_ARTIFACT'])")
+$summary.Add("Native exe fixed file version: $nativeFixedFileVersion")
+$summary.Add("Native exe fixed product version: $nativeFixedProductVersion")
+$summary.Add("Native exe file version: $(if ($null -eq $nativeVersionInfo) { '' } else { $nativeVersionInfo.FileVersion })")
+$summary.Add("Native exe product version: $(if ($null -eq $nativeVersionInfo) { '' } else { $nativeVersionInfo.ProductVersion })")
+$summary.Add("Native exe product name: $(if ($null -eq $nativeVersionInfo) { '' } else { $nativeVersionInfo.ProductName })")
+$summary.Add("Native exe original filename: $(if ($null -eq $nativeVersionInfo) { '' } else { $nativeVersionInfo.OriginalFilename })")
 $summary.Add("")
 $summary.Add("Largest files:")
 foreach ($file in $largestFiles) {
@@ -430,6 +465,49 @@ if ($packageBytes -gt $MaxExtractedBytes) {
 }
 if ($documentationLinkFailures.Count -gt 0) {
     $gateFailures.Add("native 包内文档链接或文档路径存在断链。")
+}
+$requiredVersionKeys = @(
+    "SVM_VERSION",
+    "SVM_VERSION_MAJOR",
+    "SVM_VERSION_MINOR",
+    "SVM_VERSION_PATCH",
+    "SVM_VERSION_TWEAK",
+    "SVM_RELEASE_TAG",
+    "SVM_PRODUCT_DISPLAY_NAME",
+    "SVM_WIN32_EXE_NAME",
+    "SVM_PACKAGE_ARTIFACT",
+    "SVM_MINGW_PACKAGE_ARTIFACT"
+)
+$missingVersionKeys = @($requiredVersionKeys | Where-Object { -not $versionMetadata.ContainsKey($_) -or [string]::IsNullOrWhiteSpace($versionMetadata[$_]) })
+if ($missingVersionKeys.Count -gt 0) {
+    $gateFailures.Add("版本元数据源缺少字段：$($missingVersionKeys -join ', ')。")
+}
+$expectedPackageArtifacts = @($versionMetadata["SVM_PACKAGE_ARTIFACT"], $versionMetadata["SVM_MINGW_PACKAGE_ARTIFACT"])
+$stageName = Split-Path -Leaf ([System.IO.Path]::GetFullPath($StageDir).TrimEnd('\', '/'))
+if ($expectedPackageArtifacts -notcontains $stageName) {
+    $gateFailures.Add("包目录名与版本元数据不一致：$stageName。")
+}
+if ((Split-Path -Leaf $ZipPath) -ne "$stageName.zip") {
+    $gateFailures.Add("zip 文件名与包目录名不一致：$(Split-Path -Leaf $ZipPath)。")
+}
+if ($null -ne $nativeVersionInfo -and $missingVersionKeys.Count -eq 0) {
+    $expectedVersion = $versionMetadata["SVM_VERSION"]
+    $expectedFixedVersion = "$($versionMetadata['SVM_VERSION_MAJOR']).$($versionMetadata['SVM_VERSION_MINOR']).$($versionMetadata['SVM_VERSION_PATCH']).$($versionMetadata['SVM_VERSION_TWEAK'])"
+    $versionExpectations = @{
+        "FixedFileVersion" = @($nativeFixedFileVersion, $expectedFixedVersion)
+        "FixedProductVersion" = @($nativeFixedProductVersion, $expectedFixedVersion)
+        "FileVersion" = @($nativeVersionInfo.FileVersion, $expectedVersion)
+        "ProductVersion" = @($nativeVersionInfo.ProductVersion, $expectedVersion)
+        "ProductName" = @($nativeVersionInfo.ProductName, $versionMetadata["SVM_PRODUCT_DISPLAY_NAME"])
+        "OriginalFilename" = @($nativeVersionInfo.OriginalFilename, $versionMetadata["SVM_WIN32_EXE_NAME"])
+    }
+    foreach ($field in $versionExpectations.Keys) {
+        $actual = $versionExpectations[$field][0]
+        $expected = $versionExpectations[$field][1]
+        if ($actual -ne $expected) {
+            $gateFailures.Add("native exe VERSIONINFO $field 不一致：$actual != $expected。")
+        }
+    }
 }
 
 $summary.Add("")

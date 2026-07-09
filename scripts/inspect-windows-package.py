@@ -117,6 +117,19 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest().upper()
 
 
+def read_cmake_version_metadata(root: Path) -> dict[str, str]:
+    version_file = root / "cmake" / "svm_version.cmake"
+    metadata: dict[str, str] = {}
+    if not version_file.is_file():
+        return metadata
+    pattern = re.compile(r'^\s*set\(\s*([A-Za-z0-9_]+)\s+"([^"]*)"\s*\)')
+    for line in version_file.read_text(encoding="utf-8", errors="replace").splitlines():
+        match = pattern.match(line)
+        if match:
+            metadata[match.group(1)] = match.group(2)
+    return metadata
+
+
 def imported_dlls(exe_path: Path) -> list[str]:
     if pefile is None:
         return []
@@ -128,6 +141,36 @@ def imported_dlls(exe_path: Path) -> list[str]:
     for entry in getattr(pe, "DIRECTORY_ENTRY_IMPORT", []):
         imports.append(entry.dll.decode("ascii", errors="replace"))
     return sorted(set(imports), key=str.lower)
+
+
+def decode_pe_version_value(value) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace").rstrip("\x00")
+    return str(value).rstrip("\x00")
+
+
+def version_from_ms_ls(ms: int, ls: int) -> str:
+    return f"{(ms >> 16) & 0xFFFF}.{ms & 0xFFFF}.{(ls >> 16) & 0xFFFF}.{ls & 0xFFFF}"
+
+
+def native_exe_version_info(exe_path: Path) -> dict[str, str]:
+    if pefile is None:
+        return {}
+    pe = pefile.PE(str(exe_path), fast_load=False)
+    values: dict[str, str] = {}
+    fixed = getattr(pe, "VS_FIXEDFILEINFO", [])
+    if fixed:
+        info = fixed[0]
+        values["FixedFileVersion"] = version_from_ms_ls(info.FileVersionMS, info.FileVersionLS)
+        values["FixedProductVersion"] = version_from_ms_ls(info.ProductVersionMS, info.ProductVersionLS)
+    for file_info in getattr(pe, "FileInfo", []) or []:
+        for entry in file_info:
+            if decode_pe_version_value(getattr(entry, "Key", "")) != "StringFileInfo":
+                continue
+            for table in getattr(entry, "StringTable", []) or []:
+                for key, value in table.entries.items():
+                    values[decode_pe_version_value(key)] = decode_pe_version_value(value)
+    return values
 
 
 def local_markdown_target(raw_target: str) -> str | None:
@@ -188,6 +231,8 @@ def main() -> int:
     zip_path = args.zip_path.resolve()
     hash_path = args.hash_path.resolve()
     summary_path = args.summary_path.resolve()
+    repo_root = Path(__file__).resolve().parents[1]
+    version_metadata = read_cmake_version_metadata(repo_root)
 
     failures: list[str] = []
     summary: list[str] = []
@@ -227,6 +272,7 @@ def main() -> int:
         missing_unicode_terms.extend(UNICODE_PROBE_TERMS)
         imported = []
         exe_hash = ""
+        exe_version_info = {}
     else:
         exe_bytes = native_exe.read_bytes()
         for term in UNICODE_PROBE_TERMS:
@@ -234,6 +280,7 @@ def main() -> int:
                 missing_unicode_terms.append(term)
         imported = imported_dlls(native_exe)
         exe_hash = file_sha256(native_exe)
+        exe_version_info = native_exe_version_info(native_exe)
 
     forbidden_imports = [
         dll for dll in imported if dll.lower() in FORBIDDEN_IMPORTS
@@ -259,6 +306,19 @@ def main() -> int:
         summary.append(f"Native exe sha256: {exe_hash}")
     else:
         summary.append("Native exe present: no")
+    summary.append("")
+    summary.append("Version metadata:")
+    summary.append("  Source: cmake/svm_version.cmake")
+    summary.append(f"  Expected version: {version_metadata.get('SVM_VERSION', '')}")
+    summary.append(f"  Expected release tag: {version_metadata.get('SVM_RELEASE_TAG', '')}")
+    summary.append(f"  Expected package artifact: {version_metadata.get('SVM_PACKAGE_ARTIFACT', '')}")
+    summary.append(f"  Expected MinGW package artifact: {version_metadata.get('SVM_MINGW_PACKAGE_ARTIFACT', '')}")
+    summary.append(f"Native exe fixed file version: {exe_version_info.get('FixedFileVersion', '')}")
+    summary.append(f"Native exe fixed product version: {exe_version_info.get('FixedProductVersion', '')}")
+    summary.append(f"Native exe file version: {exe_version_info.get('FileVersion', '')}")
+    summary.append(f"Native exe product version: {exe_version_info.get('ProductVersion', '')}")
+    summary.append(f"Native exe product name: {exe_version_info.get('ProductName', '')}")
+    summary.append(f"Native exe original filename: {exe_version_info.get('OriginalFilename', '')}")
     summary.append("")
     summary.append("Largest files:")
     for path in largest_files:
@@ -319,6 +379,46 @@ def main() -> int:
         failures.append(f"解压后体积超过门禁：{package_bytes} > {args.max_extracted_bytes}。")
     if documentation_link_failures:
         failures.append("native 包内文档链接或文档路径存在断链。")
+
+    required_version_keys = [
+        "SVM_VERSION",
+        "SVM_RELEASE_TAG",
+        "SVM_PRODUCT_DISPLAY_NAME",
+        "SVM_WIN32_EXE_NAME",
+        "SVM_PACKAGE_ARTIFACT",
+        "SVM_MINGW_PACKAGE_ARTIFACT",
+    ]
+    missing_version_keys = [key for key in required_version_keys if not version_metadata.get(key)]
+    if missing_version_keys:
+        failures.append("版本元数据源缺少字段：" + ", ".join(missing_version_keys) + "。")
+    expected_artifacts = {
+        version_metadata.get("SVM_PACKAGE_ARTIFACT", ""),
+        version_metadata.get("SVM_MINGW_PACKAGE_ARTIFACT", ""),
+    }
+    if stage_dir.name not in expected_artifacts:
+        failures.append(f"包目录名与版本元数据不一致：{stage_dir.name}。")
+    if zip_path.name != f"{stage_dir.name}.zip":
+        failures.append(f"zip 文件名与包目录名不一致：{zip_path.name}。")
+    if native_exe is not None and pefile is not None and version_metadata:
+        expected_version = version_metadata.get("SVM_VERSION", "")
+        expected_fixed_version = ".".join([
+            version_metadata.get("SVM_VERSION_MAJOR", ""),
+            version_metadata.get("SVM_VERSION_MINOR", ""),
+            version_metadata.get("SVM_VERSION_PATCH", ""),
+            version_metadata.get("SVM_VERSION_TWEAK", ""),
+        ])
+        version_expectations = {
+            "FixedFileVersion": expected_fixed_version,
+            "FixedProductVersion": expected_fixed_version,
+            "FileVersion": expected_version,
+            "ProductVersion": expected_version,
+            "ProductName": version_metadata.get("SVM_PRODUCT_DISPLAY_NAME", ""),
+            "OriginalFilename": version_metadata.get("SVM_WIN32_EXE_NAME", ""),
+        }
+        for field, expected in version_expectations.items():
+            actual = exe_version_info.get(field, "")
+            if actual != expected:
+                failures.append(f"native exe VERSIONINFO {field} 不一致：{actual} != {expected}。")
 
     summary.append("")
     if failures:

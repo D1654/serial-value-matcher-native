@@ -8,6 +8,8 @@
 #include "win32/ui_text.h"
 #include "win32/utf8_win32.h"
 
+#include "svm_version_resource.h"
+
 #include <algorithm>
 #include <commdlg.h>
 #include <filesystem>
@@ -236,7 +238,7 @@ void NativeMainWindow::exportEvidenceBundle() {
 
     NativeEvidenceBundleContext context;
     context.generatedAtUtc = nativeUtcTimestampText();
-    context.appVersion = "1.0.0";
+    context.appVersion = SVM_VERSION_STRING;
     context.selectedPortName = selectedPortName();
     context.rawEvents = store_.recentRawEventsChronological(5000);
     context.latestScanSession = store_.latestScanSession();

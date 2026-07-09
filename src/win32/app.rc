@@ -3,10 +3,11 @@
 #include <windows.h>
 
 #include "resource.h"
+#include "svm_version_resource.h"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,0,0
- PRODUCTVERSION 1,0,0,0
+ FILEVERSION SVM_VERSION_FILE_VERSION
+ PRODUCTVERSION SVM_VERSION_PRODUCT_VERSION
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS 0x40004L
@@ -17,13 +18,13 @@ BEGIN
     BEGIN
         BLOCK "080404b0"
         BEGIN
-            VALUE "CompanyName", "w"
-            VALUE "FileDescription", "串口值匹配器 Win32 Native"
-            VALUE "FileVersion", "1.0.0"
-            VALUE "InternalName", "svm-native-win32"
-            VALUE "OriginalFilename", "svm-native-win32.exe"
-            VALUE "ProductName", "串口值匹配器"
-            VALUE "ProductVersion", "1.0.0"
+            VALUE "CompanyName", SVM_VERSION_COMPANY_NAME_STR
+            VALUE "FileDescription", SVM_VERSION_FILE_DESCRIPTION_STR
+            VALUE "FileVersion", SVM_VERSION_FILE_VERSION_STR
+            VALUE "InternalName", SVM_VERSION_INTERNAL_NAME_STR
+            VALUE "OriginalFilename", SVM_VERSION_ORIGINAL_FILENAME_STR
+            VALUE "ProductName", SVM_VERSION_PRODUCT_NAME_STR
+            VALUE "ProductVersion", SVM_VERSION_PRODUCT_VERSION_STR
         END
     END
     BLOCK "VarFileInfo"

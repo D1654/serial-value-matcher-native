@@ -24,6 +24,17 @@ function Require-Command($Name, $Hint) {
     return $cmd.Source
 }
 
+function Read-CmakeValue($RepoRoot, $Key) {
+    $versionFile = Join-Path $RepoRoot "cmake\svm_version.cmake"
+    $pattern = "^\s*set\($([regex]::Escape($Key))\s+`"([^`"]*)`"\s*\)"
+    foreach ($line in Get-Content -Path $versionFile -Encoding UTF8) {
+        if ($line -match $pattern) {
+            return $Matches[1]
+        }
+    }
+    return ""
+}
+
 if ([string]::IsNullOrWhiteSpace($Config)) {
     $Config = "Release"
 }
@@ -31,7 +42,10 @@ if ([string]::IsNullOrWhiteSpace($Config)) {
 $repoRoot = Resolve-RepoRoot
 $buildPath = Join-Path $repoRoot $BuildDir
 $packageRoot = Join-Path $repoRoot $PackageDir
-$packageName = "SerialValueMatcherNative-win32-native-x64"
+$packageName = Read-CmakeValue $repoRoot "SVM_PACKAGE_ARTIFACT"
+if ([string]::IsNullOrWhiteSpace($packageName)) {
+    $packageName = "SerialValueMatcherNative-win32-native-x64"
+}
 $stageDir = Join-Path $packageRoot $packageName
 $zipPath = Join-Path $packageRoot "$packageName.zip"
 $hashPath = "$zipPath.sha256.txt"

@@ -4,9 +4,15 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 
+read_cmake_value() {
+    local key="$1"
+    sed -nE "s/^set\\(${key} \"([^\"]*)\"\\).*/\\1/p" "$repo_root/cmake/svm_version.cmake" | head -n 1
+}
+
 build_dir="${SVM_MINGW_BUILD_DIR:-$repo_root/build-windows-native-mingw}"
 package_root="${SVM_MINGW_PACKAGE_DIR:-$repo_root/artifacts/windows-native-mingw}"
-package_name="${SVM_MINGW_PACKAGE_NAME:-SerialValueMatcherNative-win32-native-x64-mingw}"
+package_name="${SVM_MINGW_PACKAGE_NAME:-$(read_cmake_value SVM_MINGW_PACKAGE_ARTIFACT)}"
+package_name="${package_name:-SerialValueMatcherNative-win32-native-x64-mingw}"
 max_zip_bytes="${SVM_NATIVE_MAX_ZIP_BYTES:-5242880}"
 max_extracted_bytes="${SVM_NATIVE_MAX_EXTRACTED_BYTES:-8388608}"
 skip_build=0

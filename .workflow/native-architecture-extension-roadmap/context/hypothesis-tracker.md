@@ -1,5 +1,5 @@
 # Hypothesis Tracker
-<!-- Updated after each brainstorm and interview answer. Updated: 2026-07-09T18:57:03+08:00 -->
+<!-- Updated after each brainstorm and interview answer. Updated: 2026-07-09T20:21:21+08:00 -->
 
 | ID | Hypothesis | Confidence | Source | Status |
 |----|------------|------------|--------|--------|
@@ -19,3 +19,4 @@
 | H14 | Phase 2 完整草案内部一致，可进入 Phase 3 详细计划；前提是 Phase 4 不实现 TCP runtime、不默认引入 SQLite、不做大规模目录搬迁。 | HIGH | BS-5 | CONFIRMED |
 | H15 | 当前串口 PTY loopback 压力仍是 local pre-release evidence，不应被草案或 Phase 3 误写成已完全 CI-blocking 的 GitHub Actions 门禁。 | HIGH | Draft self-review + windows-native-package.yml | CONFIRMED |
 | H16 | 危险写入、批量发送和自动化命令必须采用执行前显式确认、取消零副作用、提示失败 fail-closed、脱敏安全审计的本地安全边界。 | HIGH | Q8 + Phase 3 Task 04 | CONFIRMED |
+| H17 | 发布版本号必须从单一 CMake 元数据源派生，并通过 VERSIONINFO、package summary、README/docs 和测试门禁防止 release 漂移。 | HIGH | Phase 3 Task 05 | CONFIRMED |

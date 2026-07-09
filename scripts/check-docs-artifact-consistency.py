@@ -13,6 +13,7 @@ PACKAGE_SUMMARY = f"{PACKAGE_ARTIFACT}.package-summary.txt"
 UI_ARTIFACT = "windows-native-ui-screenshots"
 EXE_NAME = "svm-native-win32.exe"
 TARGET_NAME = "svm-native-win32"
+VERSION_SOURCE = "cmake/svm_version.cmake"
 
 PACKAGE_WORKFLOW = ".github/workflows/windows-native-package.yml"
 UI_WORKFLOW = ".github/workflows/windows-native-ui-capture.yml"
@@ -39,6 +40,7 @@ LEGACY_OR_TRANSITION_DOCS = [
 ]
 
 REQUIRED_FILES = [
+    VERSION_SOURCE,
     PACKAGE_WORKFLOW,
     UI_WORKFLOW,
     "scripts/package-windows-native.ps1",
@@ -112,6 +114,15 @@ REQUIRED_DOC_TERMS = {
 }
 
 PACKAGE_SUMMARY_TERMS = [
+    "Version metadata",
+    "Expected version",
+    "Expected release tag",
+    "Native exe fixed file version",
+    "Native exe fixed product version",
+    "Native exe file version",
+    "Native exe product version",
+    "Native exe product name",
+    "Native exe original filename",
     "Zip sha256",
     "Zip sha256 file matches",
     "Native exe present",
@@ -177,6 +188,16 @@ def parse_args() -> argparse.Namespace:
 
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def read_cmake_version_metadata(root: Path) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    pattern = re.compile(r'^\s*set\(\s*([A-Za-z0-9_]+)\s+"([^"]*)"\s*\)')
+    for line in read_text(root / VERSION_SOURCE).splitlines():
+        match = pattern.match(line)
+        if match:
+            metadata[match.group(1)] = match.group(2)
+    return metadata
 
 
 def line_is_contextual(line: str) -> bool:
@@ -320,6 +341,54 @@ def check_cross_file_consistency(root: Path, failures: list[str]) -> None:
             add_failure(failures, relative, f"missing executable name: {EXE_NAME}")
 
 
+def check_version_metadata_source(root: Path, failures: list[str]) -> None:
+    metadata = read_cmake_version_metadata(root)
+    required_keys = [
+        "SVM_VERSION",
+        "SVM_VERSION_MAJOR",
+        "SVM_VERSION_MINOR",
+        "SVM_VERSION_PATCH",
+        "SVM_VERSION_TWEAK",
+        "SVM_RELEASE_TAG",
+        "SVM_PACKAGE_ARTIFACT",
+        "SVM_MINGW_PACKAGE_ARTIFACT",
+        "SVM_WIN32_EXE_NAME",
+        "SVM_RELEASE_URL",
+    ]
+    for key in required_keys:
+        if not metadata.get(key):
+            add_failure(failures, VERSION_SOURCE, f"missing version metadata key: {key}")
+
+    if any(not metadata.get(key) for key in required_keys):
+        return
+
+    component_version = ".".join([
+        metadata["SVM_VERSION_MAJOR"],
+        metadata["SVM_VERSION_MINOR"],
+        metadata["SVM_VERSION_PATCH"],
+    ])
+    if metadata["SVM_VERSION"] != component_version:
+        add_failure(failures, VERSION_SOURCE, "SVM_VERSION does not match major/minor/patch components")
+    if metadata["SVM_VERSION_TWEAK"] != "0":
+        add_failure(failures, VERSION_SOURCE, "SVM_VERSION_TWEAK should be 0 for the current release line")
+    if metadata["SVM_RELEASE_TAG"] != f"v{metadata['SVM_VERSION']}":
+        add_failure(failures, VERSION_SOURCE, "SVM_RELEASE_TAG must be v + SVM_VERSION")
+    if metadata["SVM_PACKAGE_ARTIFACT"] != PACKAGE_ARTIFACT:
+        add_failure(failures, VERSION_SOURCE, f"SVM_PACKAGE_ARTIFACT drifted from docs constant {PACKAGE_ARTIFACT}")
+    if metadata["SVM_WIN32_EXE_NAME"] != EXE_NAME:
+        add_failure(failures, VERSION_SOURCE, f"SVM_WIN32_EXE_NAME drifted from docs constant {EXE_NAME}")
+
+    cmake = read_text(root / "CMakeLists.txt")
+    if VERSION_SOURCE not in cmake or 'VERSION "${SVM_VERSION}"' not in cmake:
+        add_failure(failures, "CMakeLists.txt", "top-level project version must consume cmake/svm_version.cmake")
+    app_rc = read_text(root / "src/win32/app.rc")
+    if "svm_version_resource.h" not in app_rc or "SVM_VERSION_FILE_VERSION" not in app_rc:
+        add_failure(failures, "src/win32/app.rc", "VERSIONINFO must consume generated version resource header")
+    readme = read_text(root / "README.md")
+    if metadata["SVM_RELEASE_TAG"] not in readme or metadata["SVM_RELEASE_URL"] not in readme:
+        add_failure(failures, "README.md", "README release tag/url must match version metadata source")
+
+
 def main() -> int:
     args = parse_args()
     root = args.root.resolve()
@@ -339,6 +408,7 @@ def main() -> int:
     check_package_summary_terms(root, failures)
     check_markdown_links(root, docs, failures)
     check_cross_file_consistency(root, failures)
+    check_version_metadata_source(root, failures)
 
     if args.negative_smoke and not failures:
         add_failure(failures, "__virtual_negative_doc__.md", "negative smoke did not fail")

@@ -54,6 +54,8 @@ Windows native workflow：
 打包检查会确认：
 
 - 包内存在 `svm-native-win32.exe`；
+- exe 的 Windows `VERSIONINFO` 与 `cmake/svm_version.cmake` 一致；
+- package summary 包含 `Native exe file version`、`Native exe product version`、`Native exe product name` 和 `Native exe original filename`；
 - 不包含 `Qt6*.dll`；
 - 不包含 `qsqlite.dll` 或 `sqldrivers`；
 - 不导入 `.NET` 运行库；

@@ -1,7 +1,7 @@
 # Task 05: Single-Source Version Metadata
 
 > Phase: 3 — Extension Capability & Production Hardening
-> Status: pending
+> Status: completed
 
 ---
 
@@ -58,9 +58,9 @@ Add test/script checks for metadata consistency.
 
 ## Verification
 
-- [ ] CMake, VERSIONINFO, package summary, README, and docs agree.
-- [ ] Package audit reports version metadata.
-- [ ] Tests/docs consistency pass.
+- [x] CMake, VERSIONINFO, package summary, README, and docs agree.
+- [x] Package audit reports version metadata.
+- [x] Tests/docs consistency pass.
 
 **Test command:**
 ```bash
@@ -73,6 +73,14 @@ python3 scripts/check-docs-artifact-consistency.py
 100% tests passed
 No docs/artifact consistency failures.
 ```
+
+## Completion Notes
+
+- Added `cmake/svm_version.cmake` as the single editable source for version, release tag, product strings, executable name, and package artifact names.
+- Generated `svm_version_resource.h` from CMake and wired Win32 `VERSIONINFO` plus evidence-bundle app version to the generated metadata.
+- Extended Python and PowerShell package inspectors to report and gate VERSIONINFO drift.
+- Added `version_metadata_tests` and updated README/release docs/package docs to describe version metadata fields.
+- Verification completed: focused version metadata tests on build-codex and MinGW, docs consistency, full build-codex 55/55, full MinGW 32/32, local MinGW package/Wine gate with VERSIONINFO summary.
 
 ## Commit
 

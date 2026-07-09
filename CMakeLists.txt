@@ -1,15 +1,18 @@
 cmake_minimum_required(VERSION 3.24)
 
+include(cmake/svm_version.cmake)
+
 project(SerialValueMatcherNative
-    VERSION 1.0.0
+    VERSION "${SVM_VERSION}"
     DESCRIPTION "Chinese-native Windows desktop serial debugging and value analysis tool"
     LANGUAGES CXX
 )
 
-set(SVM_PRODUCT_DISPLAY_NAME "串口值匹配器")
-set(SVM_PRODUCT_REPOSITORY_NAME "SerialValueMatcher Native")
-set(SVM_PRODUCT_AUTHOR "w")
-set(SVM_PRODUCT_DESCRIPTION "面向中文用户的 Windows 原生串口调试、Modbus RTU 扫描和值候选分析工具")
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/svm_version_resource.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/svm_version_resource.h"
+    @ONLY
+)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -166,6 +169,7 @@ if(SVM_BUILD_WIN32_APP)
         PRIVATE
             src
             src/win32
+            ${CMAKE_CURRENT_BINARY_DIR}/generated
     )
 
     target_compile_definitions(svm-native-win32
@@ -348,6 +352,21 @@ set_target_properties(dangerous_operation_policy_tests PROPERTIES
 target_link_libraries(dangerous_operation_policy_tests PRIVATE svm_slim_core)
 target_include_directories(dangerous_operation_policy_tests PRIVATE src)
 add_test(NAME dangerous_operation_policy_tests COMMAND dangerous_operation_policy_tests)
+
+add_executable(version_metadata_tests
+    tests/version_metadata_tests.cpp
+)
+set_target_properties(version_metadata_tests PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+target_compile_definitions(version_metadata_tests
+    PRIVATE
+        SVM_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
+        SVM_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+)
+add_test(NAME version_metadata_tests COMMAND version_metadata_tests)
 
 add_executable(native_candidate_cache_state_tests
     tests/native_candidate_cache_state_tests.cpp

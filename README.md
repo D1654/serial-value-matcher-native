@@ -27,6 +27,7 @@ svm-native-win32.exe
 v1.0.4 包信息：
 
 - GitHub Actions Windows runner 构建；
+- 版本元数据以 `cmake/svm_version.cmake` 为唯一源，CMake、Windows `VERSIONINFO`、package summary 和发布文档必须一致；
 - zip 和解压体积以 Release 附件中的 package summary 为准；
 - 不包含 `Qt6*.dll`、`qsqlite.dll`、`sqldrivers` 或 .NET 运行库；
 - SHA256 见 Release 附件中的 `.sha256.txt`。
