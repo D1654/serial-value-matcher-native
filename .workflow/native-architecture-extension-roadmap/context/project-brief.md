@@ -1,6 +1,6 @@
 # Project Brief — Native Architecture Extension Roadmap
 
-Updated: 2026-07-09T20:21:21+08:00
+Updated: 2026-07-09T20:43:13+08:00
 
 ## 用户原始输入
 
@@ -74,3 +74,4 @@ Updated: 2026-07-09T20:21:21+08:00
 - Phase 3 Task 03 完成了纯 C++ 本地声明式命令序列基础，覆盖串口写入、延时、等待响应、Modbus read 和断言；实现静态安全限制、取消、超时、结构化执行证据，并明确不引入脚本引擎或任意代码执行面。build-codex 53/53、MinGW native 30/30、本地 MinGW package/Wine gate 均通过。
 - Phase 3 Task 04 完成了危险操作确认与审计：定时发送、文件发送、命令序列写入、Modbus 广播写和寄存器写按策略分类；Win32 UI 在执行前 fail-closed 确认；确认/取消/提示失败均记录脱敏安全审计。build-codex 54/54、MinGW native 31/31、本地 MinGW package/Wine gate 均通过。
 - Phase 3 Task 05 完成了单一版本元数据源：`cmake/svm_version.cmake` 统一 CMake project version、Win32 VERSIONINFO、包审计 summary、README/发布文档和本地 MinGW 包名；当前 VERSIONINFO 已对齐 v1.0.4。build-codex 55/55、MinGW native 32/32、本地 MinGW package/Wine gate 均通过。
+- Phase 3 Task 06 完成了发布包、文档和依赖门禁加固：package audit 增加 unexpected DLL、必备文件、docs 文件集合/内容一致性；Windows package workflow 在 upload 前逐文件断言 zip/hash/summary/CTest/self-test/UI perf/backend/PTY 证据存在且内容有效；docs consistency 覆盖 artifact id/url/digest、`if-no-files-found: error` 和新增 summary 字段。build-codex 55/55、MinGW native 32/32、本地 MinGW package/Wine gate、docs negative smoke 和 forbidden DLL negative 均通过。

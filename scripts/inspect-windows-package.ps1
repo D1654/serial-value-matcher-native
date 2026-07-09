@@ -102,6 +102,60 @@ function Get-DocumentationPackageLinkFailures($StageRoot, $MarkdownFiles) {
     return @($failures)
 }
 
+function Get-RelativeFileMap($Root) {
+    $files = @{}
+    if (-not (Test-Path -LiteralPath $Root)) {
+        return $files
+    }
+    foreach ($file in Get-ChildItem -Path $Root -Recurse -File) {
+        $relative = (Get-RelativePackagePath $Root $file.FullName).Replace('\', '/')
+        $files[$relative] = $file.FullName
+    }
+    return $files
+}
+
+function Get-DocumentationFileSetFailures($RepoRoot, $StageRoot) {
+    $failures = New-Object System.Collections.Generic.List[string]
+    $repoDocsDir = Join-Path $RepoRoot "docs"
+    $packageDocsDir = Join-Path $StageRoot "docs"
+
+    if (-not (Test-Path -LiteralPath $repoDocsDir)) {
+        $failures.Add("repository docs directory is missing")
+    }
+    if (-not (Test-Path -LiteralPath $packageDocsDir)) {
+        $failures.Add("package docs directory is missing")
+    }
+    if ($failures.Count -gt 0) {
+        return @($failures)
+    }
+
+    $repoFiles = Get-RelativeFileMap $repoDocsDir
+    $packageDocsFiles = Get-RelativeFileMap $packageDocsDir
+
+    foreach ($relative in @($repoFiles.Keys | Sort-Object)) {
+        if (-not $packageDocsFiles.ContainsKey($relative)) {
+            $failures.Add("missing package docs file: docs/$relative")
+        }
+    }
+    foreach ($relative in @($packageDocsFiles.Keys | Sort-Object)) {
+        if (-not $repoFiles.ContainsKey($relative)) {
+            $failures.Add("unexpected package docs file: docs/$relative")
+        }
+    }
+    foreach ($relative in @($repoFiles.Keys | Sort-Object)) {
+        if (-not $packageDocsFiles.ContainsKey($relative)) {
+            continue
+        }
+        $repoHash = (Get-FileHash -Algorithm SHA256 $repoFiles[$relative]).Hash
+        $packageHash = (Get-FileHash -Algorithm SHA256 $packageDocsFiles[$relative]).Hash
+        if ($repoHash -ne $packageHash) {
+            $failures.Add("package docs content mismatch: docs/$relative")
+        }
+    }
+
+    return @($failures)
+}
+
 function Test-ByteSequence($Bytes, $Needle) {
     if ($Needle.Length -eq 0) {
         return $true
@@ -259,6 +313,7 @@ $forbiddenFiles = @($packageFiles | Where-Object {
     $_.Name -like "Microsoft.NET*.dll" -or
     $_.FullName -match "\\sqldrivers\\"
 } | Sort-Object -Property FullName)
+$unexpectedDllFiles = @($packageFiles | Where-Object { $_.Extension -ieq ".dll" } | Sort-Object -Property FullName)
 $nativeExe = $packageFiles | Where-Object { $_.Name -ieq "svm-native-win32.exe" } | Select-Object -First 1
 
 $unicodeProbeTerms = @(
@@ -355,6 +410,25 @@ $forbiddenImportNames = @(
 $forbiddenImports = @($importedDlls | Where-Object { $forbiddenImportNames -contains $_.ToLowerInvariant() })
 $markdownFiles = @($packageFiles | Where-Object { $_.Extension -ieq ".md" })
 $documentationLinkFailures = @(Get-DocumentationPackageLinkFailures $StageDir $markdownFiles)
+$documentationFileSetFailures = @(Get-DocumentationFileSetFailures $repoRoot $StageDir)
+$requiredPackageFiles = @(
+    "svm-native-win32.exe",
+    "README.md",
+    "docs\用户指南.md",
+    "docs\开发者指南.md",
+    "docs\Win32原生架构.md",
+    "docs\测试与验证.md",
+    "docs\发布产物.md",
+    "docs\故障排查.md",
+    "docs\Windows发布说明.md",
+    "docs\Windows原生体积说明.md",
+    "docs\Windows原生UI验证.md",
+    "docs\Windows串口真机验收.md",
+    "docs\Windows原生本地调试.md"
+)
+$missingRequiredPackageFiles = @($requiredPackageFiles | Where-Object {
+    -not (Test-Path -LiteralPath (Join-Path $StageDir $_))
+})
 
 $summary = New-Object System.Collections.Generic.List[string]
 $summary.Add("SerialValueMatcher Native Windows package summary")
@@ -415,6 +489,28 @@ if ($forbiddenFiles.Count -eq 0) {
     }
 }
 $summary.Add("")
+$summary.Add("Unexpected DLL files:")
+if ($unexpectedDllFiles.Count -eq 0) {
+    $summary.Add("  none")
+} else {
+    foreach ($file in $unexpectedDllFiles) {
+        $summary.Add(("  {0,12}  {1}" -f $file.Length, (Get-RelativePackagePath $StageDir $file.FullName)))
+    }
+}
+$summary.Add("")
+$summary.Add("Required package files:")
+if ($missingRequiredPackageFiles.Count -eq 0) {
+    $summary.Add("  passed")
+    foreach ($relative in $requiredPackageFiles) {
+        $summary.Add("  required: $($relative.Replace('\', '/'))")
+    }
+} else {
+    $summary.Add("  failed")
+    foreach ($relative in $missingRequiredPackageFiles) {
+        $summary.Add("  missing: $($relative.Replace('\', '/'))")
+    }
+}
+$summary.Add("")
 $summary.Add("Unicode text probe:")
 if ($missingUnicodeTerms.Count -eq 0) {
     $summary.Add("  passed")
@@ -438,15 +534,34 @@ if ($documentationLinkFailures.Count -eq 0) {
         $summary.Add("  $failure")
     }
 }
+$summary.Add("")
+$summary.Add("Package documentation file set:")
+if ($documentationFileSetFailures.Count -eq 0) {
+    $summary.Add("  passed")
+    $summary.Add("  checked files: $((Get-RelativeFileMap (Join-Path $repoRoot 'docs')).Count)")
+} else {
+    $summary.Add("  failed")
+    foreach ($failure in $documentationFileSetFailures) {
+        $summary.Add("  $failure")
+    }
+}
 
 $gateFailures = New-Object System.Collections.Generic.List[string]
 if ($forbiddenFiles.Count -gt 0) {
     $gateFailures.Add("native 包中出现 Qt、SQLite 或 .NET 运行时文件。")
 }
+if ($unexpectedDllFiles.Count -gt 0) {
+    $unexpectedDllList = @($unexpectedDllFiles | ForEach-Object { Get-RelativePackagePath $StageDir $_.FullName })
+    $gateFailures.Add("native 包中出现非预期 DLL 文件：$($unexpectedDllList -join ', ')。")
+}
 if ($null -eq $nativeExe) {
     $gateFailures.Add("native 包缺少 svm-native-win32.exe。")
 } elseif ($missingUnicodeTerms.Count -gt 0) {
     $gateFailures.Add("native exe 缺少关键中文 UTF-16LE 文本：$($missingUnicodeTerms -join ', ')。")
+}
+if ($missingRequiredPackageFiles.Count -gt 0) {
+    $missingRequiredList = @($missingRequiredPackageFiles | ForEach-Object { $_.Replace('\', '/') })
+    $gateFailures.Add("native 包缺少必备文件：$($missingRequiredList -join ', ')。")
 }
 if (-not $hashMatches) {
     $gateFailures.Add("zip SHA256 文件缺失或内容不匹配。")
@@ -465,6 +580,9 @@ if ($packageBytes -gt $MaxExtractedBytes) {
 }
 if ($documentationLinkFailures.Count -gt 0) {
     $gateFailures.Add("native 包内文档链接或文档路径存在断链。")
+}
+if ($documentationFileSetFailures.Count -gt 0) {
+    $gateFailures.Add("native 包内 docs 文件集合与仓库 docs 不一致。")
 }
 $requiredVersionKeys = @(
     "SVM_VERSION",

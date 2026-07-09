@@ -1,7 +1,7 @@
 # Task 06: Harden Package Docs Dependency Gates
 
 > Phase: 3 — Extension Capability & Production Hardening
-> Status: pending
+> Status: completed
 
 ---
 
@@ -58,9 +58,9 @@ python3 scripts/check-docs-artifact-consistency.py
 
 ## Verification
 
-- [ ] Package audit fails on missing or forbidden runtime artifacts.
-- [ ] Docs consistency catches release/doc drift.
-- [ ] Workflow artifact list is explicit.
+- [x] Package audit fails on missing or forbidden runtime artifacts.
+- [x] Docs consistency catches release/doc drift.
+- [x] Workflow artifact list is explicit.
 
 **Test command:**
 ```bash

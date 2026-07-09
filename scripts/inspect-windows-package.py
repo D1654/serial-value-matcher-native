@@ -86,6 +86,22 @@ FORBIDDEN_IMPORTS = {
     "mscoree.dll",
 }
 
+REQUIRED_PACKAGE_FILES = [
+    "svm-native-win32.exe",
+    "README.md",
+    "docs/用户指南.md",
+    "docs/开发者指南.md",
+    "docs/Win32原生架构.md",
+    "docs/测试与验证.md",
+    "docs/发布产物.md",
+    "docs/故障排查.md",
+    "docs/Windows发布说明.md",
+    "docs/Windows原生体积说明.md",
+    "docs/Windows原生UI验证.md",
+    "docs/Windows串口真机验收.md",
+    "docs/Windows原生本地调试.md",
+]
+
 MARKDOWN_LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 PACKAGED_PATH_REFERENCE_PATTERN = re.compile(r"`((?:docs/|README\.md)[^`]+)`")
 EXTERNAL_LINK_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
@@ -225,6 +241,50 @@ def package_documentation_link_failures(stage_dir: Path, package_files: list[Pat
     return failures
 
 
+def required_package_file_failures(stage_dir: Path) -> list[str]:
+    return [
+        relative
+        for relative in REQUIRED_PACKAGE_FILES
+        if not (stage_dir / relative).is_file()
+    ]
+
+
+def collect_relative_files(root: Path) -> set[str]:
+    if not root.is_dir():
+        return set()
+    return {
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+
+def package_documentation_file_set_failures(repo_root: Path, stage_dir: Path) -> list[str]:
+    failures: list[str] = []
+    repo_docs_dir = repo_root / "docs"
+    package_docs_dir = stage_dir / "docs"
+
+    if not repo_docs_dir.is_dir():
+        failures.append("repository docs directory is missing")
+    if not package_docs_dir.is_dir():
+        failures.append("package docs directory is missing")
+    if failures:
+        return failures
+
+    repo_files = collect_relative_files(repo_docs_dir)
+    package_files = collect_relative_files(package_docs_dir)
+    for relative in sorted(repo_files - package_files):
+        failures.append(f"missing package docs file: docs/{relative}")
+    for relative in sorted(package_files - repo_files):
+        failures.append(f"unexpected package docs file: docs/{relative}")
+    for relative in sorted(repo_files & package_files):
+        repo_path = repo_docs_dir / relative
+        package_path = package_docs_dir / relative
+        if file_sha256(repo_path) != file_sha256(package_path):
+            failures.append(f"package docs content mismatch: docs/{relative}")
+    return failures
+
+
 def main() -> int:
     args = parse_args()
     stage_dir = args.stage_dir.resolve()
@@ -285,8 +345,14 @@ def main() -> int:
     forbidden_imports = [
         dll for dll in imported if dll.lower() in FORBIDDEN_IMPORTS
     ]
+    unexpected_dll_files = sorted(
+        [path for path in package_files if path.suffix.lower() == ".dll"],
+        key=lambda path: relative_path(stage_dir, path).lower(),
+    )
     markdown_files = sorted(path for path in package_files if path.suffix.lower() == ".md")
+    required_file_failures = required_package_file_failures(stage_dir)
     documentation_link_failures = package_documentation_link_failures(stage_dir, package_files)
+    documentation_file_set_failures = package_documentation_file_set_failures(repo_root, stage_dir)
 
     summary.append("SerialValueMatcher Native Windows package summary")
     summary.append("Package kind: Win32 native")
@@ -342,6 +408,23 @@ def main() -> int:
     else:
         summary.append("  none")
     summary.append("")
+    summary.append("Unexpected DLL files:")
+    if unexpected_dll_files:
+        for path in unexpected_dll_files:
+            summary.append(f"  {path.stat().st_size:12d}  {relative_path(stage_dir, path)}")
+    else:
+        summary.append("  none")
+    summary.append("")
+    summary.append("Required package files:")
+    if required_file_failures:
+        summary.append("  failed")
+        for failure in required_file_failures:
+            summary.append(f"  missing: {failure}")
+    else:
+        summary.append("  passed")
+        for relative in REQUIRED_PACKAGE_FILES:
+            summary.append(f"  required: {relative}")
+    summary.append("")
     summary.append("Unicode text probe:")
     if missing_unicode_terms:
         summary.append("  failed")
@@ -360,11 +443,24 @@ def main() -> int:
     else:
         summary.append("  passed")
         summary.append(f"  checked files: {len(markdown_files)}")
+    summary.append("")
+    summary.append("Package documentation file set:")
+    if documentation_file_set_failures:
+        summary.append("  failed")
+        for failure in documentation_file_set_failures:
+            summary.append(f"  {failure}")
+    else:
+        summary.append("  passed")
+        summary.append(f"  checked files: {len(collect_relative_files(repo_root / 'docs'))}")
 
     if forbidden_files:
         failures.append("native 包中出现 Qt、SQLite 或 .NET 运行时文件。")
+    if unexpected_dll_files:
+        failures.append("native 包中出现非预期 DLL 文件：" + ", ".join(relative_path(stage_dir, path) for path in unexpected_dll_files) + "。")
     if native_exe is None:
         failures.append("native 包缺少 svm-native-win32.exe。")
+    if required_file_failures:
+        failures.append("native 包缺少必备文件：" + ", ".join(required_file_failures) + "。")
     if not hash_matches:
         failures.append("zip SHA256 文件缺失或内容不匹配。")
     if native_exe is not None and pefile is None:
@@ -379,6 +475,8 @@ def main() -> int:
         failures.append(f"解压后体积超过门禁：{package_bytes} > {args.max_extracted_bytes}。")
     if documentation_link_failures:
         failures.append("native 包内文档链接或文档路径存在断链。")
+    if documentation_file_set_failures:
+        failures.append("native 包内 docs 文件集合与仓库 docs 不一致。")
 
     required_version_keys = [
         "SVM_VERSION",

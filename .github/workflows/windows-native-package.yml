@@ -133,22 +133,75 @@ jobs:
           -SkipSelfTest
           -SkipUiPerfTest
 
-      - name: Assert native package audit
+      - name: Assert native package evidence completeness
         shell: pwsh
         run: |
+          function Assert-RequiredEvidenceFile($Path, $Label) {
+            if (!(Test-Path -LiteralPath $Path -PathType Leaf)) {
+              throw "Native package evidence file missing: $Label ($Path)"
+            }
+            $item = Get-Item -LiteralPath $Path
+            if ($item.Length -le 0) {
+              throw "Native package evidence file is empty: $Label ($Path)"
+            }
+          }
+
+          function Assert-FileContains($Path, $Needle, $Label) {
+            $content = Get-Content -LiteralPath $Path -Raw
+            if (!$content.Contains($Needle)) {
+              Write-Host "===== $Label ====="
+              Get-Content -LiteralPath $Path
+              throw "Native package evidence file missing required text '$Needle': $Label ($Path)"
+            }
+          }
+
           $zipPath = "$env:PACKAGE_ARTIFACT_DIR/$env:PACKAGE_NAME.zip"
           $hashPath = "$zipPath.sha256.txt"
           $summaryPath = "$env:PACKAGE_ARTIFACT_DIR/$env:PACKAGE_NAME.package-summary.txt"
-          foreach ($path in @($zipPath, $hashPath, $summaryPath)) {
-            if (!(Test-Path $path)) {
-              throw "Native package audit artifact missing: $path"
-            }
+          $ctestLog = "$env:PACKAGE_ARTIFACT_DIR/native-ctest.log"
+          $selfTestLog = "$env:PACKAGE_ARTIFACT_DIR/native-self-test.log"
+          $uiPerfLog = "$env:PACKAGE_ARTIFACT_DIR/native-ui-perf-test.log"
+          $backendLog = "$env:PACKAGE_ARTIFACT_DIR/phase-2-backend-regression.txt"
+          $serialMatrixLog = "$env:PACKAGE_ARTIFACT_DIR/serial-pty-matrix.txt"
+
+          $requiredEvidence = @(
+            @{ Path = $zipPath; Label = "package zip" },
+            @{ Path = $hashPath; Label = "package SHA256 sidecar" },
+            @{ Path = $summaryPath; Label = "package summary" },
+            @{ Path = $ctestLog; Label = "native CTest log" },
+            @{ Path = $selfTestLog; Label = "native self-test log" },
+            @{ Path = $uiPerfLog; Label = "native UI performance log" },
+            @{ Path = $backendLog; Label = "Phase 2 backend regression closure" },
+            @{ Path = $serialMatrixLog; Label = "serial PTY matrix boundary note" }
+          )
+          foreach ($evidence in $requiredEvidence) {
+            Assert-RequiredEvidenceFile $evidence.Path $evidence.Label
           }
-          $summary = Get-Content $summaryPath -Raw
-          if ($summary -notmatch "Gate status: passed") {
-            Get-Content $summaryPath
-            throw "Native package audit did not pass."
+
+          $summaryRequiredTerms = @(
+            "Gate status: passed",
+            "Version metadata:",
+            "Expected version:",
+            "Expected release tag:",
+            "Native exe fixed file version:",
+            "Native exe file version:",
+            "Imported DLLs:",
+            "Forbidden Qt/SQLite/.NET runtime files:",
+            "Unexpected DLL files:",
+            "Required package files:",
+            "Unicode text probe:",
+            "Package documentation links:",
+            "Package documentation file set:"
+          )
+          foreach ($term in $summaryRequiredTerms) {
+            Assert-FileContains $summaryPath $term "package summary"
           }
+          Assert-FileContains $hashPath "$(Split-Path -Leaf $zipPath)" "package SHA256 sidecar"
+          Assert-FileContains $ctestLog "100% tests passed" "native CTest log"
+          Assert-FileContains $selfTestLog "ok" "native self-test log"
+          Assert-FileContains $uiPerfLog "ui-perf ok" "native UI performance log"
+          Assert-FileContains $backendLog "Status: CI-blocking native CTest passed before packaging." "Phase 2 backend regression closure"
+          Assert-FileContains $serialMatrixLog "CI blocking in this workflow: no PTY scenario is executed" "serial PTY matrix boundary note"
 
       - name: Check docs artifact consistency
         shell: pwsh
@@ -170,6 +223,7 @@ jobs:
           }
 
       - name: Upload native artifact
+        id: upload-native-artifact
         # actions/upload-artifact v7
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
@@ -185,3 +239,14 @@ jobs:
             artifacts/windows-native/serial-pty-matrix.txt
           if-no-files-found: error
           retention-days: 14
+
+      - name: Report native artifact upload
+        if: always()
+        shell: pwsh
+        run: |
+          "## Native artifact upload" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "Artifact ID: ${{ steps.upload-native-artifact.outputs.artifact-id }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "Artifact URL: ${{ steps.upload-native-artifact.outputs.artifact-url }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "Artifact digest: ${{ steps.upload-native-artifact.outputs.artifact-digest }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "The artifact digest is CI upload evidence and does not replace the package zip SHA256 sidecar." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
