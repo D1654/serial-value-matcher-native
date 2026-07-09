@@ -86,6 +86,8 @@ struct ScanExecutionResult {
 
 QString describeScanAttemptStatus(ScanAttemptStatus status);
 QString describeScanExecutionStatus(ScanExecutionStatus status);
+bool scanExecutionCompleted(ScanExecutionStatus status) noexcept;
+bool scanExecutionTerminal(ScanExecutionStatus status) noexcept;
 
 class ModbusScanExecutor {
 public:

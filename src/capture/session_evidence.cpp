@@ -29,6 +29,10 @@ QString sessionEvidenceEventTypeKey(SessionEvidenceEventType type) {
         return QStringLiteral("user_command");
     case SessionEvidenceEventType::ModbusScanSettings:
         return QStringLiteral("modbus_scan_settings");
+    case SessionEvidenceEventType::CommandSequenceStep:
+        return QStringLiteral("command_sequence_step");
+    case SessionEvidenceEventType::CommandSequenceAssertion:
+        return QStringLiteral("command_sequence_assertion");
     case SessionEvidenceEventType::MatchResult:
         return QStringLiteral("match_result");
     case SessionEvidenceEventType::ReportMetadata:
@@ -52,6 +56,12 @@ std::optional<SessionEvidenceEventType> parseSessionEvidenceEventType(QStringVie
     }
     if (value == QStringLiteral("modbus_scan_settings")) {
         return SessionEvidenceEventType::ModbusScanSettings;
+    }
+    if (value == QStringLiteral("command_sequence_step")) {
+        return SessionEvidenceEventType::CommandSequenceStep;
+    }
+    if (value == QStringLiteral("command_sequence_assertion")) {
+        return SessionEvidenceEventType::CommandSequenceAssertion;
     }
     if (value == QStringLiteral("match_result")) {
         return SessionEvidenceEventType::MatchResult;
@@ -77,6 +87,8 @@ std::optional<Direction> rawIoDirection(SessionEvidenceEventType type) noexcept 
         return Direction::Rx;
     case SessionEvidenceEventType::UserCommand:
     case SessionEvidenceEventType::ModbusScanSettings:
+    case SessionEvidenceEventType::CommandSequenceStep:
+    case SessionEvidenceEventType::CommandSequenceAssertion:
     case SessionEvidenceEventType::MatchResult:
     case SessionEvidenceEventType::ReportMetadata:
     case SessionEvidenceEventType::AppVersion:

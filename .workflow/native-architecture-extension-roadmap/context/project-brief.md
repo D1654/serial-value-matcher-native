@@ -1,6 +1,6 @@
 # Project Brief — Native Architecture Extension Roadmap
 
-Updated: 2026-07-07T16:16:55+08:00
+Updated: 2026-07-09T17:56:17+08:00
 
 ## 用户原始输入
 
@@ -71,3 +71,4 @@ Updated: 2026-07-07T16:16:55+08:00
 - Phase 2 Task 04 完成了纯 C++ Modbus scan executor 抽取：Qt executor 变为兼容适配层，native worker 变为 Win32 transport/UI/storage 薄适配层；build-codex 50/50、MinGW native 28/28 和 native DLL 依赖快检均通过。
 - Phase 2 Task 05 完成了 Modbus 响应解析、扫描计划构建、native attempt UI 映射的稳定结果分类；focused 3/3、build-codex 50/50、MinGW native 28/28 和 native DLL 依赖快检均通过。
 - Phase 3 Task 01 完成了 Qt-side 本地结构化 session evidence model、raw TX/RX 证据优先捕获、source subsystem、单调顺序、metadata/隐私字段和 focused 测试；build-codex 51/51、MinGW native 28/28、本地 MinGW package/Wine gate 均通过。
+- Phase 3 Task 03 完成了纯 C++ 本地声明式命令序列基础，覆盖串口写入、延时、等待响应、Modbus read 和断言；实现静态安全限制、取消、超时、结构化执行证据，并明确不引入脚本引擎或任意代码执行面。build-codex 53/53、MinGW native 30/30、本地 MinGW package/Wine gate 均通过。

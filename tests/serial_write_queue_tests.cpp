@@ -155,6 +155,12 @@ void resultStatusNamesStayStableForLogsAndTests() {
     assert(std::string(svm::transport::serialWriteResultStatusName(SerialWriteResultStatus::Sent)) == "sent");
     assert(std::string(svm::transport::serialWriteResultStatusName(SerialWriteResultStatus::Timeout)) == "timeout");
     assert(std::string(svm::transport::serialWriteResultStatusName(SerialWriteResultStatus::Cancelled)) == "cancelled");
+    assert(svm::transport::isSerialWriteResultRejected(SerialWriteResultStatus::RejectedInvalid));
+    assert(svm::transport::isSerialWriteResultRejected(SerialWriteResultStatus::RejectedFull));
+    assert(!svm::transport::isSerialWriteResultRejected(SerialWriteResultStatus::Accepted));
+    assert(svm::transport::isSerialWriteResultTerminal(SerialWriteResultStatus::Sent));
+    assert(svm::transport::isSerialWriteResultTerminal(SerialWriteResultStatus::Timeout));
+    assert(!svm::transport::isSerialWriteResultTerminal(SerialWriteResultStatus::Accepted));
 }
 
 } // namespace

@@ -321,6 +321,14 @@ private slots:
         QCOMPARE(transport.timeoutValues(), QVector<int>({250}));
     }
 
+    void executionStatusHelpersStayStable() {
+        QVERIFY(svm::modbus::scanExecutionCompleted(svm::modbus::ScanExecutionStatus::Completed));
+        QVERIFY(!svm::modbus::scanExecutionCompleted(svm::modbus::ScanExecutionStatus::CompletedWithErrors));
+        QVERIFY(svm::modbus::scanExecutionTerminal(svm::modbus::ScanExecutionStatus::Completed));
+        QVERIFY(svm::modbus::scanExecutionTerminal(svm::modbus::ScanExecutionStatus::CompletedWithErrors));
+        QVERIFY(svm::modbus::scanExecutionTerminal(svm::modbus::ScanExecutionStatus::Failed));
+    }
+
     void cancellationStopsBeforeSendingRequests() {
         const auto plan = makePlan(0, 2, 3);
         FakeModbusRtuTransport transport;

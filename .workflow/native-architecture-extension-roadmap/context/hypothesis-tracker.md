@@ -1,5 +1,5 @@
 # Hypothesis Tracker
-<!-- Updated after each brainstorm and interview answer. Updated: 2026-07-06T16:21:45+08:00 -->
+<!-- Updated after each brainstorm and interview answer. Updated: 2026-07-09T17:56:17+08:00 -->
 
 | ID | Hypothesis | Confidence | Source | Status |
 |----|------------|------------|--------|--------|
@@ -8,7 +8,7 @@
 | H3 | Modbus 扫描应统一到 executor/transport 抽象，native worker 只作为适配和线程调度层。 | HIGH | Code review + Agent A/C + Q2 | CONFIRMED |
 | H4 | 如果下一批功能涉及批量发送、命令序列或脚本化，异步串口写队列会成为性能稳定前置条件。 | MEDIUM | Code review + Agent A/B/C + Q2 | CONFIRMED |
 | H5 | 本项目的市场差异化在中文优先、portable Win32、Modbus 数值匹配和证据报告闭环，而不是做成全功能重 dashboard。 | HIGH | Agent B + Q4 | CONFIRMED |
-| H6 | 自动化应优先从声明式命令序列和断言开始，完整脚本引擎应等安全边界、证据模型和执行沙箱明确后再考虑。 | MEDIUM | Agent B | OPEN |
+| H6 | 自动化应优先从声明式命令序列和断言开始，完整脚本引擎应等安全边界、证据模型和执行沙箱明确后再考虑。 | HIGH | Agent B + Phase 3 Task 03 | CONFIRMED |
 | H7 | 多文件 append 存储需要事务或 orphan recovery，尤其是在后续会话证据包、profile、报告和批量数据扩展后。 | MEDIUM | Code review + Agent A + Q2 | CONFIRMED |
 | H8 | vcpkg 当前不应作为架构整洁性改动引入；只有新增真实第三方依赖时才值得用 manifest/baseline 治理。 | HIGH | Agent C + Q7 | CONFIRMED |
 | H9 | 如果后续加入 device profile 和寄存器映射，必须提前设计 schema version、迁移和兼容策略。 | MEDIUM | Agent A/B + Q6 | CONFIRMED |

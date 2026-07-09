@@ -28,15 +28,11 @@ bool SerialWriteResult::accepted() const noexcept {
 }
 
 bool SerialWriteResult::rejected() const noexcept {
-    return status == SerialWriteResultStatus::RejectedInvalid
-        || status == SerialWriteResultStatus::RejectedFull;
+    return isSerialWriteResultRejected(status);
 }
 
 bool SerialWriteResult::terminal() const noexcept {
-    return status == SerialWriteResultStatus::Sent
-        || status == SerialWriteResultStatus::Failed
-        || status == SerialWriteResultStatus::Timeout
-        || status == SerialWriteResultStatus::Cancelled;
+    return isSerialWriteResultTerminal(status);
 }
 
 bool SerialWriteQueueSnapshot::empty() const noexcept {
@@ -228,6 +224,18 @@ const char* serialWriteResultStatusName(SerialWriteResultStatus status) noexcept
         return "cancelled";
     }
     return "unknown";
+}
+
+bool isSerialWriteResultRejected(SerialWriteResultStatus status) noexcept {
+    return status == SerialWriteResultStatus::RejectedInvalid
+        || status == SerialWriteResultStatus::RejectedFull;
+}
+
+bool isSerialWriteResultTerminal(SerialWriteResultStatus status) noexcept {
+    return status == SerialWriteResultStatus::Sent
+        || status == SerialWriteResultStatus::Failed
+        || status == SerialWriteResultStatus::Timeout
+        || status == SerialWriteResultStatus::Cancelled;
 }
 
 } // namespace svm::transport

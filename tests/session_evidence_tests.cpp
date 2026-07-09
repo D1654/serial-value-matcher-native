@@ -21,6 +21,8 @@ private slots:
             SessionEvidenceEventType::RawRx,
             SessionEvidenceEventType::UserCommand,
             SessionEvidenceEventType::ModbusScanSettings,
+            SessionEvidenceEventType::CommandSequenceStep,
+            SessionEvidenceEventType::CommandSequenceAssertion,
             SessionEvidenceEventType::MatchResult,
             SessionEvidenceEventType::ReportMetadata,
             SessionEvidenceEventType::AppVersion,

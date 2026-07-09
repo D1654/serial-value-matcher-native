@@ -20,6 +20,8 @@ enum class SessionEvidenceEventType {
     RawRx,
     UserCommand,
     ModbusScanSettings,
+    CommandSequenceStep,
+    CommandSequenceAssertion,
     MatchResult,
     ReportMetadata,
     AppVersion,

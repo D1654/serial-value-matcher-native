@@ -99,5 +99,7 @@ private:
 };
 
 const char* serialWriteResultStatusName(SerialWriteResultStatus status) noexcept;
+bool isSerialWriteResultRejected(SerialWriteResultStatus status) noexcept;
+bool isSerialWriteResultTerminal(SerialWriteResultStatus status) noexcept;
 
 } // namespace svm::transport

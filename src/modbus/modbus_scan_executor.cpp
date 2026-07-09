@@ -380,6 +380,20 @@ QString describeScanExecutionStatus(ScanExecutionStatus status) {
     return QStringLiteral("未知状态");
 }
 
+bool scanExecutionCompleted(ScanExecutionStatus status) noexcept {
+    return status == ScanExecutionStatus::Completed;
+}
+
+bool scanExecutionTerminal(ScanExecutionStatus status) noexcept {
+    switch (status) {
+    case ScanExecutionStatus::Completed:
+    case ScanExecutionStatus::CompletedWithErrors:
+    case ScanExecutionStatus::Failed:
+        return true;
+    }
+    return false;
+}
+
 ModbusScanExecutor::ModbusScanExecutor(ModbusRtuTransport& transport)
     : transport_(transport) {}
 

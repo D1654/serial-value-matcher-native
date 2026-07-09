@@ -43,6 +43,7 @@ if(MSVC)
 endif()
 
 add_library(svm_slim_core
+    src/command_sequence/command_sequence.cpp
     src/core/protocol_core.cpp
     src/core/modbus_core.cpp
     src/core/modbus_scan_executor_core.cpp
@@ -322,6 +323,18 @@ set_target_properties(evidence_bundle_writer_tests PROPERTIES
 )
 target_link_libraries(evidence_bundle_writer_tests PRIVATE svm_slim_core)
 add_test(NAME evidence_bundle_writer_tests COMMAND evidence_bundle_writer_tests)
+
+add_executable(command_sequence_tests
+    tests/command_sequence_tests.cpp
+)
+set_target_properties(command_sequence_tests PROPERTIES
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+)
+target_link_libraries(command_sequence_tests PRIVATE svm_slim_core)
+target_include_directories(command_sequence_tests PRIVATE src)
+add_test(NAME command_sequence_tests COMMAND command_sequence_tests)
 
 add_executable(native_candidate_cache_state_tests
     tests/native_candidate_cache_state_tests.cpp
