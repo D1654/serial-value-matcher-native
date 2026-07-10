@@ -1,7 +1,7 @@
 # Task 08: Release Runbooks and Final Documentation
 
 > Phase: 3 — Extension Capability & Production Hardening
-> Status: pending
+> Status: completed
 
 ---
 
@@ -58,9 +58,9 @@ python3 scripts/check-docs-artifact-consistency.py
 
 ## Verification
 
-- [ ] README and docs are Chinese-first and match current release artifact names.
-- [ ] Runbooks cover build, test, package, UI, serial, release, rollback, and diagnostics.
-- [ ] Docs consistency passes.
+- [x] README and docs are Chinese-first and match current release artifact names.
+- [x] Runbooks cover build, test, package, UI, serial, release, rollback, and diagnostics.
+- [x] Docs consistency passes.
 
 **Test command:**
 ```bash

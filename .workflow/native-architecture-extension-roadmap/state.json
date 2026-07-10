@@ -2,8 +2,8 @@
   "version": "1.0",
   "project_name": "SerialValueMatcher Native — Architecture Extension Roadmap",
   "created_at": "2026-07-05T17:02:34+08:00",
-  "updated_at": "2026-07-10T11:00:10+08:00",
-  "current_phase": "execution",
+  "updated_at": "2026-07-10T11:14:28+08:00",
+  "current_phase": "completed",
   "phase_history": [
     {
       "phase": "pre_research",
@@ -32,8 +32,8 @@
     {
       "phase": "execution",
       "entered_at": "2026-07-06T16:59:44+08:00",
-      "exited_at": null,
-      "exit_reason": null
+      "exited_at": "2026-07-10T11:14:28+08:00",
+      "exit_reason": "completed"
     }
   ],
   "pre_research": {
@@ -61,7 +61,7 @@
     "domain_knowledge": ".workflow/native-architecture-extension-roadmap/context/domain-knowledge.md",
     "interview_transcript": ".workflow/native-architecture-extension-roadmap/context/interview-transcript.md",
     "hypothesis_tracker": ".workflow/native-architecture-extension-roadmap/context/hypothesis-tracker.md",
-    "last_updated": "2026-07-10T11:00:10+08:00"
+    "last_updated": "2026-07-10T11:14:28+08:00"
   },
   "requirements": {
     "status": "completed",
@@ -208,7 +208,7 @@
     "completed_at": "2026-07-06T16:39:03+08:00"
   },
   "execution": {
-    "status": "in_progress",
+    "status": "completed",
     "started_at": "2026-07-06T16:59:44+08:00",
     "current_phase_index": 3,
     "current_task_index": 8,
@@ -412,9 +412,10 @@
       },
       "phase-3": {
         "name": "Extension Capability & Production Hardening",
-        "status": "in_progress",
-        "completed_tasks": 7,
+        "status": "completed",
+        "completed_tasks": 8,
         "total_tasks": 8,
+        "completed_at": "2026-07-10T11:14:28+08:00",
         "tasks": {
           "task-01": {
             "name": "Define Session Evidence Model",
@@ -533,8 +534,20 @@
           },
           "task-08": {
             "name": "Release Runbooks and Final Documentation",
-            "status": "pending",
-            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-3/tasks/task-08-release-runbooks-and-final-documentation.md"
+            "status": "completed",
+            "plan": ".workflow/native-architecture-extension-roadmap/phases/phase-3/tasks/task-08-release-runbooks-and-final-documentation.md",
+            "started_at": "2026-07-10T11:03:00+08:00",
+            "completed_at": "2026-07-10T11:14:28+08:00",
+            "verification": {
+              "task_research": "completed; no DeepWiki ask required because dependencies table is None",
+              "python_compile": "passed for docs consistency, package inspector, and serial PTY script",
+              "docs_artifact_consistency": "passed",
+              "docs_negative_smoke": "passed; checker failed on virtual old package/exe claims as expected",
+              "full_ctest_build_codex": "55/55 passed",
+              "full_ctest_build_windows_native_mingw": "32/32 passed",
+              "local_package_audit_mingw": "passed; zip=894518 bytes; extracted=2231817 bytes; sha256=7d869a324e17635040156f8160873bb11654aed328d76e896c21066fabd0b5a7; Wine gate passed",
+              "diff_check": "passed"
+            }
           }
         }
       }

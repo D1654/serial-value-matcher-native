@@ -1,5 +1,5 @@
 # Hypothesis Tracker
-<!-- Updated after each brainstorm and interview answer. Updated: 2026-07-10T11:00:10+08:00 -->
+<!-- Updated after each brainstorm and interview answer. Updated: 2026-07-10T11:14:28+08:00 -->
 
 | ID | Hypothesis | Confidence | Source | Status |
 |----|------------|------------|--------|--------|
@@ -22,3 +22,4 @@
 | H17 | 发布版本号必须从单一 CMake 元数据源派生，并通过 VERSIONINFO、package summary、README/docs 和测试门禁防止 release 漂移。 | HIGH | Phase 3 Task 05 | CONFIRMED |
 | H18 | `actions/upload-artifact` 的 `if-no-files-found: error` 不能单独证明多路径 evidence 列表完整，必须在上传前逐文件断言证据存在、非空和关键文本，同时把 unexpected DLL 与 docs 文件集一致性纳入 package summary。 | HIGH | Phase 3 Task 06 + DeepWiki task research | CONFIRMED |
 | H19 | UI capture 不能只依赖 screenshot wildcard 上传；必须用 `capture-status.txt`、`ui-perf-test.log`、`window-info.txt`、`ui-evidence-summary.txt` 和逐文件截图断言共同证明标签页、resize、DPI、分割条和性能基线有效。 | HIGH | Phase 3 Task 07 + DeepWiki task research | CONFIRMED |
+| H20 | 最终交付需要中文优先 release runbook，把 build/test/package/UI/serial/release/rollback/re-release/diagnostics/redaction 统一到同一证据链，否则用户和维护者仍可能只看 zip 或 workflow 绿灯而忽略关键证据。 | HIGH | Phase 3 Task 08 | CONFIRMED |

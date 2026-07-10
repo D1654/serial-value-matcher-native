@@ -31,6 +31,7 @@ v1.0.4 包信息：
 - zip 和解压体积以 Release 附件中的 package summary 为准；
 - 不包含 `Qt6*.dll`、`qsqlite.dll`、`sqldrivers` 或 .NET 运行库；
 - SHA256 见 Release 附件中的 `.sha256.txt`。
+- 正式验收还应检查 `native-ctest.log`、`native-self-test.log`、`native-ui-perf-test.log`、`serial-pty-matrix-summary.txt`、UI capture artifact 和 `ui-evidence-summary.txt`。
 
 ## 界面预览
 
@@ -100,6 +101,13 @@ scripts/package-windows-native-mingw.sh
 ```
 
 本地打包默认会执行 Wine 自测和 UI 性能硬门禁；Wine/UI 截图闭环见 `docs/Windows原生本地调试.md`。
+
+发布候选最低证据：
+
+- package summary 为 `Gate status: passed`，且 `Unexpected DLL files: none`、`Required package files: passed`、`Package documentation file set: passed`。
+- UI capture artifact `windows-native-ui-screenshots` 中 `ui-evidence-summary.txt` 为 `GateStatus=passed`。
+- 串口 PTY 在 GitHub Actions 中保持 local-only 说明；涉及串口 I/O 改动时，本地运行 normal/reopen/timeout/cancel/stress 矩阵并保存 summary。
+- 文档一致性检查通过：`python3 scripts/check-docs-artifact-consistency.py`。
 
 ## 文档
 

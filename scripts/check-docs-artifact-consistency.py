@@ -139,6 +139,8 @@ REQUIRED_DOC_TERMS = {
         "Unexpected DLL files",
         "Required package files",
         "Package documentation file set",
+        "回滚",
+        "重新发布",
         "Gate status: passed",
     ],
     "docs/故障排查.md": [
@@ -148,6 +150,8 @@ REQUIRED_DOC_TERMS = {
         "package",
         "PTY",
         "serial-pty-matrix-summary.txt",
+        "回滚",
+        "诊断证据包",
     ],
 }
 
