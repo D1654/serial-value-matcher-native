@@ -1,7 +1,7 @@
 # Task 07: Finalize Performance and Serial Evidence Gates
 
 > Phase: 3 — Extension Capability & Production Hardening
-> Status: pending
+> Status: completed
 
 ---
 
@@ -59,9 +59,9 @@ Document exact commands and artifact review expectations.
 
 ## Verification
 
-- [ ] UI perf gate is baseline-derived.
-- [ ] Serial PTY local-only status is explicit when applicable.
-- [ ] Docs consistency passes.
+- [x] UI perf gate is baseline-derived.
+- [x] Serial PTY local-only status is explicit when applicable.
+- [x] Docs consistency passes.
 
 **Test command:**
 ```bash

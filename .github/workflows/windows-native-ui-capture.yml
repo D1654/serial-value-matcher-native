@@ -113,12 +113,106 @@ jobs:
           Get-ChildItem $env:UI_ARTIFACT_DIR -File | Sort-Object Name | ForEach-Object {
             "- $($_.Name) ($($_.Length) bytes)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           }
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "## UI evidence summary" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "````text" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          Get-Content (Join-Path $env:UI_ARTIFACT_DIR "ui-evidence-summary.txt") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+      - name: Assert native UI evidence completeness
+        shell: pwsh
+        run: |
+          function Assert-RequiredEvidenceFile($Path, $Label) {
+            if (!(Test-Path -LiteralPath $Path -PathType Leaf)) {
+              throw "Native UI evidence file missing: $Label ($Path)"
+            }
+            $item = Get-Item -LiteralPath $Path
+            if ($item.Length -le 0) {
+              throw "Native UI evidence file is empty: $Label ($Path)"
+            }
+          }
+
+          function Assert-FileContains($Path, $Needle, $Label) {
+            $content = Get-Content -LiteralPath $Path -Raw
+            if (!$content.Contains($Needle)) {
+              Write-Host "===== $Label ====="
+              Get-Content -LiteralPath $Path
+              throw "Native UI evidence file missing required text '$Needle': $Label ($Path)"
+            }
+          }
+
+          $requiredFiles = @(
+            @{ Path = "$env:UI_ARTIFACT_DIR/root.png"; Label = "default screenshot" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/tab-single.png"; Label = "single tab screenshot" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/tab-quick.png"; Label = "quick tab screenshot" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/tab-file.png"; Label = "file tab screenshot" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/tab-scan.png"; Label = "scan tab screenshot" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/tab-settings.png"; Label = "settings tab screenshot" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/compact-tab-single.png"; Label = "compact single tab screenshot" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/compact-tab-quick.png"; Label = "compact quick tab screenshot" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/compact-tab-file.png"; Label = "compact file tab screenshot" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/compact-tab-scan.png"; Label = "compact scan tab screenshot" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/compact-tab-settings.png"; Label = "compact settings tab screenshot" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/dpi-100-window.png"; Label = "DPI 100 smoke screenshot" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/dpi-125-window.png"; Label = "DPI 125 smoke screenshot" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/log-splitter-before.png"; Label = "splitter before screenshot" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/log-splitter-frame-01.png"; Label = "splitter frame 01 screenshot" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/log-splitter-frame-02.png"; Label = "splitter frame 02 screenshot" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/log-splitter-after.png"; Label = "splitter after screenshot" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/capture-status.txt"; Label = "capture status" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/self-test.log"; Label = "native self-test log" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/ui-perf-test.log"; Label = "native UI performance log" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/window-info.txt"; Label = "window info" },
+            @{ Path = "$env:UI_ARTIFACT_DIR/ui-evidence-summary.txt"; Label = "UI evidence summary" }
+          )
+          for ($index = 0; $index -lt 5; $index += 1) {
+            $requiredFiles += @{ Path = "$env:UI_ARTIFACT_DIR/resize-$index.png"; Label = "resize sweep screenshot $index" }
+          }
+          foreach ($evidence in $requiredFiles) {
+            Assert-RequiredEvidenceFile $evidence.Path $evidence.Label
+          }
+
+          $captureStatus = "$env:UI_ARTIFACT_DIR/capture-status.txt"
+          $uiPerfLog = "$env:UI_ARTIFACT_DIR/ui-perf-test.log"
+          $selfTestLog = "$env:UI_ARTIFACT_DIR/self-test.log"
+          $windowInfo = "$env:UI_ARTIFACT_DIR/window-info.txt"
+          $uiSummary = "$env:UI_ARTIFACT_DIR/ui-evidence-summary.txt"
+
+          $requiredStatusTerms = @(
+            "PASS default-window",
+            "PASS tab-set",
+            "PASS compact-tab-set",
+            "PASS resize-sweep",
+            "PASS dpi-smoke-100",
+            "PASS dpi-smoke-125",
+            "PASS splitter-drag-frames",
+            "PASS phase-1-ui-regression-closure",
+            "PASS capture-complete"
+          )
+          foreach ($term in $requiredStatusTerms) {
+            Assert-FileContains $captureStatus $term "capture status"
+          }
+          $statusText = Get-Content -LiteralPath $captureStatus -Raw
+          if ($statusText.Contains("FAIL ")) {
+            Get-Content -LiteralPath $captureStatus
+            throw "Native UI capture status contains FAIL."
+          }
+          Assert-FileContains $selfTestLog "ok" "native self-test log"
+          Assert-FileContains $uiPerfLog "ui-perf ok" "native UI performance log"
+          foreach ($metric in @("tabs=", "tab-ms=", "layout-pass=", "apply=", "revision=", "log-lines=", "log-ms=", "log-flush=", "log-rebuild=")) {
+            Assert-FileContains $uiPerfLog $metric "native UI performance log"
+          }
+          Assert-FileContains $windowInfo "CapturedAt=" "window info"
+          Assert-FileContains $windowInfo "ScalePercent=" "window info"
+          Assert-FileContains $uiSummary "BaselinePolicy=release-artifact-derived" "UI evidence summary"
+          Assert-FileContains $uiSummary "GateStatus=passed" "UI evidence summary"
 
       - name: Check docs artifact consistency
         shell: pwsh
         run: python scripts/check-docs-artifact-consistency.py
 
       - name: Upload UI screenshots
+        id: upload-ui-screenshots
         # actions/upload-artifact v7
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
@@ -129,5 +223,17 @@ jobs:
             artifacts/windows-native-ui/self-test.log
             artifacts/windows-native-ui/ui-perf-test.log
             artifacts/windows-native-ui/window-info.txt
+            artifacts/windows-native-ui/ui-evidence-summary.txt
           if-no-files-found: error
           retention-days: 14
+
+      - name: Report UI artifact upload
+        if: always()
+        shell: pwsh
+        run: |
+          "## UI artifact upload" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "Artifact ID: ${{ steps.upload-ui-screenshots.outputs.artifact-id }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "Artifact URL: ${{ steps.upload-ui-screenshots.outputs.artifact-url }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "Artifact digest: ${{ steps.upload-ui-screenshots.outputs.artifact-digest }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "The UI artifact digest is CI upload evidence and does not replace screenshot/status review." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append

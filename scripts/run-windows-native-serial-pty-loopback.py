@@ -97,6 +97,14 @@ def print_process_output(stdout: bytes, stderr: bytes) -> None:
         print(stderr.decode(errors="replace"), end="", file=sys.stderr)
 
 
+def write_serial_summary(path: str | None, lines: list[str]) -> None:
+    if not path:
+        return
+    summary_path = Path(path)
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def finish_process(process: subprocess.Popen, timeout: float, scenario: str):
     try:
         stdout, stderr = process.communicate(timeout=timeout)
@@ -292,6 +300,7 @@ def main() -> int:
     )
     com_name = os.environ.get("SVM_SERIAL_LOOPBACK_COM", "COM5")
     trace = os.environ.get("SVM_SERIAL_LOOPBACK_TRACE") == "1"
+    summary_path = os.environ.get("SVM_SERIAL_LOOPBACK_SUMMARY")
     scenarios = scenario_list_env("SVM_SERIAL_LOOPBACK_SCENARIOS", "normal,reopen,timeout,cancel")
     iterations = positive_int_env("SVM_SERIAL_LOOPBACK_ITERATIONS", 1, 100000)
     reopen_count = positive_int_env("SVM_SERIAL_LOOPBACK_REOPEN_COUNT", 1, 10000)
@@ -376,9 +385,26 @@ def main() -> int:
     finally:
         os.close(master_fd)
 
+    scenario_text = ",".join(scenarios)
+    print(f"python serial matrix ok pty={slave_path} com={com_name} scenarios={scenario_text} transactions={total_transactions}")
     print(
-        f"python serial matrix ok pty={slave_path} com={com_name} "
-        f"scenarios={','.join(scenarios)} transactions={total_transactions}"
+        "python serial matrix summary "
+        f"gate-status=passed classification=local-only-release-candidate-evidence "
+        f"scenarios={scenario_text} transactions={total_transactions}"
+    )
+    write_serial_summary(
+        summary_path,
+        [
+            "Native serial PTY matrix summary",
+            "GateStatus=passed",
+            "Classification=local-only-release-candidate-evidence",
+            f"Scenarios={scenario_text}",
+            f"Transactions={total_transactions}",
+            f"ComPort={com_name}",
+            f"Pty={slave_path}",
+            f"Executable={exe_path}",
+            f"WinePrefix={wineprefix}",
+        ],
     )
     return 0
 

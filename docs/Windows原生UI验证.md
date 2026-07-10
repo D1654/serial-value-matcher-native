@@ -16,9 +16,12 @@ UI 验收以 GitHub Actions 编译出的 Windows native artifact 为最终对象
 - 通信日志和标签页分割条拖动帧；
 - Phase 1 UI regression closure 状态；
 - `self-test.log`；
-- `ui-perf-test.log`。
+- `ui-perf-test.log`；
+- `ui-evidence-summary.txt`。
 
-性能判断必须从当前 release/artifact 的 `--ui-perf-test` 输出派生，不得临时写入没有基线依据的阈值。缺少截图、`capture-status.txt`、`self-test.log`、`ui-perf-test.log` 或 `window-info.txt` 时，不能把该次 UI capture 视为通过。
+性能判断必须从当前 release/artifact 的 `--ui-perf-test` 输出派生，不得临时写入没有基线依据的阈值。缺少截图、`capture-status.txt`、`self-test.log`、`ui-perf-test.log`、`window-info.txt` 或 `ui-evidence-summary.txt` 时，不能把该次 UI capture 视为通过。
+
+GitHub Actions UI artifact 上传使用显式文件路径、`if-no-files-found: error` 和上传前逐文件 evidence 断言。由于 wildcard 截图路径只能证明至少有截图匹配，workflow 还会检查必备 screenshot 文件、`capture-status.txt` 的 `PASS` 场景、`ui-perf ok` 和 `ui-evidence-summary.txt` 的 `GateStatus=passed`。上传成功后 job summary 会记录 `artifact-id`、`artifact-url` 和 `artifact-digest`；该 digest 是 CI 上传对象证据，不能替代截图/status/log 的人工与脚本复核。
 
 ## 自动检查
 
@@ -52,15 +55,15 @@ scripts/capture-windows-native-ui-wine.sh
 - `compact-tab-single.png`、`compact-tab-quick.png`、`compact-tab-file.png`、`compact-tab-scan.png`、`compact-tab-settings.png`；
 - 对应 `*-fast.png` 快速帧；
 - `resize-*.png`；
-- `dpi-*-window.png`；
 - `log-splitter-before.png`、`log-splitter-frame-01.png`、`log-splitter-frame-02.png`、`log-splitter-after.png`；
 - `capture-status.txt`；
 - `window-info.txt`；
 - `self-test.log`；
-- `ui-perf-test.log`。
+- `ui-perf-test.log`；
+- `ui-evidence-summary.txt`。
 
 截图不能全白，标签页必须实际切换成功；截图文件名和实际激活标签必须一致，例如 `compact-tab-scan.png` 必须停在“扫描”页。
-Wine 截图只用于冒烟检查，不作为最终视觉结论；中文字体、输入框文字基线、按钮和下拉框渲染必须以真实 Windows 截图为准。
+Wine 截图只用于冒烟检查，不作为最终视觉结论；DPI smoke 由 Windows UI capture artifact 执行，中文字体、输入框文字基线、按钮和下拉框渲染必须以真实 Windows 截图为准。
 
 ## 手工检查
 
@@ -127,6 +130,7 @@ Wine 截图只用于冒烟检查，不作为最终视觉结论；中文字体、
 - `capture-status.txt` 缺少 `PASS phase-1-ui-regression-closure`；
 - `self-test.log` 缺失或 self-test 未通过；
 - `ui-perf-test.log` 缺失或没有通过当前 release/artifact 派生的性能门禁；
-- UI capture artifact 缺少截图、`capture-status.txt` 或 `window-info.txt`；
+- `ui-evidence-summary.txt` 缺失或没有 `GateStatus=passed`；
+- UI capture artifact 缺少截图、`capture-status.txt`、`window-info.txt` 或 `ui-evidence-summary.txt`；
 - Release 包不应要求安装 .NET、Qt 或额外运行库；
 - self-test 失败。

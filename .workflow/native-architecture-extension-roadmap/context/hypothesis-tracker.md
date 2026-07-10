@@ -1,5 +1,5 @@
 # Hypothesis Tracker
-<!-- Updated after each brainstorm and interview answer. Updated: 2026-07-09T20:43:13+08:00 -->
+<!-- Updated after each brainstorm and interview answer. Updated: 2026-07-10T11:00:10+08:00 -->
 
 | ID | Hypothesis | Confidence | Source | Status |
 |----|------------|------------|--------|--------|
@@ -21,3 +21,4 @@
 | H16 | 危险写入、批量发送和自动化命令必须采用执行前显式确认、取消零副作用、提示失败 fail-closed、脱敏安全审计的本地安全边界。 | HIGH | Q8 + Phase 3 Task 04 | CONFIRMED |
 | H17 | 发布版本号必须从单一 CMake 元数据源派生，并通过 VERSIONINFO、package summary、README/docs 和测试门禁防止 release 漂移。 | HIGH | Phase 3 Task 05 | CONFIRMED |
 | H18 | `actions/upload-artifact` 的 `if-no-files-found: error` 不能单独证明多路径 evidence 列表完整，必须在上传前逐文件断言证据存在、非空和关键文本，同时把 unexpected DLL 与 docs 文件集一致性纳入 package summary。 | HIGH | Phase 3 Task 06 + DeepWiki task research | CONFIRMED |
+| H19 | UI capture 不能只依赖 screenshot wildcard 上传；必须用 `capture-status.txt`、`ui-perf-test.log`、`window-info.txt`、`ui-evidence-summary.txt` 和逐文件截图断言共同证明标签页、resize、DPI、分割条和性能基线有效。 | HIGH | Phase 3 Task 07 + DeepWiki task research | CONFIRMED |

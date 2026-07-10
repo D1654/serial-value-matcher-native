@@ -77,9 +77,11 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path $env:PACKAGE_ARTIFACT_DIR -Force | Out-Null
           $ptyLog = Join-Path $env:PACKAGE_ARTIFACT_DIR "serial-pty-matrix.txt"
+          $ptySummary = Join-Path $env:PACKAGE_ARTIFACT_DIR "serial-pty-matrix-summary.txt"
           $ptyLines = @(
             "Native serial PTY matrix",
             "Status: local-only release-candidate evidence",
+            "Gate status: documented-local-only",
             "CI blocking in this workflow: no PTY scenario is executed on the Windows runner.",
             "CI blocking evidence file: yes, this status note must exist and upload with the package artifact.",
             "Reason: windows-2022 does not expose POSIX PTYs or Wine dosdevices for the Linux/Wine loopback harness.",
@@ -93,6 +95,16 @@ jobs:
             "Expected local scenarios: normal, reopen, timeout, cancel, stress."
           )
           $ptyLines | Set-Content -Path $ptyLog -Encoding UTF8
+          $ptySummaryLines = @(
+            "Native serial PTY matrix summary",
+            "GateStatus=documented-local-only",
+            "Classification=local-only-release-candidate-evidence",
+            "CiExecutesPtyMatrix=no",
+            "CiBlockingEvidenceFile=yes",
+            "ExpectedScenarios=normal,reopen,timeout,cancel,stress",
+            "LocalCommand=SVM_SERIAL_LOOPBACK_SCENARIOS=normal,reopen,timeout,cancel,stress python3 scripts/run-windows-native-serial-pty-loopback.py"
+          )
+          $ptySummaryLines | Set-Content -Path $ptySummary -Encoding UTF8
           "## Native serial gate boundaries" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "| Gate | CI blocking? | Evidence |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
@@ -103,6 +115,7 @@ jobs:
           "| PTY normal/reopen/timeout/cancel/stress matrix | No, local-only RC evidence | serial-pty-matrix.txt records why CI does not execute it |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "PTY note file: $ptyLog" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "PTY summary file: $ptySummary" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "Run locally from a Linux/Wine environment before release candidates that touch serial I/O:" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "````bash" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           $ptyLines[11] | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
@@ -163,6 +176,7 @@ jobs:
           $uiPerfLog = "$env:PACKAGE_ARTIFACT_DIR/native-ui-perf-test.log"
           $backendLog = "$env:PACKAGE_ARTIFACT_DIR/phase-2-backend-regression.txt"
           $serialMatrixLog = "$env:PACKAGE_ARTIFACT_DIR/serial-pty-matrix.txt"
+          $serialMatrixSummary = "$env:PACKAGE_ARTIFACT_DIR/serial-pty-matrix-summary.txt"
 
           $requiredEvidence = @(
             @{ Path = $zipPath; Label = "package zip" },
@@ -172,7 +186,8 @@ jobs:
             @{ Path = $selfTestLog; Label = "native self-test log" },
             @{ Path = $uiPerfLog; Label = "native UI performance log" },
             @{ Path = $backendLog; Label = "Phase 2 backend regression closure" },
-            @{ Path = $serialMatrixLog; Label = "serial PTY matrix boundary note" }
+            @{ Path = $serialMatrixLog; Label = "serial PTY matrix boundary note" },
+            @{ Path = $serialMatrixSummary; Label = "serial PTY matrix summary" }
           )
           foreach ($evidence in $requiredEvidence) {
             Assert-RequiredEvidenceFile $evidence.Path $evidence.Label
@@ -202,6 +217,8 @@ jobs:
           Assert-FileContains $uiPerfLog "ui-perf ok" "native UI performance log"
           Assert-FileContains $backendLog "Status: CI-blocking native CTest passed before packaging." "Phase 2 backend regression closure"
           Assert-FileContains $serialMatrixLog "CI blocking in this workflow: no PTY scenario is executed" "serial PTY matrix boundary note"
+          Assert-FileContains $serialMatrixSummary "GateStatus=documented-local-only" "serial PTY matrix summary"
+          Assert-FileContains $serialMatrixSummary "ExpectedScenarios=normal,reopen,timeout,cancel,stress" "serial PTY matrix summary"
 
       - name: Check docs artifact consistency
         shell: pwsh
@@ -237,6 +254,7 @@ jobs:
             artifacts/windows-native/native-ui-perf-test.log
             artifacts/windows-native/phase-2-backend-regression.txt
             artifacts/windows-native/serial-pty-matrix.txt
+            artifacts/windows-native/serial-pty-matrix-summary.txt
           if-no-files-found: error
           retention-days: 14
 

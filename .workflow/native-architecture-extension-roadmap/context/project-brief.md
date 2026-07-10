@@ -1,6 +1,6 @@
 # Project Brief — Native Architecture Extension Roadmap
 
-Updated: 2026-07-09T20:43:13+08:00
+Updated: 2026-07-10T11:00:10+08:00
 
 ## 用户原始输入
 
@@ -75,3 +75,4 @@ Updated: 2026-07-09T20:43:13+08:00
 - Phase 3 Task 04 完成了危险操作确认与审计：定时发送、文件发送、命令序列写入、Modbus 广播写和寄存器写按策略分类；Win32 UI 在执行前 fail-closed 确认；确认/取消/提示失败均记录脱敏安全审计。build-codex 54/54、MinGW native 31/31、本地 MinGW package/Wine gate 均通过。
 - Phase 3 Task 05 完成了单一版本元数据源：`cmake/svm_version.cmake` 统一 CMake project version、Win32 VERSIONINFO、包审计 summary、README/发布文档和本地 MinGW 包名；当前 VERSIONINFO 已对齐 v1.0.4。build-codex 55/55、MinGW native 32/32、本地 MinGW package/Wine gate 均通过。
 - Phase 3 Task 06 完成了发布包、文档和依赖门禁加固：package audit 增加 unexpected DLL、必备文件、docs 文件集合/内容一致性；Windows package workflow 在 upload 前逐文件断言 zip/hash/summary/CTest/self-test/UI perf/backend/PTY 证据存在且内容有效；docs consistency 覆盖 artifact id/url/digest、`if-no-files-found: error` 和新增 summary 字段。build-codex 55/55、MinGW native 32/32、本地 MinGW package/Wine gate、docs negative smoke 和 forbidden DLL negative 均通过。
+- Phase 3 Task 07 完成了 UI 性能与串口证据门禁收尾：Windows UI capture workflow 增加逐截图/逐日志/逐 PASS token 断言、`ui-evidence-summary.txt` 和 UI artifact id/url/digest；Wine UI capture 增加稳定 summary 并修正紧凑标签/分割条点击偏移；PTY loopback 增加本地 summary 输出，package workflow 增加 `serial-pty-matrix-summary.txt`。Wine UI capture、PTY quick matrix、build-codex 55/55、MinGW native 32/32、本地 MinGW package/Wine gate 均通过。

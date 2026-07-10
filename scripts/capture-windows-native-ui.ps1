@@ -23,6 +23,9 @@ $repoRoot = Resolve-RepoRoot
 $buildPath = Join-Path $repoRoot $BuildDir
 $outputPath = Join-Path $repoRoot $OutputDir
 $captureStatusPath = Join-Path $outputPath "capture-status.txt"
+$selfTestLog = Join-Path $outputPath "self-test.log"
+$uiPerfLog = Join-Path $outputPath "ui-perf-test.log"
+$uiEvidenceSummaryPath = Join-Path $outputPath "ui-evidence-summary.txt"
 
 if ([string]::IsNullOrWhiteSpace($ExePath)) {
     $exeCandidates = @(
@@ -36,10 +39,16 @@ if (-not $ExePath -or -not (Test-Path $ExePath)) {
     throw "未找到 svm-native-win32.exe。BuildDir=$BuildDir Config=$Config"
 }
 
-if (Test-Path $outputPath) {
-    Remove-Item $outputPath -Recurse -Force
-}
 New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
+if (Test-Path $outputPath) {
+    $preservedLogNames = @("self-test.log")
+    if ($SkipUiPerfTest) {
+        $preservedLogNames += "ui-perf-test.log"
+    }
+    Get-ChildItem -Path $outputPath -File | Where-Object {
+        $preservedLogNames -notcontains $_.Name
+    } | Remove-Item -Force
+}
 New-Item -ItemType File -Path $captureStatusPath -Force | Out-Null
 
 function Add-CaptureStatus {
@@ -57,7 +66,78 @@ function Add-CaptureStatus {
     Add-Content -Path $captureStatusPath -Value $line -Encoding UTF8
 }
 
-$uiPerfLog = Join-Path $outputPath "ui-perf-test.log"
+function Write-UiEvidenceSummary {
+    $statusLines = if (Test-Path $captureStatusPath) {
+        @(Get-Content -Path $captureStatusPath -Encoding UTF8)
+    } else {
+        @()
+    }
+    $requiredStatusTerms = @(
+        "PASS default-window",
+        "PASS tab-set",
+        "PASS compact-tab-set",
+        "PASS resize-sweep",
+        "PASS dpi-smoke-100",
+        "PASS dpi-smoke-125",
+        "PASS splitter-drag-frames",
+        "PASS phase-1-ui-regression-closure",
+        "PASS capture-complete"
+    )
+    $missingStatusTerms = @()
+    $statusText = $statusLines -join "`n"
+    foreach ($term in $requiredStatusTerms) {
+        if (-not $statusText.Contains($term)) {
+            $missingStatusTerms += $term
+        }
+    }
+    $pngFiles = @(Get-ChildItem -Path $outputPath -Filter "*.png" -File -ErrorAction SilentlyContinue)
+    $selfTestText = if (Test-Path $selfTestLog) { Get-Content -Path $selfTestLog -Raw -Encoding UTF8 } else { "" }
+    $uiPerfText = if (Test-Path $uiPerfLog) { Get-Content -Path $uiPerfLog -Raw -Encoding UTF8 } else { "" }
+    $hasFailStatus = $statusLines | Where-Object { $_.StartsWith("FAIL ") } | Select-Object -First 1
+    $selfTestStatus = if ($selfTestText.Contains("ok")) { "passed" } else { "missing-or-failed" }
+    $uiPerfStatus = if ($uiPerfText.Contains("ui-perf ok")) { "passed" } else { "missing-or-failed" }
+    $gatePassed = $missingStatusTerms.Count -eq 0 -and
+        $null -eq $hasFailStatus -and
+        $pngFiles.Count -ge 18 -and
+        $selfTestStatus -eq "passed" -and
+        $uiPerfStatus -eq "passed" -and
+        (Test-Path (Join-Path $outputPath "window-info.txt"))
+
+    $summaryLines = @(
+        "UI evidence summary",
+        "GeneratedAt=$((Get-Date).ToString("o"))",
+        "Artifact=windows-native-ui-screenshots",
+        "BaselinePolicy=release-artifact-derived",
+        "PngCount=$($pngFiles.Count)",
+        "CaptureStatusFile=capture-status.txt",
+        "MissingStatusTerms=$(if ($missingStatusTerms.Count -eq 0) { 'none' } else { $missingStatusTerms -join ', ' })",
+        "HasFailStatus=$(if ($null -eq $hasFailStatus) { 'no' } else { 'yes' })",
+        "SelfTestStatus=$selfTestStatus",
+        "UiPerfStatus=$uiPerfStatus",
+        "WindowInfoPresent=$(if (Test-Path (Join-Path $outputPath "window-info.txt")) { 'yes' } else { 'no' })",
+        "RequiredScenarios=default-window,tab-set,compact-tab-set,resize-sweep,dpi-smoke-100,dpi-smoke-125,splitter-drag-frames,phase-1-ui-regression-closure,capture-complete",
+        "GateStatus=$(if ($gatePassed) { 'passed' } else { 'failed' })"
+    )
+    $summaryLines | Set-Content -Path $uiEvidenceSummaryPath -Encoding UTF8
+}
+
+if (-not (Test-Path $selfTestLog) -or (Get-Item $selfTestLog).Length -le 0) {
+    $previousSelfTestLog = [Environment]::GetEnvironmentVariable("SVM_NATIVE_SELF_TEST_LOG", "Process")
+    [Environment]::SetEnvironmentVariable("SVM_NATIVE_SELF_TEST_LOG", $selfTestLog, "Process")
+    try {
+        Write-Host "运行 native self-test..."
+        $selfTest = Start-Process -FilePath $ExePath -ArgumentList "--self-test" -Wait -PassThru
+        if ($selfTest.ExitCode -ne 0) {
+            throw "native self-test 失败，退出码：$($selfTest.ExitCode)"
+        }
+        Add-CaptureStatus -Scenario "self-test" -Detail "log=self-test.log"
+    } finally {
+        [Environment]::SetEnvironmentVariable("SVM_NATIVE_SELF_TEST_LOG", $previousSelfTestLog, "Process")
+    }
+} else {
+    Add-CaptureStatus -Scenario "self-test" -Detail "preexisting-log=self-test.log"
+}
+
 if (-not $SkipUiPerfTest) {
     $previousSelfTestLog = [Environment]::GetEnvironmentVariable("SVM_NATIVE_SELF_TEST_LOG", "Process")
     [Environment]::SetEnvironmentVariable("SVM_NATIVE_SELF_TEST_LOG", $uiPerfLog, "Process")
@@ -73,9 +153,11 @@ if (-not $SkipUiPerfTest) {
     }
 } else {
     Write-Host "跳过 UI 性能门禁：调用方已完成独立验证。"
-    "UI 性能门禁已由 workflow 独立步骤执行，本截图脚本跳过重复执行。" |
-        Set-Content -Path $uiPerfLog -Encoding UTF8
-    Add-CaptureStatus -Scenario "ui-perf-test" -Detail "skipped-by-caller"
+    if (-not (Test-Path $uiPerfLog)) {
+        Add-CaptureStatus -Scenario "ui-perf-test" -Status "FAIL" -Detail "missing-preexisting-log"
+        throw "SkipUiPerfTest 要求调用方预先生成 ui-perf-test.log。"
+    }
+    Add-CaptureStatus -Scenario "ui-perf-test" -Detail "preexisting-log=ui-perf-test.log"
 }
 
 try {
@@ -733,6 +815,7 @@ try {
     Add-CaptureStatus -Scenario "capture" -Status "FAIL" -Detail $_.Exception.Message
     throw
 } finally {
+    Write-UiEvidenceSummary
     if ($process -and -not $process.HasExited) {
         Stop-Process -Id $process.Id -Force
     }

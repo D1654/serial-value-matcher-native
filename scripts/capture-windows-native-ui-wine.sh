@@ -75,6 +75,74 @@ add_capture_status() {
     fi
 }
 
+write_ui_evidence_summary() {
+    local summary_file="$output_dir/ui-evidence-summary.txt"
+    local status_file="$output_dir/capture-status.txt"
+    local status_text=""
+    if [[ -f "$status_file" ]]; then
+        status_text="$(cat "$status_file")"
+    fi
+    local missing=()
+    local required_terms=(
+        "PASS default-window"
+        "PASS tab-set"
+        "PASS compact-tab-set"
+        "PASS resize-sweep"
+        "PASS splitter-drag-frames"
+        "PASS phase-1-ui-regression-closure"
+        "PASS capture-complete"
+    )
+    for term in "${required_terms[@]}"; do
+        if ! grep -Fq "$term" "$status_file" 2>/dev/null; then
+            missing+=("$term")
+        fi
+    done
+
+    local png_count
+    png_count="$(find "$output_dir" -maxdepth 1 -type f -name "*.png" | wc -l | tr -d " ")"
+    local self_test_status="missing-or-failed"
+    local ui_perf_status="missing-or-failed"
+    if grep -Fq "ok" "$output_dir/self-test.log" 2>/dev/null; then
+        self_test_status="passed"
+    fi
+    if grep -Fq "ui-perf ok" "$output_dir/ui-perf-test.log" 2>/dev/null; then
+        ui_perf_status="passed"
+    fi
+    local has_fail="no"
+    if printf "%s\n" "$status_text" | grep -Fq "FAIL "; then
+        has_fail="yes"
+    fi
+    local window_info_present="no"
+    if [[ -s "$output_dir/window-info.txt" ]]; then
+        window_info_present="yes"
+    fi
+    local missing_text="none"
+    if [[ "${#missing[@]}" -gt 0 ]]; then
+        local IFS=","
+        missing_text="${missing[*]}"
+    fi
+    local gate_status="failed"
+    if [[ "${#missing[@]}" -eq 0 && "$has_fail" == "no" && "$png_count" -ge 18 && "$self_test_status" == "passed" && "$ui_perf_status" == "passed" && "$window_info_present" == "yes" ]]; then
+        gate_status="passed"
+    fi
+
+    {
+        echo "UI evidence summary"
+        echo "GeneratedAt=$(date -Is)"
+        echo "Artifact=windows-native-ui-screenshots"
+        echo "BaselinePolicy=release-artifact-derived"
+        echo "PngCount=$png_count"
+        echo "CaptureStatusFile=capture-status.txt"
+        echo "MissingStatusTerms=$missing_text"
+        echo "HasFailStatus=$has_fail"
+        echo "SelfTestStatus=$self_test_status"
+        echo "UiPerfStatus=$ui_perf_status"
+        echo "WindowInfoPresent=$window_info_present"
+        echo "RequiredScenarios=default-window,tab-set,compact-tab-set,resize-sweep,splitter-drag-frames,phase-1-ui-regression-closure,capture-complete"
+        echo "GateStatus=$gate_status"
+    } >"$summary_file"
+}
+
 wineboot -u >"$output_dir/wineboot.log" 2>&1
 {
     for font_name in \
@@ -344,7 +412,7 @@ capture_tab_set() {
     local tabs_y=$((margin + log_height + splitter_height))
     local tab_y_adjust="${SVM_WINE_UI_TAB_Y_ADJUST:-0}"
     if (( compact == 1 )); then
-        tab_y_adjust="${SVM_WINE_UI_COMPACT_TAB_Y_ADJUST:-20}"
+        tab_y_adjust="${SVM_WINE_UI_COMPACT_TAB_Y_ADJUST:--45}"
     fi
     local tab_y=$((tabs_y + 14 + tab_y_adjust))
     printf "%s X=%s Y=%s WIDTH=%s HEIGHT=%s compact=%s tight=%s tabs_y=%s tab_y=%s adjust=%s\n" "$prefix" "$X" "$Y" "$WIDTH" "$HEIGHT" "$compact" "$tight" "$tabs_y" "$tab_y" "$tab_y_adjust" >> "$output_dir/tab-clicks.txt"
@@ -353,7 +421,10 @@ capture_tab_set() {
     for index in "${!tab_names[@]}"; do
         local tab_x=$((margin + tab_centers[index]))
         xdotool windowactivate --sync "$window_id" >/dev/null 2>&1 || true
-        xdotool mousemove --sync "$((X + tab_x))" "$((Y + tab_y))" click 1
+        for y_delta in 0 -18 8; do
+            xdotool mousemove --sync "$((X + tab_x))" "$((Y + tab_y + y_delta))" click 1
+            sleep 0.12
+        done
         if [[ "$fast_frames" != "0" ]]; then
             sleep "$fast_delay"
             capture_checked_screen "$output_dir/${prefix}${tab_names[$index]}-fast.png"
@@ -430,7 +501,7 @@ capture_log_splitter_movement() {
     if (( log_height < 1 )); then
         log_height=1
     fi
-    local splitter_y_adjust="${SVM_WINE_UI_SPLITTER_Y_ADJUST:-0}"
+    local splitter_y_adjust="${SVM_WINE_UI_SPLITTER_Y_ADJUST:--45}"
     local splitter_y=$((Y + margin + log_height + splitter_height / 2 + splitter_y_adjust))
     local splitter_x=$((X + WIDTH / 2))
 
@@ -473,8 +544,10 @@ printf "%s\n" "PASS capture-complete" >> "$output_dir/capture-status.txt"
 ' bash "$exe_path" "$output_dir" "$window_name" "$stabilize_seconds" "$capture_tabs" "$capture_compact" "$capture_fast_frames" "$fast_frame_delay" "$ui_perf_log_windows" "$capture_resize_sweep"
 
 echo "Wine UI 截图完成：$output_dir/root.png"
+write_ui_evidence_summary
 echo "捕获状态：$output_dir/capture-status.txt"
 echo "窗口信息：$output_dir/window-info.txt"
 echo "self-test 日志：$output_dir/self-test.log"
 echo "UI 性能日志：$output_dir/ui-perf-test.log"
+echo "UI evidence 摘要：$output_dir/ui-evidence-summary.txt"
 echo "UI 基线说明：Wine 截图用于辅助诊断，最终视觉结论以 GitHub Actions Windows UI artifact 和真实 Windows 截图为准。"
