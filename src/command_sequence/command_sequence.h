@@ -3,6 +3,7 @@
 #include "core/byte_buffer.h"
 #include "core/modbus_scan_executor_core.h"
 #include "core/text.h"
+#include "transport/serial_session.h"
 #include "transport/serial_write_queue.h"
 
 #include <cstddef>
@@ -138,7 +139,7 @@ struct CommandSequenceExecutionResult {
 };
 
 struct CommandSequenceExecutionContext {
-    transport::SerialWritePort* serialWriteTransport = nullptr;
+    transport::SerialWriteScheduler* serialWriteScheduler = nullptr;
     core::modbus::RtuTransport* modbusTransport = nullptr;
     std::function<std::optional<core::ByteBuffer>(int timeoutMs)> waitForResponse;
     std::function<void(int durationMs)> sleepForMs;

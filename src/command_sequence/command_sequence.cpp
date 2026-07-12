@@ -1,6 +1,7 @@
 #include "command_sequence/command_sequence.h"
 
 #include <algorithm>
+#include <chrono>
 #include <limits>
 #include <type_traits>
 #include <utility>
@@ -36,6 +37,68 @@ Text toText(int value) {
 
 Text boolText(bool value) {
     return value ? "true" : "false";
+}
+
+const char* serialOperationStatusName(transport::SerialOperationStatus status) noexcept {
+    switch (status) {
+    case transport::SerialOperationStatus::Accepted:
+        return "accepted";
+    case transport::SerialOperationStatus::Succeeded:
+        return "succeeded";
+    case transport::SerialOperationStatus::RejectedInvalid:
+        return "rejected_invalid";
+    case transport::SerialOperationStatus::RejectedFull:
+        return "rejected_full";
+    case transport::SerialOperationStatus::RejectedClosed:
+        return "rejected_closed";
+    case transport::SerialOperationStatus::Failed:
+        return "failed";
+    case transport::SerialOperationStatus::Timeout:
+        return "timeout";
+    case transport::SerialOperationStatus::Cancelled:
+        return "cancelled";
+    case transport::SerialOperationStatus::Disconnected:
+        return "disconnected";
+    }
+    return "unknown";
+}
+
+const char* serialErrorCategoryName(transport::SerialErrorCategory category) noexcept {
+    switch (category) {
+    case transport::SerialErrorCategory::None:
+        return "none";
+    case transport::SerialErrorCategory::InvalidInput:
+        return "invalid_input";
+    case transport::SerialErrorCategory::SessionClosed:
+        return "session_closed";
+    case transport::SerialErrorCategory::QueueFull:
+        return "queue_full";
+    case transport::SerialErrorCategory::Timeout:
+        return "timeout";
+    case transport::SerialErrorCategory::Cancelled:
+        return "cancelled";
+    case transport::SerialErrorCategory::Disconnected:
+        return "disconnected";
+    case transport::SerialErrorCategory::NativeFailure:
+        return "native_failure";
+    case transport::SerialErrorCategory::IoFailure:
+        return "io_failure";
+    }
+    return "unknown";
+}
+
+const char* serialDeadlineStatusName(transport::SerialDeadlineStatus status) noexcept {
+    switch (status) {
+    case transport::SerialDeadlineStatus::NotSet:
+        return "not_set";
+    case transport::SerialDeadlineStatus::Pending:
+        return "pending";
+    case transport::SerialDeadlineStatus::Met:
+        return "met";
+    case transport::SerialDeadlineStatus::Expired:
+        return "expired";
+    }
+    return "unknown";
 }
 
 bool containsSubsequence(const ByteBuffer& haystack, const ByteBuffer& needle) {
@@ -253,24 +316,33 @@ CommandStepExecutionResult runSerialWrite(
     std::size_t stepIndex,
     const SerialWriteCommand& command,
     CommandSequenceExecutionContext& context,
-    std::optional<transport::SerialWriteResult>& lastSerialWriteResult) {
+    std::optional<transport::SerialWriteAdmissionResult>& lastSerialWriteResult) {
     auto result = makeStepResult(sequence, step, stepIndex, CommandExecutionStatus::Failed, {});
     result.metadata["payload_bytes"] = toText(command.payload.size());
     result.metadata["timeout_ms"] = toText(command.timeoutMs);
-    result.metadata["backend"] = "serial_write_transport";
+    result.metadata["backend"] = "serial_write_scheduler";
 
-    if (!context.serialWriteTransport) {
+    if (!context.serialWriteScheduler) {
         result.message = "Serial write transport backend is not available.";
         return result;
     }
 
-    auto writeResult = context.serialWriteTransport->enqueueWrite(command.payload, command.timeoutMs);
+    transport::SerialDeadline deadline{
+        .expiresAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(command.timeoutMs),
+    };
+    auto writeResult = context.serialWriteScheduler->enqueueWrite(command.payload, deadline);
     lastSerialWriteResult = writeResult;
-    result.metadata["serial_request_id"] = toText(writeResult.requestId);
-    result.metadata["serial_status"] = transport::serialWriteResultStatusName(writeResult.status);
+    result.metadata["serial_request_id"] = std::to_string(writeResult.operation.requestId);
+    result.metadata["serial_generation"] = std::to_string(writeResult.operation.generation);
+    result.metadata["serial_status"] = serialOperationStatusName(writeResult.status);
+    result.metadata["serial_error_category"] = serialErrorCategoryName(writeResult.error.category);
+    result.metadata["deadline_status"] = serialDeadlineStatusName(writeResult.deadlineStatus);
+    result.metadata["deadline_set"] = boolText(writeResult.operation.deadline.set());
     result.metadata["byte_count"] = toText(writeResult.byteCount);
     result.status = writeResult.accepted() ? CommandExecutionStatus::Completed : CommandExecutionStatus::Failed;
-    result.message = std::move(writeResult.message);
+    if (!writeResult.accepted()) {
+        result.message = "Serial write request was rejected.";
+    }
     return result;
 }
 
@@ -408,7 +480,7 @@ CommandStepExecutionResult runAssertion(
     const CommandStep& step,
     std::size_t stepIndex,
     const AssertionCommand& command,
-    const std::optional<transport::SerialWriteResult>& lastSerialWriteResult,
+    const std::optional<transport::SerialWriteAdmissionResult>& lastSerialWriteResult,
     const std::optional<ByteBuffer>& lastResponse,
     const std::optional<core::modbus::ScanExecutionResult>& lastModbusResult) {
     auto result = makeStepResult(sequence, step, stepIndex, CommandExecutionStatus::Completed, {});
@@ -448,7 +520,7 @@ CommandStepExecutionResult runStep(
     const CommandStep& step,
     std::size_t stepIndex,
     CommandSequenceExecutionContext& context,
-    std::optional<transport::SerialWriteResult>& lastSerialWriteResult,
+    std::optional<transport::SerialWriteAdmissionResult>& lastSerialWriteResult,
     std::optional<ByteBuffer>& lastResponse,
     std::optional<core::modbus::ScanExecutionResult>& lastModbusResult) {
     return std::visit(
@@ -630,7 +702,7 @@ CommandSequenceExecutionResult executeCommandSequence(
         return result;
     }
 
-    std::optional<transport::SerialWriteResult> lastSerialWriteResult;
+    std::optional<transport::SerialWriteAdmissionResult> lastSerialWriteResult;
     std::optional<ByteBuffer> lastResponse;
     std::optional<core::modbus::ScanExecutionResult> lastModbusResult;
 

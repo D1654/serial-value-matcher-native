@@ -1,6 +1,7 @@
 #include "command_sequence/command_sequence.h"
 
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <map>
@@ -104,8 +105,121 @@ bool hasMetadataValue(
     return found != metadata.end() && found->second == expected;
 }
 
+class FakeSerialWriteScheduler final : public svm::transport::SerialWriteScheduler {
+public:
+    struct PendingWrite {
+        ByteBuffer payload;
+        svm::transport::SerialDeadline deadline;
+    };
+
+    explicit FakeSerialWriteScheduler(std::size_t capacity)
+        : capacity_(capacity) {
+    }
+
+    svm::transport::SerialWriteAdmissionResult enqueueWrite(
+        std::vector<std::uint8_t> payload,
+        svm::transport::SerialDeadline deadline) override {
+        if (payload.empty()) {
+            return rejected(svm::transport::SerialOperationStatus::RejectedInvalid, svm::transport::SerialErrorCategory::InvalidInput);
+        }
+        if (pending_.size() >= capacity_) {
+            return rejected(svm::transport::SerialOperationStatus::RejectedFull, svm::transport::SerialErrorCategory::QueueFull);
+        }
+
+        const svm::transport::SerialOperationId requestId = nextRequestId_++;
+        const std::size_t byteCount = payload.size();
+        pending_.push_back({std::move(payload), deadline});
+        return admission(requestId, deadline, byteCount);
+    }
+
+    std::vector<svm::transport::SerialTerminalResult> cancelPendingWrites() override {
+        std::vector<svm::transport::SerialTerminalResult> results;
+        results.reserve(pending_.size());
+        while (!pending_.empty()) {
+            const std::size_t byteCount = pending_.front().payload.size();
+            pending_.erase(pending_.begin());
+            results.push_back({
+                .operation = {
+                    .requestId = nextRequestId_++,
+                    .generation = generation_,
+                    .kind = svm::transport::SerialOperationKind::Write,
+                },
+                .status = svm::transport::SerialOperationStatus::Cancelled,
+                .byteCount = byteCount,
+                .endpoint = "fake://command-sequence-serial",
+                .error = {.category = svm::transport::SerialErrorCategory::Cancelled},
+            });
+        }
+        return results;
+    }
+
+    std::vector<svm::transport::SerialTerminalResult> takeCompletedWrites() override {
+        return {};
+    }
+
+    svm::transport::SerialWriteQueueSnapshot writeQueueSnapshot() const override {
+        return {
+            .capacity = capacity_,
+            .pendingCount = pending_.size(),
+            .nextRequestId = nextRequestId_,
+        };
+    }
+
+    [[nodiscard]] std::size_t pendingCount() const noexcept {
+        return pending_.size();
+    }
+
+    [[nodiscard]] bool empty() const noexcept {
+        return pending_.empty();
+    }
+
+    [[nodiscard]] const PendingWrite& front() const {
+        return pending_.front();
+    }
+
+private:
+    svm::transport::SerialWriteAdmissionResult admission(
+        svm::transport::SerialOperationId requestId,
+        svm::transport::SerialDeadline deadline,
+        std::size_t byteCount) const {
+        return {
+            .operation = {
+                .requestId = requestId,
+                .generation = generation_,
+                .kind = svm::transport::SerialOperationKind::Write,
+                .deadline = deadline,
+            },
+            .status = svm::transport::SerialOperationStatus::Accepted,
+            .deadlineStatus = deadline.set()
+                ? svm::transport::SerialDeadlineStatus::Pending
+                : svm::transport::SerialDeadlineStatus::NotSet,
+            .byteCount = byteCount,
+            .endpoint = "fake://command-sequence-serial",
+        };
+    }
+
+    svm::transport::SerialWriteAdmissionResult rejected(
+        svm::transport::SerialOperationStatus status,
+        svm::transport::SerialErrorCategory category) const {
+        return {
+            .operation = {
+                .generation = generation_,
+                .kind = svm::transport::SerialOperationKind::Write,
+            },
+            .status = status,
+            .endpoint = "fake://command-sequence-serial",
+            .error = {.category = category},
+        };
+    }
+
+    std::size_t capacity_ = 0;
+    std::vector<PendingWrite> pending_;
+    svm::transport::SerialSessionGeneration generation_ = 9;
+    svm::transport::SerialOperationId nextRequestId_ = 1;
+};
+
 void validSequenceUsesExistingBackendsAndRecordsEvidence() {
-    svm::transport::SerialWriteQueue queue(4);
+    FakeSerialWriteScheduler scheduler(4);
     FakeModbusTransport transport;
     int waitTimeoutMs = 0;
     int sleptMs = 0;
@@ -123,7 +237,7 @@ void validSequenceUsesExistingBackendsAndRecordsEvidence() {
     };
 
     CommandSequenceExecutionContext context;
-    context.serialWriteTransport = &queue;
+    context.serialWriteScheduler = &scheduler;
     context.modbusTransport = &transport;
     context.waitForResponse = [&waitTimeoutMs](int timeoutMs) -> std::optional<ByteBuffer> {
         waitTimeoutMs = timeoutMs;
@@ -144,10 +258,17 @@ void validSequenceUsesExistingBackendsAndRecordsEvidence() {
     assert(result.evidence.size() == sequence.steps.size());
     assert(result.evidence.back().type == CommandEvidenceEventType::AssertionResult);
     assert(hasMetadataValue(result.evidence.back().metadata, "passed", "true"));
-    assert(hasMetadataValue(result.steps.front().metadata, "backend", "serial_write_transport"));
-    assert(queue.pendingCount() == 1);
-    assert(queue.peek()->payload == ByteBuffer({0x10, 0x02}));
-    assert(queue.peek()->timeoutMs == 200);
+    assert(hasMetadataValue(result.steps.front().metadata, "backend", "serial_write_scheduler"));
+    assert(hasMetadataValue(result.steps.front().metadata, "serial_request_id", "1"));
+    assert(hasMetadataValue(result.steps.front().metadata, "serial_generation", "9"));
+    assert(hasMetadataValue(result.steps.front().metadata, "serial_status", "accepted"));
+    assert(hasMetadataValue(result.steps.front().metadata, "serial_error_category", "none"));
+    assert(hasMetadataValue(result.steps.front().metadata, "deadline_status", "pending"));
+    assert(hasMetadataValue(result.steps.front().metadata, "deadline_set", "true"));
+    assert(hasMetadataValue(result.steps.front().metadata, "byte_count", "2"));
+    assert(scheduler.pendingCount() == 1);
+    assert(scheduler.front().payload == ByteBuffer({0x10, 0x02}));
+    assert(scheduler.front().deadline.set());
     assert(waitTimeoutMs == 300);
     assert(sleptMs == 5);
     assert(transport.requests.size() == 1);
@@ -180,7 +301,7 @@ void waitForResponseTimeoutStopsSequence() {
 }
 
 void cancellationStopsBeforeDispatchingBackendWork() {
-    svm::transport::SerialWriteQueue queue(4);
+    FakeSerialWriteScheduler scheduler(4);
     CommandSequence sequence;
     sequence.id = "seq-cancel";
     sequence.steps = {
@@ -188,7 +309,7 @@ void cancellationStopsBeforeDispatchingBackendWork() {
     };
 
     CommandSequenceExecutionContext context;
-    context.serialWriteTransport = &queue;
+    context.serialWriteScheduler = &scheduler;
     context.shouldCancel = [] {
         return true;
     };
@@ -198,7 +319,7 @@ void cancellationStopsBeforeDispatchingBackendWork() {
     assert(result.status == CommandExecutionStatus::Cancelled);
     assert(result.steps.size() == 1);
     assert(result.steps[0].status == CommandExecutionStatus::Cancelled);
-    assert(queue.empty());
+    assert(scheduler.empty());
 }
 
 void assertionFailureStopsSequenceAndRecordsResult() {
@@ -225,7 +346,7 @@ void assertionFailureStopsSequenceAndRecordsResult() {
 }
 
 void unsafeCommandIsRejectedBeforeBackendWork() {
-    svm::transport::SerialWriteQueue queue(4);
+    FakeSerialWriteScheduler scheduler(4);
     FakeModbusTransport transport;
     CommandSequence sequence;
     sequence.id = "seq-unsafe";
@@ -241,7 +362,7 @@ void unsafeCommandIsRejectedBeforeBackendWork() {
     };
 
     CommandSequenceExecutionContext context;
-    context.serialWriteTransport = &queue;
+    context.serialWriteScheduler = &scheduler;
     context.modbusTransport = &transport;
 
     const auto validation = svm::command_sequence::validateCommandSequence(sequence);
@@ -252,7 +373,7 @@ void unsafeCommandIsRejectedBeforeBackendWork() {
     assert(result.status == CommandExecutionStatus::RejectedUnsafe);
     assert(result.steps.empty());
     assert(result.evidence.empty());
-    assert(queue.empty());
+    assert(scheduler.empty());
     assert(transport.requests.empty());
 }
 
