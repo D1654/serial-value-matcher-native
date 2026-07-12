@@ -1,7 +1,7 @@
 #include "native_storage/native_session_store.h"
 #include "native_storage/native_store_files.h"
 #include "native_storage/native_store_record_io.h"
-#include "storage/session_store_port.h"
+#include "native_storage/session_store_port.h"
 
 #ifdef NDEBUG
 #undef NDEBUG

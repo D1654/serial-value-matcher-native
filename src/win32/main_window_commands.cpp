@@ -107,10 +107,10 @@ std::optional<LRESULT> NativeMainWindow::handleSerialControlCommand(WORD command
         if (notificationCode == CBN_SELCHANGE) {
             updateRtsControlState();
             saveUiPreferences();
-            if ((!serialPort_.isOpen()
+            if ((!serialTransport_.isOpen()
                     && selectedComboData(flowControlCombo_, static_cast<LPARAM>(SerialFlowControl::None))
                         == static_cast<LPARAM>(SerialFlowControl::HardwareRtsCts))
-                || (serialPort_.isOpen() && serialPort_.usesHardwareRtsCts())) {
+                || (serialTransport_.isOpen() && serialTransport_.usesHardwareRtsCts())) {
                 setStatus(tx(T::RtsHardwareManaged));
             }
         }

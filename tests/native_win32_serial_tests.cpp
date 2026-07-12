@@ -1,9 +1,11 @@
 #include "win32/win32_serial_types.h"
 #if defined(_WIN32)
+#include "transport/serial_transport.h"
 #include "win32/win32_serial_port.h"
 #endif
 
 #include <cassert>
+#include <concepts>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -123,13 +125,15 @@ void translatesCommonWin32ErrorsToActionableChinese() {
 #if defined(_WIN32)
 void closedPortAsyncWriteFailsWithoutQueueing() {
     svm::win32::Win32SerialPort port;
-    const auto result = port.enqueueWrite(std::vector<std::uint8_t>{0x01});
+    static_assert(std::derived_from<svm::win32::Win32SerialPort, svm::transport::SerialTransport>);
+    svm::transport::SerialTransport& transport = port;
+    const auto result = transport.enqueueWrite(std::vector<std::uint8_t>{0x01});
     assert(result.status == svm::transport::SerialWriteResultStatus::Failed);
     assert(!result.message.empty());
 
-    const auto snapshot = port.writeQueueSnapshot();
+    const auto snapshot = transport.writeQueueSnapshot();
     assert(snapshot.pendingCount == 0);
-    assert(port.takeCompletedWrites().empty());
+    assert(transport.takeCompletedWrites().empty());
 }
 #endif
 

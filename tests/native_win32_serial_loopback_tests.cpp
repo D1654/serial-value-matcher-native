@@ -38,7 +38,7 @@ bool parsePositiveIntEnv(const char* name, int defaultValue, int maxValue, int& 
 }
 
 std::vector<std::uint8_t> readExpectedBytes(
-    svm::win32::Win32SerialPort& port,
+    svm::transport::SerialTransport& port,
     std::size_t byteCount,
     int timeoutMs) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
@@ -72,7 +72,7 @@ std::vector<std::uint8_t> readExpectedBytes(
 }
 
 bool transact(
-    svm::win32::Win32SerialPort& port,
+    svm::transport::SerialTransport& port,
     const std::vector<std::uint8_t>& request,
     const std::vector<std::uint8_t>& expected,
     int reopenIndex,
@@ -105,7 +105,7 @@ bool transact(
     return true;
 }
 
-bool waitForNoData(svm::win32::Win32SerialPort& port, int timeoutMs, const char* scenarioName) {
+bool waitForNoData(svm::transport::SerialTransport& port, int timeoutMs, const char* scenarioName) {
     if (port.waitForReadyRead(timeoutMs)) {
         const std::vector<std::uint8_t> unexpected = port.readAvailable(260);
         std::cerr << "unexpected ready-read scenario=" << scenarioName << " bytes=";

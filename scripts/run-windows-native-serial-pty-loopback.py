@@ -403,6 +403,7 @@ def main() -> int:
             f"ComPort={com_name}",
             f"Pty={slave_path}",
             f"Executable={exe_path}",
+            "Transport=serial-adapter-contract",
             f"WinePrefix={wineprefix}",
         ],
     )

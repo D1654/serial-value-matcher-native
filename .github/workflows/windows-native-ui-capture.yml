@@ -6,9 +6,12 @@ on:
     paths:
       - ".github/workflows/windows-native-ui-capture.yml"
       - "scripts/capture-windows-native-ui.ps1"
+      - "scripts/run-windows-native-serial-pty-loopback.py"
       - "src/win32/**"
+      - "src/transport/**"
       - "src/core/**"
       - "src/native_storage/**"
+      - "tests/**"
       - "CMakeLists.txt"
 
 permissions:
@@ -34,8 +37,6 @@ jobs:
           cmake -S . -B $env:BUILD_DIR
           -G "Visual Studio 17 2022"
           -A x64
-          -DSVM_BUILD_QT_APP=OFF
-          -DSVM_BUILD_QT_TESTS=OFF
           -DSVM_BUILD_WIN32_APP=ON
 
       - name: Build Release

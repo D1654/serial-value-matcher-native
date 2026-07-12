@@ -95,8 +95,6 @@ UI artifact 还应确认：
 
 ```powershell
 cmake -S . -B build-windows-native -G "Visual Studio 17 2022" -A x64 `
-  -DSVM_BUILD_QT_APP=OFF `
-  -DSVM_BUILD_QT_TESTS=OFF `
   -DSVM_BUILD_WIN32_APP=ON
 
 cmake --build build-windows-native --config Release --parallel 1

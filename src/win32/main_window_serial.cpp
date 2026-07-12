@@ -126,7 +126,7 @@ void NativeMainWindow::saveCurrentSerialProfile() {
 }
 
 void NativeMainWindow::toggleConnection() {
-    if (serialPort_.isOpen()) {
+    if (serialTransport_.isOpen()) {
         disconnectSerial();
         return;
     }
@@ -134,7 +134,7 @@ void NativeMainWindow::toggleConnection() {
 }
 
 void NativeMainWindow::connectSerial() {
-    if (serialPort_.isOpen()) {
+    if (serialTransport_.isOpen()) {
         setStatus(tx(T::AlreadyConnected));
         return;
     }
@@ -146,8 +146,8 @@ void NativeMainWindow::connectSerial() {
         return;
     }
 
-    if (!serialPort_.open(options)) {
-        setStatus(utf8ToWide(serialPort_.lastErrorText()));
+    if (!serialTransport_.open(options)) {
+        setStatus(utf8ToWide(serialTransport_.lastErrorText()));
         return;
     }
 
@@ -155,7 +155,7 @@ void NativeMainWindow::connectSerial() {
     disconnectAfterModbusScan_ = false;
     timedSendConfirmed_ = false;
     KillTimer(window_, IDT_RECONNECT);
-    appendLog(uiString(T::SystemConnectedPrefix) + utf8ToWide(serialPort_.endpoint()));
+    appendLog(uiString(T::SystemConnectedPrefix) + utf8ToWide(serialTransport_.endpoint()));
     updateConnectionButtonState();
     updateRtsControlState();
     saveCurrentSerialProfile();
@@ -174,14 +174,14 @@ void NativeMainWindow::disconnectSerial() {
 }
 
 void NativeMainWindow::closeSerialPort(const std::wstring& statusText) {
-    if (!serialPort_.isOpen()) {
+    if (!serialTransport_.isOpen()) {
         return;
     }
     KillTimer(window_, IDT_TIMED_SEND);
     timedSendConfirmed_ = false;
     stopFileSend({});
-    const std::wstring endpoint = utf8ToWide(serialPort_.endpoint());
-    serialPort_.close();
+    const std::wstring endpoint = utf8ToWide(serialTransport_.endpoint());
+    serialTransport_.close();
     clearPendingSerialWrites();
     appendLog(uiString(T::SystemDisconnectedPrefix) + endpoint);
     updateConnectionButtonState();
@@ -191,8 +191,8 @@ void NativeMainWindow::closeSerialPort(const std::wstring& statusText) {
 }
 
 void NativeMainWindow::shutdownSerialPort() {
-    if (serialPort_.isOpen()) {
-        serialPort_.close();
+    if (serialTransport_.isOpen()) {
+        serialTransport_.close();
     }
     timedSendConfirmed_ = false;
     clearPendingSerialWrites();
@@ -264,7 +264,7 @@ void NativeMainWindow::applySerialLineControl(WORD controlId) {
         setStatus(serialIoBusyStatus());
         return;
     }
-    if (!serialPort_.isOpen()) {
+    if (!serialTransport_.isOpen()) {
         setStatus(std::wstring(controlId == IDC_DTR_CHECK ? tx(T::DtrAppliedPrefix) : tx(T::RtsAppliedPrefix))
             + (enabled ? tx(T::SignalEnabledSuffix) : tx(T::SignalDisabledSuffix))
             + L" \u4E0B\u6B21\u8FDE\u63A5\u751F\u6548\u3002");
@@ -273,12 +273,12 @@ void NativeMainWindow::applySerialLineControl(WORD controlId) {
 
     bool ok = false;
     if (controlId == IDC_DTR_CHECK) {
-        ok = serialPort_.setDataTerminalReady(enabled);
+        ok = serialTransport_.setDataTerminalReady(enabled);
         if (ok) {
             reconnectState_.updateDataTerminalReady(enabled);
         }
     } else {
-        ok = serialPort_.setRequestToSend(enabled);
+        ok = serialTransport_.setRequestToSend(enabled);
         if (ok) {
             reconnectState_.updateRequestToSend(enabled);
         }
@@ -287,7 +287,7 @@ void NativeMainWindow::applySerialLineControl(WORD controlId) {
     if (!ok) {
         HWND control = controlId == IDC_DTR_CHECK ? dtrCheck_ : rtsCheck_;
         SendMessageW(control, BM_SETCHECK, enabled ? BST_UNCHECKED : BST_CHECKED, 0);
-        setStatus(utf8ToWide(serialPort_.lastErrorText()));
+        setStatus(utf8ToWide(serialTransport_.lastErrorText()));
         updateRtsControlState();
         return;
     }
@@ -297,7 +297,7 @@ void NativeMainWindow::applySerialLineControl(WORD controlId) {
 }
 
 void NativeMainWindow::updateConnectionButtonState() {
-    const NativeConnectionButtonMode mode = connectionUiState_.buttonMode(serialPort_.isOpen());
+    const NativeConnectionButtonMode mode = connectionUiState_.buttonMode(serialTransport_.isOpen());
     setControlText(connectButton_, mode == NativeConnectionButtonMode::Disconnect ? tx(T::DisconnectButton) : tx(T::ConnectButton));
 }
 
@@ -306,9 +306,9 @@ void NativeMainWindow::updateRtsControlState() {
         == static_cast<LPARAM>(SerialFlowControl::HardwareRtsCts);
     const NativeLineControlUiState lineControlState = connectionUiState_.lineControlState(
         serialIoState_.allowsLineControl(),
-        serialPort_.isOpen(),
+        serialTransport_.isOpen(),
         selectedHardwareRtsCts,
-        serialPort_.isOpen() && serialPort_.usesHardwareRtsCts());
+        serialTransport_.isOpen() && serialTransport_.usesHardwareRtsCts());
     EnableWindow(rtsCheck_, lineControlState.rtsEnabled ? TRUE : FALSE);
 }
 

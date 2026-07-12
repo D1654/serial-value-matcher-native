@@ -3,6 +3,7 @@
 #if defined(_WIN32)
 
 #include "core/modbus_scan_executor_core.h"
+#include "transport/serial_rtu_transport.h"
 
 #include <algorithm>
 #include <chrono>
@@ -43,28 +44,6 @@ std::string timestampText() {
     return buffer;
 }
 
-std::vector<std::uint8_t> bytesFromSpan(core::ByteSpan bytes) {
-    return std::vector<std::uint8_t>(bytes.begin(), bytes.end());
-}
-
-std::size_t expectedNormalResponseLength(core::ByteSpan requestFrame) {
-    if (requestFrame.size() >= 6) {
-        const std::size_t quantity = (static_cast<std::size_t>(requestFrame[4]) << 8U)
-            | static_cast<std::size_t>(requestFrame[5]);
-        if (quantity > 0 && quantity <= 125) {
-            return 5 + quantity * 2;
-        }
-    }
-    return 5;
-}
-
-bool responseLooksComplete(const std::vector<std::uint8_t>& response, std::size_t expectedNormalBytes) {
-    if (response.size() >= 5 && (response[1] & 0x80U) != 0) {
-        return true;
-    }
-    return response.size() >= expectedNormalBytes;
-}
-
 std::string statusText(core::modbus::ScanAttemptStatus status, const std::string& errorMessage) {
     if (errorMessage == kNativeModbusCancelledMessage) {
         return "cancelled";
@@ -84,127 +63,6 @@ std::string statusText(core::modbus::ScanAttemptStatus status, const std::string
 
     return "unknown";
 }
-
-class NativeWin32ModbusTransport final : public core::modbus::RtuTransport {
-public:
-    using FrameCallback = std::function<void(bool tx, const std::vector<std::uint8_t>& payload)>;
-
-    NativeWin32ModbusTransport(
-        Win32SerialPort& serialPort,
-        std::atomic_bool& cancelRequested,
-        std::string endpoint,
-        std::string timeoutErrorMessage,
-        FrameCallback frameCallback)
-        : serialPort_(serialPort),
-          cancelRequested_(cancelRequested),
-          endpoint_(std::move(endpoint)),
-          timeoutErrorMessage_(std::move(timeoutErrorMessage)),
-          frameCallback_(std::move(frameCallback)) {}
-
-    core::modbus::RtuTransportExchange exchange(core::ByteSpan requestFrame, int responseTimeoutMs) override {
-        core::modbus::RtuTransportExchange exchange;
-        exchange.requestFrame = core::ByteBuffer(requestFrame.begin(), requestFrame.end());
-        exchange.endpoint = endpoint_;
-        exchange.sentAtUtc = timestampText();
-
-        if (cancelRequested_.load(std::memory_order_relaxed)) {
-            cancelObserved_ = true;
-            exchange.status = core::modbus::RtuTransportExchangeStatus::TransportError;
-            exchange.errorMessage = kNativeModbusCancelledMessage;
-            exchange.receivedAtUtc = timestampText();
-            return exchange;
-        }
-
-        if (requestFrame.empty()) {
-            exchange.status = core::modbus::RtuTransportExchangeStatus::TransportError;
-            exchange.errorMessage = "Modbus 请求为空。";
-            return exchange;
-        }
-
-        const std::vector<std::uint8_t> request = bytesFromSpan(requestFrame);
-        const SerialIoResult writeResult = serialPort_.writeBytes(request);
-        if (!writeResult.ok) {
-            serialFailed_ = true;
-            lastErrorMessage_ = writeResult.errorMessage;
-            exchange.status = core::modbus::RtuTransportExchangeStatus::TransportError;
-            exchange.errorMessage = writeResult.errorMessage;
-            return exchange;
-        }
-
-        if (frameCallback_) {
-            frameCallback_(true, request);
-        }
-
-        exchange.status = core::modbus::RtuTransportExchangeStatus::Timeout;
-        std::vector<std::uint8_t> response;
-        const std::size_t expectedNormalBytes = expectedNormalResponseLength(requestFrame);
-        const int timeoutMs = std::max(0, responseTimeoutMs);
-        const ULONGLONG deadline = GetTickCount64() + static_cast<ULONGLONG>(timeoutMs);
-        while (GetTickCount64() < deadline) {
-            if (cancelRequested_.load(std::memory_order_relaxed)) {
-                cancelObserved_ = true;
-                exchange.status = core::modbus::RtuTransportExchangeStatus::TransportError;
-                exchange.errorMessage = kNativeModbusCancelledMessage;
-                break;
-            }
-
-            const ULONGLONG now = GetTickCount64();
-            const DWORD waitMs = static_cast<DWORD>(std::min<ULONGLONG>(50, deadline > now ? deadline - now : 0));
-            if (waitMs == 0) {
-                break;
-            }
-
-            if (serialPort_.waitForReadyRead(static_cast<int>(waitMs))) {
-                std::vector<std::uint8_t> chunk = serialPort_.readAvailable(260);
-                response.insert(response.end(), chunk.begin(), chunk.end());
-                if (responseLooksComplete(response, expectedNormalBytes)) {
-                    exchange.status = core::modbus::RtuTransportExchangeStatus::Success;
-                    break;
-                }
-            } else {
-                const std::string error = serialPort_.lastErrorText();
-                if (!error.empty()) {
-                    serialFailed_ = true;
-                    lastErrorMessage_ = error;
-                    exchange.status = core::modbus::RtuTransportExchangeStatus::TransportError;
-                    exchange.errorMessage = error;
-                    break;
-                }
-            }
-        }
-
-        exchange.receivedAtUtc = timestampText();
-        exchange.responseFrame = std::move(response);
-        if (!exchange.responseFrame.empty() && frameCallback_) {
-            frameCallback_(false, exchange.responseFrame);
-        }
-
-        if (exchange.status == core::modbus::RtuTransportExchangeStatus::Success
-            || exchange.status == core::modbus::RtuTransportExchangeStatus::TransportError) {
-            return exchange;
-        }
-
-        exchange.status = core::modbus::RtuTransportExchangeStatus::Timeout;
-        exchange.errorMessage = timeoutErrorMessage_.empty()
-            ? std::string("等待 Modbus 响应超时。")
-            : timeoutErrorMessage_;
-        return exchange;
-    }
-
-    bool serialFailed() const noexcept { return serialFailed_; }
-    bool cancelObserved() const noexcept { return cancelObserved_; }
-    const std::string& lastErrorMessage() const noexcept { return lastErrorMessage_; }
-
-private:
-    Win32SerialPort& serialPort_;
-    std::atomic_bool& cancelRequested_;
-    std::string endpoint_;
-    std::string timeoutErrorMessage_;
-    FrameCallback frameCallback_;
-    bool serialFailed_ = false;
-    bool cancelObserved_ = false;
-    std::string lastErrorMessage_;
-};
 
 void applyExecutionResult(
     const std::string& scanSessionId,
@@ -258,14 +116,14 @@ void applyExecutionResult(
 
 DWORD WINAPI nativeModbusScanThreadProc(void* parameter) {
     std::unique_ptr<NativeModbusScanContext> context(static_cast<NativeModbusScanContext*>(parameter));
-    if (!context || context->notifyWindow == nullptr || context->serialPort == nullptr || context->cancelRequested == nullptr) {
+    if (!context || context->notifyWindow == nullptr || context->serialTransport == nullptr || context->cancelRequested == nullptr) {
         return 1;
     }
 
     auto* result = new NativeModbusScanResult;
     result->execution = std::move(context->execution);
     const std::string scanSessionId = context->scanSessionId;
-    const std::string endpoint = context->serialPort->endpoint();
+    const std::string endpoint = context->serialTransport->endpoint();
     NativeModbusScanDataBatch dataBatch;
 
     const auto postDataBatch = [&](bool force = false) {
@@ -333,13 +191,17 @@ DWORD WINAPI nativeModbusScanThreadProc(void* parameter) {
     };
 
     try {
-        NativeWin32ModbusTransport transport(
-            *context->serialPort,
-            *context->cancelRequested,
-            endpoint,
-            context->timeoutErrorMessage,
-            appendFrame);
-        core::modbus::ScanExecutor executor(transport);
+        transport::SerialRtuTransport serialTransport(
+            *context->serialTransport,
+            {
+                .shouldCancel = [&]() {
+                    return context->cancelRequested->load(std::memory_order_relaxed);
+                },
+                .nowUtc = timestampText,
+                .onFrame = appendFrame,
+                .timeoutErrorMessage = context->timeoutErrorMessage,
+            });
+        core::modbus::ScanExecutor executor(serialTransport);
         core::modbus::ScanExecutionOptions options;
         options.responseTimeoutMs = 1200;
         options.shouldCancel = [&]() {
@@ -361,10 +223,12 @@ DWORD WINAPI nativeModbusScanThreadProc(void* parameter) {
         const core::modbus::ScanExecutionResult executionResult = executor.execute(context->plan, options);
         applyExecutionResult(scanSessionId, endpoint, executionResult, result->execution);
 
-        result->cancelled = transport.cancelObserved() || context->cancelRequested->load(std::memory_order_relaxed);
-        result->serialFailed = transport.serialFailed();
+        result->cancelled = serialTransport.cancelObserved() || context->cancelRequested->load(std::memory_order_relaxed);
+        result->serialFailed = serialTransport.serialFailed();
         if (result->serialFailed) {
-            result->errorMessage = transport.lastErrorMessage().empty() ? executionResult.errorMessage : transport.lastErrorMessage();
+            result->errorMessage = serialTransport.lastErrorMessage().empty()
+                ? executionResult.errorMessage
+                : serialTransport.lastErrorMessage();
         } else if (!executionResult.errorMessage.empty()) {
             result->errorMessage = executionResult.errorMessage;
         }

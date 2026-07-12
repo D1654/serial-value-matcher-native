@@ -65,7 +65,16 @@ struct SerialWriteQueueSnapshot {
     bool full() const noexcept;
 };
 
-class SerialWriteQueue final {
+class SerialWritePort {
+public:
+    virtual ~SerialWritePort() = default;
+
+    virtual SerialWriteResult enqueueWrite(
+        std::vector<std::uint8_t> payload,
+        std::optional<int> timeoutMs = std::nullopt) = 0;
+};
+
+class SerialWriteQueue final : public SerialWritePort {
 public:
     explicit SerialWriteQueue(std::size_t capacity = kDefaultSerialWriteQueueCapacity);
 
@@ -76,6 +85,9 @@ public:
     SerialWriteQueueSnapshot snapshot() const noexcept;
 
     SerialWriteResult enqueue(std::vector<std::uint8_t> payload, int timeoutMs = kDefaultSerialWriteTimeoutMs);
+    SerialWriteResult enqueueWrite(
+        std::vector<std::uint8_t> payload,
+        std::optional<int> timeoutMs = std::nullopt) override;
     std::optional<SerialWriteRequest> peek() const;
     std::optional<SerialWriteRequest> takeNext();
 

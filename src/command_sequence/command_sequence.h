@@ -138,7 +138,7 @@ struct CommandSequenceExecutionResult {
 };
 
 struct CommandSequenceExecutionContext {
-    transport::SerialWriteQueue* serialWriteQueue = nullptr;
+    transport::SerialWritePort* serialWriteTransport = nullptr;
     core::modbus::RtuTransport* modbusTransport = nullptr;
     std::function<std::optional<core::ByteBuffer>(int timeoutMs)> waitForResponse;
     std::function<void(int durationMs)> sleepForMs;

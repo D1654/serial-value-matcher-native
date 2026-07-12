@@ -1,0 +1,220 @@
+{
+  "version": "1.0",
+  "project_name": "Serial Transport Layer v2",
+  "created_at": "2026-07-11T03:50:05+08:00",
+  "updated_at": "2026-07-12T14:52:58+08:00",
+  "current_phase": "execution",
+  "phase_history": [
+    {
+      "phase": "pre_research",
+      "entered_at": "2026-07-11T03:50:05+08:00",
+      "exited_at": "2026-07-11T06:48:18+08:00",
+      "exit_reason": "approved"
+    },
+    {
+      "phase": "requirements",
+      "entered_at": "2026-07-11T06:48:18+08:00",
+      "exited_at": "2026-07-12T07:16:14+08:00",
+      "exit_reason": "approved"
+    },
+    {
+      "phase": "draft",
+      "entered_at": "2026-07-12T07:16:14+08:00",
+      "exited_at": "2026-07-12T14:13:53+08:00",
+      "exit_reason": "approved"
+    },
+    {
+      "phase": "planning",
+      "entered_at": "2026-07-12T14:13:53+08:00",
+      "exited_at": "2026-07-12T14:52:58+08:00",
+      "exit_reason": "approved"
+    },
+    {
+      "phase": "execution",
+      "entered_at": "2026-07-12T14:52:58+08:00",
+      "exited_at": null,
+      "exit_reason": null
+    }
+  ],
+  "pre_research": {
+    "status": "completed",
+    "agents": {
+      "domain_research": {
+        "status": "completed",
+        "output_file": ".workflow/serial-transport-layer-v2/agent-outputs/agent-a-domain.md"
+      },
+      "competitive_analysis": {
+        "status": "completed",
+        "output_file": ".workflow/serial-transport-layer-v2/agent-outputs/agent-b-competitive.md"
+      },
+      "tech_ecosystem": {
+        "status": "completed",
+        "output_file": ".workflow/serial-transport-layer-v2/agent-outputs/agent-c-tech.md",
+        "deepwiki_called": true
+      }
+    },
+    "consolidation_status": "completed",
+    "completed_at": "2026-07-11T04:02:11+08:00"
+  },
+  "context_bus": {
+    "project_brief": ".workflow/serial-transport-layer-v2/context/project-brief.md",
+    "domain_knowledge": ".workflow/serial-transport-layer-v2/context/domain-knowledge.md",
+    "interview_transcript": ".workflow/serial-transport-layer-v2/context/interview-transcript.md",
+    "hypothesis_tracker": ".workflow/serial-transport-layer-v2/context/hypothesis-tracker.md",
+    "last_updated": "2026-07-12T14:52:58+08:00"
+  },
+  "requirements": {
+    "status": "completed",
+    "coverage_map": {
+      "project_vision": "clear",
+      "functional_scope": "clear",
+      "user_personas": "clear",
+      "domain_data_model": "clear",
+      "tech_stack": "clear",
+      "integration": "clear",
+      "non_functional": "clear",
+      "ux_design": "partial",
+      "dev_constraints": "clear",
+      "edge_cases_risk": "clear"
+    },
+    "questions_asked": 7,
+    "answers": [
+      {
+        "category": "functional_scope,tech_stack,non_functional,edge_cases_risk",
+        "question": "取消或断开后，操作终态结果最长可接受多久返回？是否要求本轮立即全面改成 overlapped I/O？建议先承诺 <= 1 秒，通过明确的超时与取消契约实现。",
+        "answer": "接受 <= 1 秒的终态结果目标；本轮不立即全面改写为 overlapped I/O，先用明确的超时与取消契约实现，并为后续演进保留边界。",
+        "timestamp": "2026-07-11T06:55:00+08:00"
+      },
+      {
+        "category": "functional_scope,tech_stack,edge_cases_risk",
+        "question": "是否要求保留现有 `SerialTransport` 类名及主要调用方式作为兼容门面？建议只保留行为，不保留为兼容而存在的宽接口。",
+        "answer": "不保留冗余兼容代码；直接收敛并迁移项目内调用方，保持行为与必要测试契约，不承诺旧宽接口的源代码兼容。",
+        "timestamp": "2026-07-11T08:11:56+08:00"
+      },
+      {
+        "category": "functional_scope,tech_stack,edge_cases_risk",
+        "question": "是否将所有 HANDLE 操作（open/close/read/write/DTR/RTS）交给一个 session owner，并禁止上层直接访问，使实际句柄操作严格顺序化？",
+        "answer": "确认。单一 owner 加顺序化句柄操作是统一传输层的硬约束。",
+        "timestamp": "2026-07-11T08:35:15+08:00"
+      },
+      {
+        "category": "functional_scope,non_functional,edge_cases_risk",
+        "question": "是否确认发送队列同时受请求数和待发送字节数限制（含正在执行请求），超限立即返回 RejectedFull，不阻塞也不丢弃旧请求；默认 64 个请求、256 KiB？",
+        "answer": "确认。采用双重硬上限和立即拒绝语义，默认 64 个请求、256 KiB 总待发字节。",
+        "timestamp": "2026-07-11T17:23:39+08:00"
+      },
+      {
+        "category": "functional_scope,integration,edge_cases_risk,observability_operations",
+        "question": "重连时是否关闭旧 session、递增 generation、终止旧请求并禁止旧结果回写新 session，且不自动重放请求？",
+        "answer": "确认。旧请求终止并标记为 Cancelled 或 Disconnected，旧结果不得回写新 session；重试必须由调用方显式发起。",
+        "timestamp": "2026-07-11T17:24:45+08:00"
+      },
+      {
+        "category": "functional_scope,tech_stack,security_compliance,observability_operations",
+        "question": "是否确认 transport 只负责字节流、生命周期、排队、取消和结构化结果；Modbus/RTU 层负责帧边界、CRC 与陈旧接收数据清理，并将协议错误与传输错误分开？",
+        "answer": "确认。transport 不解析协议帧，协议层独立负责 RTU framing、CRC 和 stale-RX 策略；两类错误保持分离。",
+        "timestamp": "2026-07-11T17:34:11+08:00"
+      },
+      {
+        "category": "project_vision,functional_scope,user_personas,domain_data_model,tech_stack",
+        "question": "是否将 transport 限定为稳定的串口字节底座，把 PLC/通用串口设备的协议、位布局和编码能力放在上层扩展？",
+        "answer": "确认。软件首先服务串口调试，包括 PLC 和大多数串口设备；先稳定串口底座，再丰富功能。当前数据扫描匹配应预留可变位布局和可插拔编码能力（例如 Gray code），但不把这些功能塞入 transport 本轮实现。",
+        "timestamp": "2026-07-11T21:42:53+08:00"
+      }
+    ]
+  },
+  "draft": {
+    "status": "approved",
+    "revision_count": 0,
+    "approved_at": "2026-07-12T14:13:53+08:00",
+    "completed_sections": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+    "cache_file": ".workflow/serial-transport-layer-v2/draft-cache.md"
+  },
+  "brainstorm": {
+    "bs1": { "status": "pending", "completed_at": null, "artifact": ".workflow/serial-transport-layer-v2/brainstorm/bs-1.md" },
+    "bs2": { "status": "completed", "completed_at": "2026-07-12T07:32:00+08:00", "audit_score": 8.5, "artifact": ".workflow/serial-transport-layer-v2/brainstorm/bs-2.md" },
+    "bs3": { "status": "completed", "completed_at": "2026-07-12T07:45:00+08:00", "audit_score": 8.5, "artifact": ".workflow/serial-transport-layer-v2/brainstorm/bs-3.md" },
+    "bs4": { "status": "completed", "completed_at": "2026-07-12T08:15:00+08:00", "audit_score": 8.5, "artifact": ".workflow/serial-transport-layer-v2/brainstorm/bs-4.md" },
+    "bs8": { "status": "completed", "completed_at": "2026-07-12T08:30:00+08:00", "audit_score": 8.5, "artifact": ".workflow/serial-transport-layer-v2/brainstorm/bs-8.md" },
+    "bs5": { "status": "completed", "completed_at": "2026-07-12T08:50:00+08:00", "artifact": ".workflow/serial-transport-layer-v2/brainstorm/bs-5.md" },
+    "bs6": { "status": "completed", "completed_at": "2026-07-12T14:22:42+08:00", "artifact": ".workflow/serial-transport-layer-v2/brainstorm/bs-6.md" },
+    "bs7_count": 0
+  },
+  "planning": {
+    "status": "completed",
+    "total_phases": 4,
+    "total_tasks": 18,
+    "plans_written": {
+      "level_1": true,
+      "level_2_count": 4,
+      "level_3_count": 18
+    }
+  },
+  "execution": {
+    "status": "in_progress",
+    "current_phase_index": 1,
+    "current_task_index": 0,
+    "total_phases": 4,
+    "phases": {
+      "1": {
+        "name": "Contract Foundation",
+        "total_tasks": 4,
+        "completed_tasks": 0,
+        "status": "in_progress",
+        "tasks": {
+          "1": { "name": "Define Session Model", "status": "pending", "started_at": null, "completed_at": null },
+          "2": { "name": "Migrate Command Write Capability", "status": "pending", "started_at": null, "completed_at": null },
+          "3": { "name": "Enforce Dual-Budget Queue", "status": "pending", "started_at": null, "completed_at": null },
+          "4": { "name": "Build Fake Session Contract Suite", "status": "pending", "started_at": null, "completed_at": null }
+        }
+      },
+      "2": {
+        "name": "Win32 Session and Caller Migration",
+        "total_tasks": 6,
+        "completed_tasks": 0,
+        "status": "pending",
+        "tasks": {
+          "1": { "name": "Harden Win32 Session Owner", "status": "pending", "started_at": null, "completed_at": null },
+          "2": { "name": "Implement Generation and Settlement", "status": "pending", "started_at": null, "completed_at": null },
+          "3": { "name": "Migrate Main-Window Lifecycle", "status": "pending", "started_at": null, "completed_at": null },
+          "4": { "name": "Migrate Main-Window I/O", "status": "pending", "started_at": null, "completed_at": null },
+          "5": { "name": "Migrate RTU and Modbus Borrowing", "status": "pending", "started_at": null, "completed_at": null },
+          "6": { "name": "Remove Broad Transport Facade", "status": "pending", "started_at": null, "completed_at": null }
+        }
+      },
+      "3": {
+        "name": "Production Hardening",
+        "total_tasks": 5,
+        "completed_tasks": 0,
+        "status": "pending",
+        "tasks": {
+          "1": { "name": "Integrate Queue Backpressure", "status": "pending", "started_at": null, "completed_at": null },
+          "2": { "name": "Guarantee Exactly-Once Completion", "status": "pending", "started_at": null, "completed_at": null },
+          "3": { "name": "Wire Typed Errors and Evidence", "status": "pending", "started_at": null, "completed_at": null },
+          "4": { "name": "Expand PTY Fault Matrix", "status": "pending", "started_at": null, "completed_at": null },
+          "5": { "name": "Strengthen CI Release Gates", "status": "pending", "started_at": null, "completed_at": null }
+        }
+      },
+      "4": {
+        "name": "Boundary and Release Closure",
+        "total_tasks": 3,
+        "completed_tasks": 0,
+        "status": "pending",
+        "tasks": {
+          "1": { "name": "Document Codec Boundary", "status": "pending", "started_at": null, "completed_at": null },
+          "2": { "name": "Enforce Transport Boundaries", "status": "pending", "started_at": null, "completed_at": null },
+          "3": { "name": "Run Final Release Verification", "status": "pending", "started_at": null, "completed_at": null }
+        }
+      }
+    },
+    "deepwiki_cache": {
+      "phases_researched": [],
+      "cache_dir": ".workflow/serial-transport-layer-v2/deepwiki-cache/"
+    },
+    "error_log": []
+  },
+  "bug_fixer": {
+    "reviews": []
+  },
+  "change_requests": []
+}

@@ -17,14 +17,15 @@ Win32 native 路线的目标是：
 ```text
 svm-native-win32.exe
 ├── src/win32/             Win32 UI、消息、串口、日志、发送、扫描、偏好
-├── src/core/              Qt-free 协议、Modbus、分析、报告核心
+├── src/core/              C++20 协议、Modbus、分析、报告核心
 ├── src/native_storage/    native 文件存储和记录编解码
+├── src/transport/         串口契约、RTU adapter 和写队列
 └── scripts + workflows    构建、截图、PTY、包体审计、artifact 证据
 ```
 
 CMake 目标关系：
 
-- `svm_slim_core`：由 `src/core/` 构成，给 Win32 native 和 native 测试复用。
+- `svm_slim_core`：由 `src/core/` 和 `src/transport/` 的无框架部分构成，给 Win32 native 和 native 测试复用。
 - `svm_native_storage`：由 `src/native_storage/` 构成，负责 native 存储。
 - `svm_win32_serial`：串口类型、端口枚举和 Win32 串口读写。
 - `svm-native-win32`：最终 Win32 native GUI exe，链接以上目标和 `user32`、`gdi32`、`comctl32`、`comdlg32`、`shell32`。
@@ -130,7 +131,9 @@ Win32 event
 串口链路由以下模块组成：
 
 - `win32_serial_enumerator.*`：通过 Windows API 枚举串口描述。
-- `win32_serial_port.*`：打开、关闭、读写、等待可读、DTR、RTS、RTS/CTS。
+- `transport/serial_transport.h`：唯一的串口生命周期、读写、队列和取消契约。
+- `win32_serial_port.*`：该契约的唯一生产 adapter，拥有 Windows handle、写线程和串口参数实现。
+- `transport/serial_rtu_transport.*`：将串口契约映射为 Modbus RTU exchange，可由 fake transport 单测。
 - `NativeSerialIoState`：限制当前 I/O 状态，避免并发发送/读写冲突。
 - `NativeReconnectState`：异常断开后的自动重连状态。
 - `main_window_serial_io.cpp`：轮询读取、错误处理、保存原始事件、更新 TX/RX 计数。
@@ -138,6 +141,8 @@ Win32 event
 测试边界：
 
 - `native_win32_serial_tests` 覆盖串口参数和基础状态。
+- `transport_contract_tests` 覆盖串口契约生命周期、读写和队列语义。
+- `native_modbus_transport_adapter_tests` 覆盖 RTU adapter 的分块响应、超时、取消和失败分类。
 - `native_win32_serial_loopback_tests` 覆盖 normal、reopen、timeout、cancel、stress 场景，需要 PTY 脚本提供端点。
 
 ## 发送链路
@@ -165,7 +170,7 @@ Modbus 和分析链路分为：
 - `NativeModbusScanWorker`：后台扫描 worker，向 UI 汇报进度、数据批次和完成结果。
 - `NativeModbusScanUiState`：扫描运行状态、进度和取消状态。
 - `NativeAnalysisWorkflow`：候选生成、规则保存、规则验证和报告输出协调。
-- `src/core/analysis_core.*`、`report_core.*`：Qt-free 分析和报告核心。
+- `src/core/analysis_core.*`、`report_core.*`：框架无关的分析和报告核心。
 - `src/native_storage/`：保存扫描、候选、规则和验证结果。
 
 原则：
@@ -222,5 +227,4 @@ UI capture 工作流和脚本在 exe 自检之外补充截图证据，覆盖默�
 - [开发者指南](开发者指南.md)
 - [测试与验证](测试与验证.md)
 - [发布产物](发布产物.md)
-- [历史 Qt 说明](Qt历史说明.md)
 - [过渡架构说明](架构说明.md)

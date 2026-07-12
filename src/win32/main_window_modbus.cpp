@@ -61,7 +61,7 @@ void NativeMainWindow::updateModbusScanProgress(
 void NativeMainWindow::runModbusScan() {
     const NativeModbusScanDecision scanDecision = modbusAnalysisController_.scanDecision(
         serialIoState_.isOwnedBy(NativeSerialIoOwner::ModbusScan),
-        serialPort_.isOpen(),
+        serialTransport_.isOpen(),
         store_.isOpen(),
         serialIoState_);
     if (scanDecision.cancelsScan()) {
@@ -120,7 +120,7 @@ void NativeMainWindow::runModbusScan() {
 
     auto context = std::make_unique<NativeModbusScanContext>();
     context->notifyWindow = window_;
-    context->serialPort = &serialPort_;
+    context->serialTransport = &serialTransport_;
     context->cancelRequested = &modbusScanCancelRequested_;
     context->plan = std::move(requestResult.request.plan);
     context->execution = std::move(requestResult.request.execution);
@@ -275,7 +275,7 @@ void NativeMainWindow::setModbusScanRunningUi(bool running) {
     if (running) {
         KillTimer(window_, IDT_SERIAL_POLL);
         KillTimer(window_, IDT_TIMED_SEND);
-    } else if (serialPort_.isOpen()) {
+    } else if (serialTransport_.isOpen()) {
         SetTimer(window_, IDT_SERIAL_POLL, 50, nullptr);
         updateTimedSendTimer();
     }

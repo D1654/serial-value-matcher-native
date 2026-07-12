@@ -403,6 +403,7 @@ private:
     bool trackingWindowSizeMove_ = false;
     std::optional<native_storage::UiPreferences> lastSavedUiPreferences_;
     Win32SerialPort serialPort_;
+    svm::transport::SerialTransport& serialTransport_ = serialPort_;
     NativeSerialIoState serialIoState_;
     std::deque<NativePendingSerialWrite> pendingSerialWrites_;
     native_storage::NativeSessionStore store_;

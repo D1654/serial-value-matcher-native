@@ -257,14 +257,14 @@ CommandStepExecutionResult runSerialWrite(
     auto result = makeStepResult(sequence, step, stepIndex, CommandExecutionStatus::Failed, {});
     result.metadata["payload_bytes"] = toText(command.payload.size());
     result.metadata["timeout_ms"] = toText(command.timeoutMs);
-    result.metadata["backend"] = "serial_write_queue";
+    result.metadata["backend"] = "serial_write_transport";
 
-    if (!context.serialWriteQueue) {
-        result.message = "Serial write queue backend is not available.";
+    if (!context.serialWriteTransport) {
+        result.message = "Serial write transport backend is not available.";
         return result;
     }
 
-    auto writeResult = context.serialWriteQueue->enqueue(command.payload, command.timeoutMs);
+    auto writeResult = context.serialWriteTransport->enqueueWrite(command.payload, command.timeoutMs);
     lastSerialWriteResult = writeResult;
     result.metadata["serial_request_id"] = toText(writeResult.requestId);
     result.metadata["serial_status"] = transport::serialWriteResultStatusName(writeResult.status);

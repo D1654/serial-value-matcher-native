@@ -24,8 +24,6 @@ require_command x86_64-w64-mingw32-windres
 cmake -S "$repo_root" -B "$build_dir" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$repo_root/cmake/toolchains/mingw64.cmake" \
     -DCMAKE_BUILD_TYPE="$build_type" \
-    -DSVM_BUILD_QT_APP=OFF \
-    -DSVM_BUILD_QT_TESTS=OFF \
     -DSVM_BUILD_WIN32_APP=ON
 
 cmake --build "$build_dir" --target svm-native-win32 --parallel "$parallel"

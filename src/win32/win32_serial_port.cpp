@@ -374,7 +374,9 @@ SerialIoResult Win32SerialPort::writeBytesInternal(const std::uint8_t* payload, 
     return succeed(totalWritten);
 }
 
-svm::transport::SerialWriteResult Win32SerialPort::enqueueWrite(std::vector<std::uint8_t> payload) {
+svm::transport::SerialWriteResult Win32SerialPort::enqueueWrite(
+    std::vector<std::uint8_t> payload,
+    std::optional<int> timeoutMs) {
     if (!isOpen()) {
         lastErrorText_ = "串口未打开，无法发送数据。";
         return {
@@ -393,7 +395,9 @@ svm::transport::SerialWriteResult Win32SerialPort::enqueueWrite(std::vector<std:
                 .message = "串口写入队列已满，请等待前序请求完成。",
             };
         } else {
-            result = writeQueue_.enqueue(std::move(payload), std::max(1, options_.writeTimeoutMs));
+            result = writeQueue_.enqueue(
+                std::move(payload),
+                timeoutMs.value_or(std::max(1, options_.writeTimeoutMs)));
         }
         if (result.accepted() && !ensureWriteWorkerLocked()) {
             writeQueue_.cancelPending(result.requestId);

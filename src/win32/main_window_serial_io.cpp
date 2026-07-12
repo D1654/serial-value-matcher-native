@@ -51,17 +51,17 @@ std::wstring writeResultMessage(const svm::transport::SerialWriteResult& result)
 } // namespace
 
 void NativeMainWindow::updateSerialWriteQueueStatus() {
-    serialIoState_.updateWriteQueueStatus(serialPort_.writeQueueSnapshot());
+    serialIoState_.updateWriteQueueStatus(serialTransport_.writeQueueSnapshot());
 }
 
 void NativeMainWindow::clearPendingSerialWrites() {
     pendingSerialWrites_.clear();
-    serialPort_.takeCompletedWrites();
+    serialTransport_.takeCompletedWrites();
     updateSerialWriteQueueStatus();
 }
 
 void NativeMainWindow::drainSerialWriteResults() {
-    const std::vector<svm::transport::SerialWriteResult> results = serialPort_.takeCompletedWrites();
+    const std::vector<svm::transport::SerialWriteResult> results = serialTransport_.takeCompletedWrites();
     if (results.empty()) {
         updateSerialWriteQueueStatus();
         return;
@@ -147,27 +147,27 @@ void NativeMainWindow::drainSerialWriteResults() {
 
 void NativeMainWindow::pollSerial() {
     drainSerialWriteResults();
-    if (!serialPort_.isOpen()) {
+    if (!serialTransport_.isOpen()) {
         return;
     }
     if (!serialIoState_.allowsSerialPoll()) {
         return;
     }
-    if (!serialPort_.waitForReadyRead(0)) {
-        if (!serialPort_.lastErrorText().empty()) {
-            handleSerialFailure(serialPort_.lastErrorText());
+    if (!serialTransport_.waitForReadyRead(0)) {
+        if (!serialTransport_.lastErrorText().empty()) {
+            handleSerialFailure(serialTransport_.lastErrorText());
         }
         return;
     }
 
     std::vector<native_storage::RawIoEvent> events;
     std::vector<std::uint8_t> mergedPayload;
-    const std::string endpoint = serialPort_.endpoint();
+    const std::string endpoint = serialTransport_.endpoint();
     for (int batch = 0; batch < 8; ++batch) {
-        const std::vector<std::uint8_t> payload = serialPort_.readAvailable(4096);
+        const std::vector<std::uint8_t> payload = serialTransport_.readAvailable(4096);
         if (payload.empty()) {
-            if (!serialPort_.lastErrorText().empty()) {
-                handleSerialFailure(serialPort_.lastErrorText());
+            if (!serialTransport_.lastErrorText().empty()) {
+                handleSerialFailure(serialTransport_.lastErrorText());
             }
             break;
         }
@@ -190,12 +190,12 @@ void NativeMainWindow::pollSerial() {
 }
 
 void NativeMainWindow::handleSerialFailure(const std::string& message) {
-    if (!serialPort_.isOpen()) {
+    if (!serialTransport_.isOpen()) {
         return;
     }
-    const std::string endpoint = serialPort_.endpoint();
+    const std::string endpoint = serialTransport_.endpoint();
     stopFileSend({});
-    serialPort_.close();
+    serialTransport_.close();
     updateConnectionButtonState();
     updateRtsControlState();
     appendLog(NativeLogKind::Error, uiString(T::SystemSerialFailedPrefix) + utf8ToWide(message));
@@ -210,7 +210,7 @@ void NativeMainWindow::handleSerialFailure(const std::string& message) {
 }
 
 void NativeMainWindow::tryAutoReconnect() {
-    if (!reconnectState_.shouldTryReconnect(serialPort_.isOpen())) {
+    if (!reconnectState_.shouldTryReconnect(serialTransport_.isOpen())) {
         KillTimer(window_, IDT_RECONNECT);
         return;
     }
@@ -230,8 +230,8 @@ void NativeMainWindow::tryAutoReconnect() {
         KillTimer(window_, IDT_RECONNECT);
         return;
     }
-    if (!serialPort_.open(*options)) {
-        setStatus(uiString(T::AutoReconnectFailedPrefix) + utf8ToWide(serialPort_.lastErrorText()));
+    if (!serialTransport_.open(*options)) {
+        setStatus(uiString(T::AutoReconnectFailedPrefix) + utf8ToWide(serialTransport_.lastErrorText()));
         reconnectState_.markReconnectFailed();
         KillTimer(window_, IDT_RECONNECT);
         return;
@@ -241,7 +241,7 @@ void NativeMainWindow::tryAutoReconnect() {
     KillTimer(window_, IDT_RECONNECT);
     updateConnectionButtonState();
     updateRtsControlState();
-    appendLog(uiString(T::SystemReconnectOkPrefix) + utf8ToWide(serialPort_.endpoint()));
+    appendLog(uiString(T::SystemReconnectOkPrefix) + utf8ToWide(serialTransport_.endpoint()));
     setStatus(tx(T::AutoReconnectOk));
 }
 

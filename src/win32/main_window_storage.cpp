@@ -31,7 +31,7 @@ void NativeMainWindow::saveRawEvent(std::string direction, const std::vector<std
     event.sessionId = sessionId_;
     event.direction = std::move(direction);
     event.timestampUtc = nativeUtcTimestampText();
-    event.endpoint = serialPort_.endpoint();
+    event.endpoint = serialTransport_.endpoint();
     event.payload = payload;
     saveRawEvents({std::move(event)});
 }

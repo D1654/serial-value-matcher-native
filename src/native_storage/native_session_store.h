@@ -10,7 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "storage/session_store_port.h"
+#include "native_storage/session_store_port.h"
 
 namespace svm::native_storage {
 

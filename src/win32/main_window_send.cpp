@@ -206,7 +206,7 @@ void NativeMainWindow::sendPayload() {
 }
 
 bool NativeMainWindow::sendPayloadFromText(const std::wstring& text, bool saveHistory) {
-    const NativeSerialSendDecision availability = serialSendController_.manualSendAvailability(serialPort_.isOpen(), serialIoState_);
+    const NativeSerialSendDecision availability = serialSendController_.manualSendAvailability(serialTransport_.isOpen(), serialIoState_);
     if (availability.kind == NativeSerialSendDecisionKind::SerialNotConnected) {
         setStatus(tx(T::SerialNotConnectedSend));
         return false;
@@ -265,7 +265,7 @@ bool NativeMainWindow::enqueueManualSerialWrite(std::vector<std::uint8_t> payloa
     pending.lineEnding = static_cast<int>(selectedComboData(lineEndingCombo_, 0));
     pending.textCodePage = static_cast<int>(selectedTextCodePage());
 
-    auto result = serialPort_.enqueueWrite(std::move(payload));
+    auto result = serialTransport_.enqueueWrite(std::move(payload));
     updateSerialWriteQueueStatus();
     if (!result.accepted()) {
         setStatus(result.message.empty()
@@ -307,7 +307,7 @@ void NativeMainWindow::updateTimedSendTimer() {
     KillTimer(window_, IDT_TIMED_SEND);
     const NativeTimedSendTimerDecision decision = serialSendController_.timedSendDecision(
         sendControlState_,
-        serialPort_.isOpen(),
+        serialTransport_.isOpen(),
         serialIoState_,
         textToInt(timedPeriodEdit_, kNativeDefaultTimedSendPeriodMs));
     if (!decision.shouldRun) {
@@ -343,7 +343,7 @@ void NativeMainWindow::browseFileSend() {
 void NativeMainWindow::startFileSend() {
     const std::wstring pathText = controlText(filePathEdit_);
     const NativeSerialSendDecision startDecision = serialSendController_.fileStartDecision(
-        serialPort_.isOpen(),
+        serialTransport_.isOpen(),
         serialIoState_,
         fileSend_.active(),
         pathText);
@@ -403,7 +403,7 @@ void NativeMainWindow::stopFileSend(const std::wstring& statusText) {
     const bool wasActive = fileSend_.active();
     fileSend_.close();
     if (wasActive) {
-        serialPort_.cancelPendingWrites();
+        serialTransport_.cancelPendingWrites();
         pendingSerialWrites_.erase(
             std::remove_if(
                 pendingSerialWrites_.begin(),
@@ -434,7 +434,7 @@ void NativeMainWindow::pumpFileSend() {
     drainSerialWriteResults();
     const NativeSerialSendDecision pumpDecision = serialSendController_.filePumpDecision(
         fileSend_.active(),
-        serialPort_.isOpen(),
+        serialTransport_.isOpen(),
         serialIoState_);
     if (pumpDecision.ignored()) {
         return;
@@ -472,7 +472,7 @@ bool NativeMainWindow::enqueueFileSerialWrite(std::vector<std::uint8_t> payload)
     pending.source = NativePendingSerialWriteSource::File;
     pending.payload = payload;
 
-    auto result = serialPort_.enqueueWrite(std::move(payload));
+    auto result = serialTransport_.enqueueWrite(std::move(payload));
     updateSerialWriteQueueStatus();
     if (!result.accepted()) {
         const std::wstring message = result.message.empty()

@@ -13,7 +13,7 @@
 #include "core/modbus_core.h"
 #include "native_storage/native_session_store.h"
 #include "win32/native_log_model.h"
-#include "win32/win32_serial_port.h"
+#include "transport/serial_transport.h"
 
 #include <atomic>
 #include <cstddef>
@@ -48,7 +48,7 @@ struct NativeModbusScanProgress {
 
 struct NativeModbusScanContext {
     HWND notifyWindow = nullptr;
-    Win32SerialPort* serialPort = nullptr;
+    transport::SerialTransport* serialTransport = nullptr;
     std::atomic_bool* cancelRequested = nullptr;
     core::modbus::ScanPlan plan;
     native_storage::ScanExecutionRecord execution;

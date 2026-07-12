@@ -83,8 +83,6 @@ v1.0.4 已可作为轻量串口工具测试使用，但仍建议在真实设备�
 - 大范围 Modbus 扫描的超时、取消和错误恢复；
 - 候选分析结果是否符合现场业务语义。
 
-Qt 版本源码仍保留在仓库中，用于历史基线和部分自动化测试；当前面向用户的轻量发布以 Win32 native 包为准。
-
 ## 构建与验证
 
 Windows native CI：
@@ -119,14 +117,11 @@ scripts/package-windows-native-mingw.sh
 - `docs/测试与验证.md`：测试、截图、PTY、包体审计和验证入口。
 - `docs/发布产物.md`：Actions artifact 和发布产物入口。
 - `docs/故障排查.md`：常见问题和排查入口。
-- `docs/Qt历史说明.md`：Qt 历史路线说明。
-
-过渡期参考文档：
+其他参考文档：
 
 - `docs/Windows发布说明.md`
 - `docs/Windows原生本地调试.md`
 - `docs/Windows原生体积说明.md`
-- `docs/Win32原生与Qt基线对照.md`
 - `docs/Windows原生UI验证.md`
 - `docs/Windows串口真机验收.md`
 - `docs/架构说明.md`

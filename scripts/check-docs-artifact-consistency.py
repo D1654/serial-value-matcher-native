@@ -33,11 +33,7 @@ ACTIVE_DOCS = [
     "docs/Windows原生本地调试.md",
 ]
 
-LEGACY_OR_TRANSITION_DOCS = [
-    "docs/Qt历史说明.md",
-    "docs/架构说明.md",
-    "docs/Win32原生与Qt基线对照.md",
-]
+LEGACY_OR_TRANSITION_DOCS = []
 
 REQUIRED_FILES = [
     VERSION_SOURCE,

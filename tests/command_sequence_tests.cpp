@@ -123,7 +123,7 @@ void validSequenceUsesExistingBackendsAndRecordsEvidence() {
     };
 
     CommandSequenceExecutionContext context;
-    context.serialWriteQueue = &queue;
+    context.serialWriteTransport = &queue;
     context.modbusTransport = &transport;
     context.waitForResponse = [&waitTimeoutMs](int timeoutMs) -> std::optional<ByteBuffer> {
         waitTimeoutMs = timeoutMs;
@@ -144,8 +144,10 @@ void validSequenceUsesExistingBackendsAndRecordsEvidence() {
     assert(result.evidence.size() == sequence.steps.size());
     assert(result.evidence.back().type == CommandEvidenceEventType::AssertionResult);
     assert(hasMetadataValue(result.evidence.back().metadata, "passed", "true"));
+    assert(hasMetadataValue(result.steps.front().metadata, "backend", "serial_write_transport"));
     assert(queue.pendingCount() == 1);
     assert(queue.peek()->payload == ByteBuffer({0x10, 0x02}));
+    assert(queue.peek()->timeoutMs == 200);
     assert(waitTimeoutMs == 300);
     assert(sleptMs == 5);
     assert(transport.requests.size() == 1);
@@ -186,7 +188,7 @@ void cancellationStopsBeforeDispatchingBackendWork() {
     };
 
     CommandSequenceExecutionContext context;
-    context.serialWriteQueue = &queue;
+    context.serialWriteTransport = &queue;
     context.shouldCancel = [] {
         return true;
     };
@@ -239,7 +241,7 @@ void unsafeCommandIsRejectedBeforeBackendWork() {
     };
 
     CommandSequenceExecutionContext context;
-    context.serialWriteQueue = &queue;
+    context.serialWriteTransport = &queue;
     context.modbusTransport = &transport;
 
     const auto validation = svm::command_sequence::validateCommandSequence(sequence);

@@ -22,7 +22,7 @@ SVM_SERIAL_LOOPBACK_SUMMARY=artifacts/local/serial-pty-matrix-summary.txt \
 python3 scripts/run-windows-native-serial-pty-loopback.py
 ```
 
-成功输出必须包含 `python serial matrix summary gate-status=passed classification=local-only-release-candidate-evidence`，summary 文件必须包含 `GateStatus=passed` 和 `Classification=local-only-release-candidate-evidence`。
+成功输出必须包含 `python serial matrix summary gate-status=passed classification=local-only-release-candidate-evidence`，summary 文件必须包含 `GateStatus=passed`、`Classification=local-only-release-candidate-evidence` 和 `Transport=serial-adapter-contract`。
 
 ## 准备
 

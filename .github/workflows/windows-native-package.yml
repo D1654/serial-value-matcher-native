@@ -31,8 +31,6 @@ jobs:
           cmake -S . -B $env:BUILD_DIR
           -G "Visual Studio 17 2022"
           -A x64
-          -DSVM_BUILD_QT_APP=OFF
-          -DSVM_BUILD_QT_TESTS=OFF
           -DSVM_BUILD_WIN32_APP=ON
 
       - name: Build Release
@@ -60,8 +58,8 @@ jobs:
             "Phase 2 backend regression closure",
             "Status: CI-blocking native CTest passed before packaging.",
             "Covered backend gates:",
-            "- serial write queue contract and native serial state tests",
-            "- Modbus core/executor/request/UI state tests",
+            "- serial transport contract, write queue, and native serial state tests",
+            "- serial RTU adapter plus Modbus core/executor/request/UI state tests",
             "- native storage replacement rollback and orphan-tail recovery tests",
             "- native package self-test and UI performance gates later in this workflow",
             "Local-only release-candidate evidence remains separate:",
