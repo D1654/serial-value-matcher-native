@@ -346,17 +346,17 @@ target_link_libraries(serial_write_queue_tests PRIVATE svm_slim_core)
 target_include_directories(serial_write_queue_tests PRIVATE src)
 add_test(NAME serial_write_queue_tests COMMAND serial_write_queue_tests)
 
-add_executable(transport_contract_tests
+add_executable(serial_session_contract_tests
     tests/transport_contract_tests.cpp
 )
-set_target_properties(transport_contract_tests PROPERTIES
+set_target_properties(serial_session_contract_tests PROPERTIES
     AUTOMOC OFF
     AUTOUIC OFF
     AUTORCC OFF
 )
-target_link_libraries(transport_contract_tests PRIVATE svm_slim_core)
-target_include_directories(transport_contract_tests PRIVATE src)
-add_test(NAME transport_contract_tests COMMAND transport_contract_tests)
+target_link_libraries(serial_session_contract_tests PRIVATE svm_slim_core)
+target_include_directories(serial_session_contract_tests PRIVATE src)
+add_test(NAME serial_session_contract_tests COMMAND serial_session_contract_tests)
 
 add_executable(native_modbus_transport_adapter_tests
     tests/native_modbus_transport_adapter_tests.cpp
