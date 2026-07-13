@@ -22,15 +22,16 @@
 
 namespace svm::win32 {
 
-class Win32SerialPort final : public svm::transport::SerialTransport {
+// Temporary bridge while in-repo callers migrate to the narrow session capabilities.
+class Win32SerialSession final : public svm::transport::SerialTransport {
 public:
-    Win32SerialPort();
-    ~Win32SerialPort() override;
+    Win32SerialSession();
+    ~Win32SerialSession() override;
 
-    Win32SerialPort(const Win32SerialPort&) = delete;
-    Win32SerialPort& operator=(const Win32SerialPort&) = delete;
-    Win32SerialPort(Win32SerialPort&& other) noexcept = delete;
-    Win32SerialPort& operator=(Win32SerialPort&& other) noexcept = delete;
+    Win32SerialSession(const Win32SerialSession&) = delete;
+    Win32SerialSession& operator=(const Win32SerialSession&) = delete;
+    Win32SerialSession(Win32SerialSession&& other) noexcept = delete;
+    Win32SerialSession& operator=(Win32SerialSession&& other) noexcept = delete;
 
     bool open(SerialOpenOptions options) override;
     void close() override;

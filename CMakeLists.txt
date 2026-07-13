@@ -65,7 +65,7 @@ add_library(svm_win32_serial
 if(WIN32)
     target_sources(svm_win32_serial
         PRIVATE
-            src/win32/win32_serial_port.cpp
+            src/win32/win32_serial_session.cpp
             src/win32/win32_serial_enumerator.cpp
     )
     target_compile_definitions(svm_win32_serial

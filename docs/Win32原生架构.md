@@ -132,7 +132,7 @@ Win32 event
 
 - `win32_serial_enumerator.*`：通过 Windows API 枚举串口描述。
 - `transport/serial_transport.h`：唯一的串口生命周期、读写、队列和取消契约。
-- `win32_serial_port.*`：该契约的唯一生产 adapter，拥有 Windows handle、写线程和串口参数实现。
+- `win32_serial_session.*`：唯一生产会话所有者，拥有 Windows handle、写线程和串口参数实现。
 - `transport/serial_rtu_transport.*`：将串口契约映射为 Modbus RTU exchange，可由 fake transport 单测。
 - `NativeSerialIoState`：限制当前 I/O 状态，避免并发发送/读写冲突。
 - `NativeReconnectState`：异常断开后的自动重连状态。

@@ -49,3 +49,8 @@ the plans await explicit execution approval.
 Execution was approved on 2026-07-12. Phase 4 starts from Phase 1, Task 1 and
 must follow the recorded task order, verification gates, state updates, and
 per-task commits.
+
+Phase 1 completed on 2026-07-13 with all four contract-foundation tasks and all
+27 host CTest targets passing. The user approved Phase 2, so execution now moves
+to the sole Win32 session owner and direct caller migration; production queue
+integration and exactly-once hardening remain in their planned later tasks.

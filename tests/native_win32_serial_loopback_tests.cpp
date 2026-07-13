@@ -1,4 +1,4 @@
-#include "win32/win32_serial_port.h"
+#include "win32/win32_serial_session.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -170,7 +170,7 @@ int main() {
     }
 
     if (scenario == "timeout") {
-        svm::win32::Win32SerialPort port;
+        svm::win32::Win32SerialSession port;
         if (!port.open(options)) {
             std::cerr << "open failed scenario=timeout: " << port.lastErrorText() << '\n';
             return 2;
@@ -185,7 +185,7 @@ int main() {
     }
 
     if (scenario == "cancel") {
-        svm::win32::Win32SerialPort port;
+        svm::win32::Win32SerialSession port;
         if (!port.open(options)) {
             std::cerr << "open failed scenario=cancel: " << port.lastErrorText() << '\n';
             return 2;
@@ -207,7 +207,7 @@ int main() {
     }
 
     for (int reopenIndex = 0; reopenIndex < reopenCount; ++reopenIndex) {
-        svm::win32::Win32SerialPort port;
+        svm::win32::Win32SerialSession port;
         if (trace) {
             std::cerr << "trace: opening reopen=" << reopenIndex << '\n';
         }

@@ -30,7 +30,7 @@
 #include "win32/native_send_history_state.h"
 #include "win32/native_status_counters_state.h"
 #include "win32/native_workbench_tab_state.h"
-#include "win32/win32_serial_port.h"
+#include "win32/win32_serial_session.h"
 
 #include <array>
 #include <atomic>
@@ -402,8 +402,8 @@ private:
     bool uiPreferenceSaveFailureShown_ = false;
     bool trackingWindowSizeMove_ = false;
     std::optional<native_storage::UiPreferences> lastSavedUiPreferences_;
-    Win32SerialPort serialPort_;
-    svm::transport::SerialTransport& serialTransport_ = serialPort_;
+    Win32SerialSession serialSession_;
+    svm::transport::SerialTransport& serialTransport_ = serialSession_;
     NativeSerialIoState serialIoState_;
     std::deque<NativePendingSerialWrite> pendingSerialWrites_;
     native_storage::NativeSessionStore store_;
