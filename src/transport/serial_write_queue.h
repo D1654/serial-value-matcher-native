@@ -1,7 +1,8 @@
 #pragma once
 
+#include "transport/serial_types.h"
+
 #include <cstddef>
-#include <cstdint>
 #include <deque>
 #include <optional>
 #include <string>
@@ -9,10 +10,18 @@
 
 namespace svm::transport {
 
-using SerialWriteRequestId = std::uint64_t;
+using SerialWriteRequestId = SerialOperationId;
 
 inline constexpr std::size_t kDefaultSerialWriteQueueCapacity = 64;
+inline constexpr std::size_t kDefaultSerialWriteQueueByteCapacity = 256 * 1024;
 inline constexpr int kDefaultSerialWriteTimeoutMs = 1000;
+
+struct SerialWriteQueueLimits {
+    std::size_t requestCapacity = kDefaultSerialWriteQueueCapacity;
+    std::size_t byteCapacity = kDefaultSerialWriteQueueByteCapacity;
+
+    bool valid() const noexcept;
+};
 
 enum class SerialWriteCancellationState {
     Active,
@@ -27,19 +36,25 @@ enum class SerialWriteResultStatus {
     Failed,
     Timeout,
     Cancelled,
+    Disconnected,
+    Closed,
 };
 
 struct SerialWriteCancellationToken {
     SerialWriteRequestId requestId = 0;
+    SerialSessionGeneration generation = kUnassignedSerialSessionGeneration;
 
     bool valid() const noexcept;
 };
 
 struct SerialWriteRequest {
     SerialWriteRequestId id = 0;
+    SerialSessionGeneration generation = kUnassignedSerialSessionGeneration;
     SerialWriteCancellationToken cancellationToken;
     std::vector<std::uint8_t> payload;
+    std::size_t payloadBytes = 0;
     int timeoutMs = kDefaultSerialWriteTimeoutMs;
+    SerialDeadline deadline;
     SerialWriteCancellationState cancellationState = SerialWriteCancellationState::Active;
 
     bool cancellationRequested() const noexcept;
@@ -47,8 +62,10 @@ struct SerialWriteRequest {
 
 struct SerialWriteResult {
     SerialWriteRequestId requestId = 0;
+    SerialSessionGeneration generation = kUnassignedSerialSessionGeneration;
     SerialWriteResultStatus status = SerialWriteResultStatus::RejectedInvalid;
     std::size_t byteCount = 0;
+    SerialDeadline deadline;
     std::string message;
 
     bool accepted() const noexcept;
@@ -58,9 +75,15 @@ struct SerialWriteResult {
 
 struct SerialWriteQueueSnapshot {
     std::size_t capacity = 0;
+    std::size_t byteCapacity = 0;
     std::size_t pendingCount = 0;
+    std::size_t activeCount = 0;
+    std::size_t pendingBytes = 0;
+    std::size_t activeBytes = 0;
     SerialWriteRequestId nextRequestId = 1;
 
+    std::size_t countedCount() const noexcept;
+    std::size_t countedBytes() const noexcept;
     bool empty() const noexcept;
     bool full() const noexcept;
 };
@@ -77,37 +100,60 @@ public:
 class SerialWriteQueue final : public SerialWritePort {
 public:
     explicit SerialWriteQueue(std::size_t capacity = kDefaultSerialWriteQueueCapacity);
+    explicit SerialWriteQueue(SerialWriteQueueLimits limits);
 
     std::size_t capacity() const noexcept;
+    std::size_t byteCapacity() const noexcept;
     std::size_t pendingCount() const noexcept;
+    std::size_t activeCount() const noexcept;
     bool empty() const noexcept;
     bool full() const noexcept;
     SerialWriteQueueSnapshot snapshot() const noexcept;
 
-    SerialWriteResult enqueue(std::vector<std::uint8_t> payload, int timeoutMs = kDefaultSerialWriteTimeoutMs);
+    SerialWriteResult enqueue(
+        std::vector<std::uint8_t> payload,
+        int timeoutMs = kDefaultSerialWriteTimeoutMs,
+        SerialSessionGeneration generation = kUnassignedSerialSessionGeneration,
+        SerialDeadline deadline = {});
     SerialWriteResult enqueueWrite(
         std::vector<std::uint8_t> payload,
         std::optional<int> timeoutMs = std::nullopt) override;
     std::optional<SerialWriteRequest> peek() const;
+    std::optional<SerialWriteRequest> activateNext();
     std::optional<SerialWriteRequest> takeNext();
 
     SerialWriteResult cancelPending(SerialWriteRequestId requestId);
     SerialWriteResult cancelPending(SerialWriteCancellationToken token);
     std::vector<SerialWriteResult> cancelAllPending();
-    SerialWriteResult completeNextSent(std::size_t byteCount);
-    SerialWriteResult completeNextFailed(std::string message);
-    SerialWriteResult completeNextTimeout(std::string message = {});
+    SerialWriteResult completeActive(
+        SerialWriteRequestId requestId,
+        SerialSessionGeneration generation,
+        SerialWriteResultStatus status,
+        std::size_t byteCount = 0,
+        std::string message = {});
 
     void clear() noexcept;
 
 private:
-    SerialWriteRequestId allocateRequestId() noexcept;
-    SerialWriteResult reject(SerialWriteResultStatus status, std::string message) const;
-    SerialWriteResult completeNext(SerialWriteResultStatus status, std::size_t byteCount, std::string message);
+    struct ActiveReservation {
+        SerialWriteRequestId requestId = 0;
+        SerialSessionGeneration generation = kUnassignedSerialSessionGeneration;
+        std::size_t payloadBytes = 0;
+        SerialDeadline deadline;
+    };
 
-    std::size_t capacity_ = kDefaultSerialWriteQueueCapacity;
+    std::optional<SerialWriteRequestId> allocateRequestId() noexcept;
+    SerialWriteResult reject(SerialWriteResultStatus status, std::string message) const;
+    SerialWriteResult rejectCompletion(
+        SerialWriteRequestId requestId,
+        SerialSessionGeneration generation,
+        std::string message) const;
+
+    SerialWriteQueueLimits limits_;
     SerialWriteRequestId nextRequestId_ = 1;
+    std::size_t pendingBytes_ = 0;
     std::deque<SerialWriteRequest> pending_;
+    std::optional<ActiveReservation> active_;
 };
 
 const char* serialWriteResultStatusName(SerialWriteResultStatus status) noexcept;

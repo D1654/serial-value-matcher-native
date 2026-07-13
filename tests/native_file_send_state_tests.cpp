@@ -120,7 +120,13 @@ void queuedWriteDoesNotAdvanceProgressUntilSentResult() {
     assert(state.sentBytes() == 0);
     assert(state.progressPermille() == 0);
 
-    const auto sent = queue.completeNextSent(chunk.bytes.size());
+    const auto active = queue.activateNext();
+    assert(active.has_value());
+    const auto sent = queue.completeActive(
+        active->id,
+        active->generation,
+        svm::transport::SerialWriteResultStatus::Sent,
+        chunk.bytes.size());
     assert(sent.status == svm::transport::SerialWriteResultStatus::Sent);
     state.markBytesWritten(sent.byteCount);
     assert(state.sentBytes() == 2);
