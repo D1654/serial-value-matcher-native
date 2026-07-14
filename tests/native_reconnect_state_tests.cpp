@@ -2,8 +2,30 @@
 
 #include <cassert>
 #include <iostream>
+#include <optional>
+#include <type_traits>
+#include <utility>
 
 namespace {
+
+using ReconnectOptionsResult = decltype(
+    std::declval<const svm::win32::NativeReconnectState&>().reconnectOptions());
+
+template <typename Options>
+concept ContainsRequestId = requires(const Options& options) {
+    options.requestId;
+};
+
+template <typename Options>
+concept ContainsPayload = requires(const Options& options) {
+    options.payload;
+};
+
+static_assert(std::is_same_v<
+              ReconnectOptionsResult,
+              std::optional<svm::win32::SerialOpenOptions>>);
+static_assert(!ContainsRequestId<svm::win32::SerialOpenOptions>);
+static_assert(!ContainsPayload<svm::win32::SerialOpenOptions>);
 
 svm::win32::SerialOpenOptions optionsFor(std::string portName) {
     svm::win32::SerialOpenOptions options;
@@ -44,6 +66,42 @@ void waitingRequiresLastOptionsAndClosedSerial() {
     assert(reconnect->baudRate == 57600);
 }
 
+void reconnectCopiesTheCompleteConfigurationAndOnlyReplacesEndpoint() {
+    svm::win32::SerialOpenOptions original;
+    original.portName = "COM5";
+    original.baudRate = 230400;
+    original.dataBits = 7;
+    original.parity = svm::win32::SerialParity::Odd;
+    original.stopBits = svm::win32::SerialStopBits::Two;
+    original.flowControl = svm::win32::SerialFlowControl::SoftwareXonXoff;
+    original.dataTerminalReady = true;
+    original.requestToSend = false;
+    original.readTimeoutMs = 125;
+    original.writeTimeoutMs = 250;
+    original.readBufferSize = 8192;
+
+    svm::win32::NativeReconnectState state;
+    state.rememberSuccessfulOpen(original);
+    state.startWaiting("COM17");
+
+    const auto reconnect = state.reconnectOptions();
+    assert(reconnect.has_value());
+    assert(reconnect->portName == "COM17");
+    assert(reconnect->baudRate == original.baudRate);
+    assert(reconnect->dataBits == original.dataBits);
+    assert(reconnect->parity == original.parity);
+    assert(reconnect->stopBits == original.stopBits);
+    assert(reconnect->flowControl == original.flowControl);
+    assert(reconnect->dataTerminalReady == original.dataTerminalReady);
+    assert(reconnect->requestToSend == original.requestToSend);
+    assert(reconnect->readTimeoutMs == original.readTimeoutMs);
+    assert(reconnect->writeTimeoutMs == original.writeTimeoutMs);
+    assert(reconnect->readBufferSize == original.readBufferSize);
+
+    assert(state.lastOpenOptions()->portName == "COM5");
+    assert(state.reconnectPortName() == "COM17");
+}
+
 void reconnectTerminalStateStopsWaiting() {
     svm::win32::NativeReconnectState state;
     state.rememberSuccessfulOpen(optionsFor("COM3"));
@@ -73,6 +131,7 @@ void lineControlUpdatesLastOpenOptionsOnlyWhenPresent() {
 int main() {
     successfulOpenStoresOptionsAndClearsWaiting();
     waitingRequiresLastOptionsAndClosedSerial();
+    reconnectCopiesTheCompleteConfigurationAndOnlyReplacesEndpoint();
     reconnectTerminalStateStopsWaiting();
     lineControlUpdatesLastOpenOptionsOnlyWhenPresent();
 
