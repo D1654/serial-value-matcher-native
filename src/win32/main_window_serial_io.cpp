@@ -190,12 +190,16 @@ void NativeMainWindow::pollSerial() {
 }
 
 void NativeMainWindow::handleSerialFailure(const std::string& message) {
-    if (!serialTransport_.isOpen()) {
+    const svm::transport::SerialSessionSnapshot snapshot = serialLifecycle_.snapshot();
+    if (snapshot.state == svm::transport::SerialSessionState::Closed) {
         return;
     }
-    const std::string endpoint = serialTransport_.endpoint();
+    const std::string endpoint = snapshot.endpoint;
+    KillTimer(window_, IDT_TIMED_SEND);
+    timedSendConfirmed_ = false;
     stopFileSend({});
-    serialTransport_.close();
+    serialLifecycle_.close();
+    clearPendingSerialWrites();
     updateConnectionButtonState();
     updateRtsControlState();
     appendLog(NativeLogKind::Error, uiString(T::SystemSerialFailedPrefix) + utf8ToWide(message));
@@ -210,7 +214,13 @@ void NativeMainWindow::handleSerialFailure(const std::string& message) {
 }
 
 void NativeMainWindow::tryAutoReconnect() {
-    if (!reconnectState_.shouldTryReconnect(serialTransport_.isOpen())) {
+    const bool autoReconnect = SendMessageW(autoReconnectCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    if (!autoReconnect) {
+        reconnectState_.clearWaiting();
+        KillTimer(window_, IDT_RECONNECT);
+        return;
+    }
+    if (!reconnectState_.shouldTryReconnect(serialLifecycle_.snapshot().open())) {
         KillTimer(window_, IDT_RECONNECT);
         return;
     }
@@ -230,18 +240,30 @@ void NativeMainWindow::tryAutoReconnect() {
         KillTimer(window_, IDT_RECONNECT);
         return;
     }
-    if (!serialTransport_.open(*options)) {
-        setStatus(uiString(T::AutoReconnectFailedPrefix) + utf8ToWide(serialTransport_.lastErrorText()));
+    const svm::transport::SerialOperationResult openResult = serialLifecycle_.open(*options);
+    if (!openResult.succeeded()) {
+        setStatus(uiString(T::AutoReconnectFailedPrefix)
+            + serialOperationErrorMessage(openResult, "自动重连串口"));
         reconnectState_.markReconnectFailed();
         KillTimer(window_, IDT_RECONNECT);
         return;
     }
 
-    reconnectState_.markReconnectSucceeded();
+    const svm::transport::SerialSessionSnapshot openedSession = serialLifecycle_.snapshot();
+    if (!openedSession.open() || openedSession.generation != openResult.operation.generation) {
+        serialLifecycle_.close();
+        reconnectState_.markReconnectFailed();
+        KillTimer(window_, IDT_RECONNECT);
+        setStatus(uiString(T::AutoReconnectFailedPrefix) + L"会话状态未能稳定发布。");
+        return;
+    }
+
+    reconnectState_.rememberSuccessfulOpen(openedSession.options);
     KillTimer(window_, IDT_RECONNECT);
     updateConnectionButtonState();
     updateRtsControlState();
-    appendLog(uiString(T::SystemReconnectOkPrefix) + utf8ToWide(serialTransport_.endpoint()));
+    updateTimedSendTimer();
+    appendLog(uiString(T::SystemReconnectOkPrefix) + utf8ToWide(openResult.endpoint));
     setStatus(tx(T::AutoReconnectOk));
 }
 

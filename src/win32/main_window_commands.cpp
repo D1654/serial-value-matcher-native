@@ -103,14 +103,20 @@ std::optional<LRESULT> NativeMainWindow::handleSerialControlCommand(WORD command
             applySerialLineControl(commandId);
         }
         return 0;
+    case IDC_AUTO_RECONNECT_CHECK:
+        if (notificationCode == BN_CLICKED) {
+            applyAutoReconnectPreference();
+        }
+        return 0;
     case IDC_FLOW_CONTROL_COMBO:
         if (notificationCode == CBN_SELCHANGE) {
             updateRtsControlState();
             saveUiPreferences();
-            if ((!serialTransport_.isOpen()
+            const svm::transport::SerialSessionSnapshot snapshot = serialLifecycle_.snapshot();
+            if ((!snapshot.open()
                     && selectedComboData(flowControlCombo_, static_cast<LPARAM>(SerialFlowControl::None))
                         == static_cast<LPARAM>(SerialFlowControl::HardwareRtsCts))
-                || (serialTransport_.isOpen() && serialTransport_.usesHardwareRtsCts())) {
+                || (snapshot.open() && snapshot.usesHardwareRtsCts())) {
                 setStatus(tx(T::RtsHardwareManaged));
             }
         }
@@ -347,13 +353,23 @@ std::optional<LRESULT> NativeMainWindow::handleSerialMenuCommand(WORD commandId)
             BM_SETCHECK,
             SendMessageW(autoReconnectCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED ? BST_UNCHECKED : BST_CHECKED,
             0);
-        setStatus(SendMessageW(autoReconnectCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED ? tx(T::AutoReconnectEnabled) : tx(T::AutoReconnectDisabled));
+        applyAutoReconnectPreference();
         return 0;
     default:
         break;
     }
 
     return std::nullopt;
+}
+
+void NativeMainWindow::applyAutoReconnectPreference() {
+    const bool enabled = SendMessageW(autoReconnectCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    if (!enabled) {
+        reconnectState_.clearWaiting();
+        KillTimer(window_, IDT_RECONNECT);
+    }
+    setStatus(enabled ? tx(T::AutoReconnectEnabled) : tx(T::AutoReconnectDisabled));
+    saveUiPreferences();
 }
 
 std::optional<LRESULT> NativeMainWindow::handleToolsMenuCommand(WORD commandId) {

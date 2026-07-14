@@ -39,6 +39,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace svm::win32 {
@@ -141,6 +142,7 @@ private:
     void applySelectedHistory();
     void applyLatestSerialProfile();
     void saveCurrentSerialProfile();
+    void applyAutoReconnectPreference();
     void applyUiPreferences();
     void scheduleUiPreferencesSave();
     void saveUiPreferences();
@@ -239,6 +241,9 @@ private:
     unsigned int selectedLogCodePage() const;
     std::string selectedPortName() const;
     SerialOpenOptions currentOpenOptions() const;
+    std::wstring serialOperationErrorMessage(
+        const svm::transport::SerialOperationResult& result,
+        std::string_view operation) const;
     void applySerialLineControl(WORD controlId);
     void updateConnectionButtonState();
     void updateRtsControlState();
@@ -403,6 +408,7 @@ private:
     bool trackingWindowSizeMove_ = false;
     std::optional<native_storage::UiPreferences> lastSavedUiPreferences_;
     Win32SerialSession serialSession_;
+    svm::transport::SerialSession& serialLifecycle_ = serialSession_.sessionCapability();
     svm::transport::SerialTransport& serialTransport_ = serialSession_;
     NativeSerialIoState serialIoState_;
     std::deque<NativePendingSerialWrite> pendingSerialWrites_;

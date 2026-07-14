@@ -82,6 +82,7 @@ inline NativeMainControlCommandDomain nativeMainControlCommandDomain(WORD comman
     case IDC_DISCONNECT_BUTTON:
     case IDC_DTR_CHECK:
     case IDC_RTS_CHECK:
+    case IDC_AUTO_RECONNECT_CHECK:
     case IDC_FLOW_CONTROL_COMBO:
     case IDC_SAVE_PROFILE_BUTTON:
         return NativeMainControlCommandDomain::serial;
