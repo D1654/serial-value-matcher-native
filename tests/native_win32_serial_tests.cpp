@@ -1,6 +1,5 @@
 #include "win32/win32_serial_types.h"
 #if defined(_WIN32)
-#include "transport/serial_transport.h"
 #include "win32/win32_serial_session.h"
 #endif
 
@@ -18,6 +17,29 @@ namespace svm::win32 {
 
 class Win32SerialSessionTestAccess final {
 public:
+    static bool installExitedWorker(Win32SerialSession& session) {
+        HANDLE event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (event == nullptr) {
+            return false;
+        }
+        HANDLE thread = CreateThread(nullptr, 0, &completedThreadProc, nullptr, 0, nullptr);
+        if (thread == nullptr) {
+            CloseHandle(event);
+            return false;
+        }
+        if (WaitForSingleObject(thread, INFINITE) != WAIT_OBJECT_0) {
+            CloseHandle(thread);
+            CloseHandle(event);
+            return false;
+        }
+
+        EnterCriticalSection(&session.writeLock_);
+        session.writeWakeEvent_ = event;
+        session.writeThread_ = thread;
+        LeaveCriticalSection(&session.writeLock_);
+        return true;
+    }
+
     static void publishSyntheticOpen(
         Win32SerialSession& session,
         svm::transport::SerialSessionGeneration generation,
@@ -27,7 +49,6 @@ public:
         session.generation_ = generation;
         session.generationCounter_ = std::max(session.generationCounter_, generation);
         session.options_.portName = std::move(endpoint);
-        session.lastErrorText_.clear();
         LeaveCriticalSection(&session.writeLock_);
     }
 
@@ -82,8 +103,7 @@ public:
             status == svm::transport::SerialWriteResultStatus::Timeout
                 ? svm::transport::SerialErrorCategory::Timeout
                 : svm::transport::SerialErrorCategory::None,
-            0,
-            {});
+            0);
         if (completed) {
             session.activeWrite_.reset();
         }
@@ -100,13 +120,18 @@ public:
     static void markDisconnected(
         Win32SerialSession& session,
         svm::transport::SerialSessionGeneration generation) {
-        session.markGenerationDisconnected(generation, "设备已断开");
+        session.markGenerationDisconnected(generation);
     }
 
     static svm::transport::SerialOperationResult rejectFromSnapshot(
         Win32SerialSession& session,
         const svm::transport::SerialSessionSnapshot& snapshot) {
         return session.rejectedClosed(svm::transport::SerialOperationKind::Read, snapshot);
+    }
+
+private:
+    static DWORD WINAPI completedThreadProc(void*) {
+        return 0;
     }
 };
 
@@ -234,44 +259,49 @@ svm::transport::SerialDeadline deadlineAfter(int milliseconds) {
 
 void closedPortAsyncWriteFailsWithoutQueueing() {
     svm::win32::Win32SerialSession session;
-    static_assert(std::derived_from<svm::win32::Win32SerialSession, svm::transport::SerialTransport>);
+    static_assert(std::derived_from<svm::win32::Win32SerialSession, svm::transport::SerialSession>);
+    static_assert(std::derived_from<svm::win32::Win32SerialSession, svm::transport::SerialByteStream>);
+    static_assert(std::derived_from<svm::win32::Win32SerialSession, svm::transport::SerialWriteScheduler>);
     static_assert(!std::copy_constructible<svm::win32::Win32SerialSession>);
     static_assert(!std::movable<svm::win32::Win32SerialSession>);
-    svm::transport::SerialTransport& transport = session;
-    const auto result = transport.enqueueWrite(std::vector<std::uint8_t>{0x01});
-    assert(result.status == svm::transport::SerialWriteResultStatus::Failed);
-    assert(!result.message.empty());
+    svm::transport::SerialWriteScheduler& scheduler = session;
+    const auto result = scheduler.enqueueWrite({0x01}, deadlineAfter(100));
+    assert(result.status == svm::transport::SerialOperationStatus::RejectedClosed);
+    assert(result.error.category == svm::transport::SerialErrorCategory::SessionClosed);
+    assert(!result.operation.assigned());
 
-    const auto snapshot = transport.writeQueueSnapshot();
+    const auto snapshot = scheduler.writeQueueSnapshot();
     assert(snapshot.pendingCount == 0);
-    assert(transport.takeCompletedWrites().empty());
+    assert(scheduler.takeCompletedWrites().empty());
 }
 
-void capabilityViewPublishesTypedClosedAndFaultedState() {
+void narrowCapabilitiesPublishTypedClosedAndFaultedState() {
     svm::win32::Win32SerialSession session;
-    svm::transport::SerialSession& capability = session.sessionCapability();
-    assert(&capability.byteStream() != nullptr);
-    assert(&capability.writeScheduler() != nullptr);
-    assert(capability.snapshot().state == svm::transport::SerialSessionState::Closed);
-    assert(capability.snapshot().generation == 0);
-    assert(capability.snapshot().endpoint.empty());
+    svm::transport::SerialSession& lifecycle = session;
+    svm::transport::SerialByteStream& byteStream = session;
+    svm::transport::SerialWriteScheduler& scheduler = session;
+    assert(&lifecycle.byteStream() == &byteStream);
+    assert(&lifecycle.writeScheduler() == &scheduler);
+    assert(lifecycle.snapshot().state == svm::transport::SerialSessionState::Closed);
+    assert(lifecycle.snapshot().generation == 0);
+    assert(lifecycle.snapshot().endpoint.empty());
 
-    const auto closedWrite = capability.byteStream().writeBytes({0x01}, deadlineAfter(100));
+    const auto closedWrite = byteStream.writeBytes({0x01}, deadlineAfter(100));
     assert(closedWrite.status == svm::transport::SerialOperationStatus::RejectedClosed);
     assert(closedWrite.error.category == svm::transport::SerialErrorCategory::SessionClosed);
     assert(!closedWrite.operation.assigned());
-    const auto closedAdmission = capability.writeScheduler().enqueueWrite({0x02}, deadlineAfter(100));
+    const auto closedAdmission = scheduler.enqueueWrite({0x02}, deadlineAfter(100));
     assert(closedAdmission.status == svm::transport::SerialOperationStatus::RejectedClosed);
-    assert(capability.writeScheduler().writeQueueSnapshot().empty());
+    assert(scheduler.writeQueueSnapshot().empty());
 
     svm::transport::SerialOpenOptions invalidOptions;
-    const auto failedOpen = capability.open(invalidOptions);
+    const auto failedOpen = lifecycle.open(invalidOptions);
     assert(failedOpen.status == svm::transport::SerialOperationStatus::RejectedInvalid);
     assert(failedOpen.error.category == svm::transport::SerialErrorCategory::InvalidInput);
-    assert(capability.snapshot().state == svm::transport::SerialSessionState::Faulted);
-    assert(capability.snapshot().generation == 0);
-    assert(capability.close().succeeded());
-    assert(capability.snapshot().state == svm::transport::SerialSessionState::Closed);
+    assert(lifecycle.snapshot().state == svm::transport::SerialSessionState::Faulted);
+    assert(lifecycle.snapshot().generation == 0);
+    assert(lifecycle.close().succeeded());
+    assert(lifecycle.snapshot().state == svm::transport::SerialSessionState::Closed);
 }
 
 void nativeErrorClassificationUsesCodesInsteadOfLocalizedText() {
@@ -293,25 +323,25 @@ void expiredTypedWriteTimesOutBeforeNativeIo() {
     const svm::transport::SerialDeadline expired{
         .expiresAt = std::chrono::steady_clock::now() - std::chrono::milliseconds(1),
     };
-    const auto result = session.sessionCapability().byteStream().writeBytes({0x01}, expired);
+    const auto result = session.writeBytes({0x01}, expired);
     assert(result.status == svm::transport::SerialOperationStatus::Timeout);
     assert(result.deadlineStatus == svm::transport::SerialDeadlineStatus::Expired);
     assert(result.error.category == svm::transport::SerialErrorCategory::Timeout);
     assert(result.operation.generation == 4);
     assert(result.endpoint == "COM4");
     assert(result.byteCount == 0);
-    assert(session.sessionCapability().close().succeeded());
+    assert(session.close().succeeded());
 }
 
 void typedEmptyWriteIsRejectedBeforeNativeIo() {
     svm::win32::Win32SerialSession session;
     svm::win32::Win32SerialSessionTestAccess::publishSyntheticOpen(session, 5, "COM5");
-    const auto result = session.sessionCapability().byteStream().writeBytes({});
+    const auto result = session.writeBytes({});
     assert(result.status == svm::transport::SerialOperationStatus::RejectedInvalid);
     assert(result.error.category == svm::transport::SerialErrorCategory::InvalidInput);
     assert(!result.operation.assigned());
     assert(result.operation.generation == 5);
-    assert(session.sessionCapability().close().succeeded());
+    assert(session.close().succeeded());
 }
 
 void explicitCancellationUsesOneCompletionChannel() {
@@ -321,12 +351,12 @@ void explicitCancellationUsesOneCompletionChannel() {
     const auto admission = Access::enqueueWithoutWorker(session, {0x01}, deadlineAfter(500));
     assert(admission.accepted());
 
-    const auto cancelled = session.sessionCapability().writeScheduler().cancelPendingWrites();
+    const auto cancelled = session.cancelPendingWrites();
     assert(cancelled.size() == 1);
     assert(cancelled.front().operation.requestId == admission.requestId);
     assert(cancelled.front().status == svm::transport::SerialOperationStatus::Cancelled);
-    assert(session.sessionCapability().writeScheduler().takeCompletedWrites().empty());
-    assert(session.sessionCapability().close().succeeded());
+    assert(session.takeCompletedWrites().empty());
+    assert(session.close().succeeded());
 }
 
 void disconnectInvalidatesGenerationAndSettlesPendingWrites() {
@@ -340,13 +370,13 @@ void disconnectInvalidatesGenerationAndSettlesPendingWrites() {
     assert(Access::activateWithoutWorker(session).has_value());
 
     Access::markDisconnected(session, 7);
-    const auto snapshot = session.sessionCapability().snapshot();
+    const auto snapshot = session.snapshot();
     assert(snapshot.state == svm::transport::SerialSessionState::Faulted);
     assert(snapshot.generation == 0);
     assert(session.writeQueueSnapshot().activeCount == 1);
-    assert(session.sessionCapability().close().succeeded());
+    assert(session.close().succeeded());
 
-    const auto results = session.sessionCapability().writeScheduler().takeCompletedWrites();
+    const auto results = session.takeCompletedWrites();
     assert(results.size() == 2);
     assert(results[0].operation.requestId == pendingAdmission.requestId);
     assert(results[1].operation.requestId == activeAdmission.requestId);
@@ -355,22 +385,24 @@ void disconnectInvalidatesGenerationAndSettlesPendingWrites() {
         assert(result.status == svm::transport::SerialOperationStatus::Disconnected);
         assert(result.error.category == svm::transport::SerialErrorCategory::Disconnected);
     }
-    assert(session.sessionCapability().writeScheduler().takeCompletedWrites().empty());
+    assert(session.takeCompletedWrites().empty());
 }
 
 void staleSnapshotCannotRewriteReplacementSessionEvidence() {
     using Access = svm::win32::Win32SerialSessionTestAccess;
     svm::win32::Win32SerialSession session;
-    const auto oldSnapshot = session.sessionCapability().snapshot();
+    const auto oldSnapshot = session.snapshot();
     Access::publishSyntheticOpen(session, 9, "COM9");
 
     const auto rejected = Access::rejectFromSnapshot(session, oldSnapshot);
     assert(rejected.status == svm::transport::SerialOperationStatus::RejectedClosed);
     assert(rejected.operation.generation == 0);
     assert(rejected.endpoint.empty());
-    assert(session.sessionCapability().snapshot().generation == 9);
-    assert(session.lastErrorText().empty());
-    assert(session.sessionCapability().close().succeeded());
+    const auto current = session.snapshot();
+    assert(current.state == svm::transport::SerialSessionState::Open);
+    assert(current.generation == 9);
+    assert(current.endpoint == "COM9");
+    assert(session.close().succeeded());
 }
 
 void closeSettlesPendingAndActiveWritesExactlyOnce() {
@@ -385,13 +417,13 @@ void closeSettlesPendingAndActiveWritesExactlyOnce() {
     assert(session.writeQueueSnapshot().activeCount == 1);
     assert(session.writeQueueSnapshot().pendingCount == 1);
 
-    const auto closed = session.sessionCapability().close();
+    const auto closed = session.close();
     assert(closed.succeeded());
     assert(closed.operation.generation == 8);
-    assert(session.sessionCapability().snapshot().generation == 0);
+    assert(session.snapshot().generation == 0);
     assert(session.writeQueueSnapshot().empty());
 
-    const auto results = session.sessionCapability().writeScheduler().takeCompletedWrites();
+    const auto results = session.takeCompletedWrites();
     assert(results.size() == 2);
     assert(results[0].operation.requestId == pendingAdmission.requestId);
     assert(results[1].operation.requestId == activeAdmission.requestId);
@@ -401,7 +433,7 @@ void closeSettlesPendingAndActiveWritesExactlyOnce() {
         assert(result.operation.generation == 8);
         assert(result.endpoint == "COM8");
     }
-    assert(session.sessionCapability().writeScheduler().takeCompletedWrites().empty());
+    assert(session.takeCompletedWrites().empty());
 }
 
 void staleOrDuplicateCompletionCannotReleaseTheActiveReservation() {
@@ -420,7 +452,7 @@ void staleOrDuplicateCompletionCannotReleaseTheActiveReservation() {
         2));
     assert(session.writeQueueSnapshot().activeCount == before.activeCount);
     assert(session.writeQueueSnapshot().activeBytes == before.activeBytes);
-    assert(session.sessionCapability().writeScheduler().takeCompletedWrites().empty());
+    assert(session.takeCompletedWrites().empty());
 
     assert(Access::completeActive(
         session,
@@ -434,11 +466,29 @@ void staleOrDuplicateCompletionCannotReleaseTheActiveReservation() {
         12,
         svm::transport::SerialWriteResultStatus::Sent,
         2));
-    const auto results = session.sessionCapability().writeScheduler().takeCompletedWrites();
+    const auto results = session.takeCompletedWrites();
     assert(results.size() == 1);
     assert(results.front().status == svm::transport::SerialOperationStatus::Succeeded);
     assert(session.writeQueueSnapshot().empty());
-    assert(session.sessionCapability().close().succeeded());
+    assert(session.close().succeeded());
+}
+
+void exitedWorkerIsReapedBeforeNewAdmission() {
+    using Access = svm::win32::Win32SerialSessionTestAccess;
+    svm::win32::Win32SerialSession session;
+    Access::publishSyntheticOpen(session, 13, "COM13");
+    assert(Access::installExitedWorker(session));
+
+    const auto admission = session.enqueueWrite({0x01}, deadlineAfter(500));
+    assert(admission.accepted());
+    assert(admission.error.category == svm::transport::SerialErrorCategory::None);
+    assert(session.close().succeeded());
+    assert(session.writeQueueSnapshot().empty());
+
+    const auto completed = session.takeCompletedWrites();
+    assert(completed.size() == 1);
+    assert(completed.front().operation.requestId == admission.operation.requestId);
+    assert(completed.front().terminal());
 }
 #endif
 
@@ -451,7 +501,7 @@ int main() {
     translatesCommonWin32ErrorsToActionableChinese();
 #if defined(_WIN32)
     closedPortAsyncWriteFailsWithoutQueueing();
-    capabilityViewPublishesTypedClosedAndFaultedState();
+    narrowCapabilitiesPublishTypedClosedAndFaultedState();
     nativeErrorClassificationUsesCodesInsteadOfLocalizedText();
     expiredTypedWriteTimesOutBeforeNativeIo();
     typedEmptyWriteIsRejectedBeforeNativeIo();
@@ -460,6 +510,7 @@ int main() {
     staleSnapshotCannotRewriteReplacementSessionEvidence();
     closeSettlesPendingAndActiveWritesExactlyOnce();
     staleOrDuplicateCompletionCannotReleaseTheActiveReservation();
+    exitedWorkerIsReapedBeforeNewAdmission();
 #endif
 
     std::cout << "native_win32_serial_tests passed\n";

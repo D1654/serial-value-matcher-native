@@ -54,3 +54,9 @@ Phase 1 completed on 2026-07-13 with all four contract-foundation tasks and all
 27 host CTest targets passing. The user approved Phase 2, so execution now moves
 to the sole Win32 session owner and direct caller migration; production queue
 integration and exactly-once hardening remain in their planned later tasks.
+
+Phase 2 completed on 2026-07-16. The broad transport facade, queue capability
+inheritance, compatibility adapters, and localized transport error channel are
+gone. `Win32SerialSession` directly owns the three narrow contracts, all active
+callers and loopback tests use typed results, and the portable plus MinGW/Wine
+test trees pass. Execution pauses at the Phase 2 milestone before Phase 3.

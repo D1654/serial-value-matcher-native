@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cassert>
 #include <chrono>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -665,6 +666,11 @@ private:
     SerialSessionGeneration generationCounter_ = svm::transport::kUnassignedSerialSessionGeneration;
     svm::transport::SerialOperationId nextDirectOperationId_ = 1'000'000;
 };
+
+static_assert(std::derived_from<FakeSerialSession, svm::transport::SerialSession>);
+static_assert(std::derived_from<FakeSerialSession, svm::transport::SerialByteStream>);
+static_assert(std::derived_from<FakeSerialSession, svm::transport::SerialWriteScheduler>);
+static_assert(!std::derived_from<SerialWriteQueue, svm::transport::SerialWriteScheduler>);
 
 void lifecycleTransitionsInvalidateBeforePublishingTheNextGeneration() {
     FakeSerialSession session;

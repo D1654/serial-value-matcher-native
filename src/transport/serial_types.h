@@ -196,10 +196,4 @@ constexpr const char* serialSessionStateName(SerialSessionState state) noexcept 
     return "unknown";
 }
 
-struct SerialIoResult {
-    bool ok = true;
-    std::size_t byteCount = 0;
-    std::string errorMessage;
-};
-
 } // namespace svm::transport

@@ -418,7 +418,7 @@ private:
     bool trackingWindowSizeMove_ = false;
     std::optional<native_storage::UiPreferences> lastSavedUiPreferences_;
     Win32SerialSession serialSession_;
-    svm::transport::SerialSession& serialLifecycle_ = serialSession_.sessionCapability();
+    svm::transport::SerialSession& serialLifecycle_ = serialSession_;
     svm::transport::SerialByteStream& serialByteStream_ = serialLifecycle_.byteStream();
     svm::transport::SerialWriteScheduler& serialWriteScheduler_ = serialLifecycle_.writeScheduler();
     NativeSerialIoState serialIoState_;

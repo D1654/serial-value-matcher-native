@@ -11,9 +11,9 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <exception>
 #include <limits>
 #include <optional>
-#include <string_view>
 #include <utility>
 
 namespace svm::win32 {
@@ -89,51 +89,39 @@ BYTE stopBitsToWin32(SerialStopBits stopBits) {
     return ONESTOPBIT;
 }
 
-bool setLastErrorText(std::string& lastErrorText, unsigned long errorCode, std::string_view operation) {
-    lastErrorText = win32SerialErrorText(errorCode, operation);
-    return false;
-}
-
 bool unsupportedDisabledControlLine(unsigned long errorCode, bool enabled) noexcept {
     return !enabled && errorCode == ERROR_NOT_SUPPORTED;
 }
 
-std::string commStatusErrorText(DWORD errors) {
-    std::string message = "串口接收状态异常：";
-    bool first = true;
-    const auto appendFlag = [&](DWORD flag, std::string_view text) {
-        if ((errors & flag) == 0) {
-            return;
-        }
-        if (!first) {
-            message.append("、");
-        }
-        message.append(text);
-        first = false;
-    };
-
-    appendFlag(CE_BREAK, "检测到 break 信号");
-    appendFlag(CE_FRAME, "帧错误");
-    appendFlag(CE_OVERRUN, "驱动缓冲区溢出");
-    appendFlag(CE_RXOVER, "接收缓冲区溢出");
-    appendFlag(CE_RXPARITY, "校验错误");
-    if (first) {
-        message.append("未知线路错误");
+svm::transport::SerialOperationStatus failureOperationStatus(
+    svm::transport::SerialErrorCategory category) noexcept {
+    switch (category) {
+    case svm::transport::SerialErrorCategory::Timeout:
+        return svm::transport::SerialOperationStatus::Timeout;
+    case svm::transport::SerialErrorCategory::Cancelled:
+    case svm::transport::SerialErrorCategory::SessionClosed:
+        return svm::transport::SerialOperationStatus::Cancelled;
+    case svm::transport::SerialErrorCategory::Disconnected:
+        return svm::transport::SerialOperationStatus::Disconnected;
+    case svm::transport::SerialErrorCategory::None:
+    case svm::transport::SerialErrorCategory::InvalidInput:
+    case svm::transport::SerialErrorCategory::QueueFull:
+    case svm::transport::SerialErrorCategory::NativeFailure:
+    case svm::transport::SerialErrorCategory::IoFailure:
+        return svm::transport::SerialOperationStatus::Failed;
     }
-    message.append("。请检查波特率、校验位、停止位、接线和设备状态。");
-    return message;
+    return svm::transport::SerialOperationStatus::Failed;
 }
 
 bool configureSerialState(
     HANDLE handle,
     const SerialOpenOptions& options,
-    std::string& lastErrorText,
     DWORD& nativeCode) {
     DCB dcb = {};
     dcb.DCBlength = sizeof(DCB);
     if (!GetCommState(handle, &dcb)) {
         nativeCode = GetLastError();
-        return setLastErrorText(lastErrorText, nativeCode, "读取串口参数");
+        return false;
     }
 
     dcb.BaudRate = static_cast<DWORD>(options.baudRate);
@@ -158,7 +146,7 @@ bool configureSerialState(
 
     if (!SetCommState(handle, &dcb)) {
         nativeCode = GetLastError();
-        return setLastErrorText(lastErrorText, nativeCode, "设置串口参数");
+        return false;
     }
 
     COMMTIMEOUTS timeouts = {};
@@ -169,7 +157,7 @@ bool configureSerialState(
     timeouts.WriteTotalTimeoutConstant = static_cast<DWORD>(options.writeTimeoutMs);
     if (!SetCommTimeouts(handle, &timeouts)) {
         nativeCode = GetLastError();
-        return setLastErrorText(lastErrorText, nativeCode, "设置串口超时");
+        return false;
     }
 
     return true;
@@ -178,12 +166,11 @@ bool configureSerialState(
 bool applyControlLines(
     HANDLE handle,
     const SerialOpenOptions& options,
-    std::string& lastErrorText,
     DWORD& nativeCode) {
     if (!EscapeCommFunction(handle, options.dataTerminalReady ? SETDTR : CLRDTR)) {
         nativeCode = GetLastError();
         if (!unsupportedDisabledControlLine(nativeCode, options.dataTerminalReady)) {
-            return setLastErrorText(lastErrorText, nativeCode, "设置 DTR 信号");
+            return false;
         }
         nativeCode = 0;
     }
@@ -192,7 +179,7 @@ bool applyControlLines(
         && !EscapeCommFunction(handle, options.requestToSend ? SETRTS : CLRRTS)) {
         nativeCode = GetLastError();
         if (!unsupportedDisabledControlLine(nativeCode, options.requestToSend)) {
-            return setLastErrorText(lastErrorText, nativeCode, "设置 RTS 信号");
+            return false;
         }
         nativeCode = 0;
     }
@@ -202,73 +189,7 @@ bool applyControlLines(
 
 } // namespace
 
-Win32SerialSession::CapabilityView::CapabilityView(Win32SerialSession& owner) noexcept
-    : owner_(owner) {
-}
-
-svm::transport::SerialOperationResult Win32SerialSession::CapabilityView::open(SerialOpenOptions options) {
-    return owner_.openOperation(std::move(options));
-}
-
-svm::transport::SerialOperationResult Win32SerialSession::CapabilityView::close() {
-    return owner_.closeOperation();
-}
-
-svm::transport::SerialSessionSnapshot Win32SerialSession::CapabilityView::snapshot() const {
-    return owner_.sessionSnapshot();
-}
-
-svm::transport::SerialOperationResult Win32SerialSession::CapabilityView::setDataTerminalReady(bool enabled) {
-    return owner_.setDataTerminalReadyOperation(enabled);
-}
-
-svm::transport::SerialOperationResult Win32SerialSession::CapabilityView::setRequestToSend(bool enabled) {
-    return owner_.setRequestToSendOperation(enabled);
-}
-
-svm::transport::SerialByteStream& Win32SerialSession::CapabilityView::byteStream() noexcept {
-    return *this;
-}
-
-svm::transport::SerialWriteScheduler& Win32SerialSession::CapabilityView::writeScheduler() noexcept {
-    return *this;
-}
-
-svm::transport::SerialTerminalResult Win32SerialSession::CapabilityView::writeBytes(
-    std::vector<std::uint8_t> payload,
-    svm::transport::SerialDeadline deadline) {
-    return owner_.writeOperation(std::move(payload), deadline);
-}
-
-svm::transport::SerialReadResult Win32SerialSession::CapabilityView::readAvailable(
-    std::size_t maxBytes,
-    svm::transport::SerialDeadline deadline) {
-    return owner_.readOperation(maxBytes, deadline);
-}
-
-svm::transport::SerialWriteAdmissionResult Win32SerialSession::CapabilityView::enqueueWrite(
-    std::vector<std::uint8_t> payload,
-    svm::transport::SerialDeadline deadline) {
-    return owner_.enqueueOperation(std::move(payload), deadline);
-}
-
-std::vector<svm::transport::SerialTerminalResult>
-Win32SerialSession::CapabilityView::cancelPendingWrites() {
-    return owner_.cancelPendingOperations();
-}
-
-std::vector<svm::transport::SerialTerminalResult>
-Win32SerialSession::CapabilityView::takeCompletedWrites() {
-    return owner_.takeCompletedOperations();
-}
-
-svm::transport::SerialWriteQueueSnapshot
-Win32SerialSession::CapabilityView::writeQueueSnapshot() const {
-    return owner_.writeQueueSnapshot();
-}
-
-Win32SerialSession::Win32SerialSession()
-    : capabilityView_(*this) {
+Win32SerialSession::Win32SerialSession() {
     InitializeCriticalSection(&lifecycleLock_);
     InitializeCriticalSection(&writeLock_);
     InitializeCriticalSection(&ioLock_);
@@ -276,27 +197,36 @@ Win32SerialSession::Win32SerialSession()
 
 Win32SerialSession::~Win32SerialSession() {
     close();
-    if (writeWakeEvent_ != nullptr) {
-        CloseHandle(writeWakeEvent_);
-        writeWakeEvent_ = nullptr;
+    if (writeThread_ != nullptr
+        || writeWakeEvent_ != nullptr
+        || isValidHandle(asHandle(handle_))) {
+        std::terminate();
     }
     DeleteCriticalSection(&ioLock_);
     DeleteCriticalSection(&writeLock_);
     DeleteCriticalSection(&lifecycleLock_);
 }
 
-bool Win32SerialSession::open(SerialOpenOptions options) {
-    return openOperation(std::move(options)).succeeded();
-}
-
-svm::transport::SerialOperationResult Win32SerialSession::openOperation(SerialOpenOptions options) {
+svm::transport::SerialOperationResult Win32SerialSession::open(SerialOpenOptions options) {
     WriteLock lifecycleLock(lifecycleLock_);
-    if (sessionSnapshot().state != svm::transport::SerialSessionState::Closed) {
-        closeOperation();
+    const std::string requestedEndpoint = options.portName;
+    if (snapshot().state != svm::transport::SerialSessionState::Closed) {
+        const svm::transport::SerialOperationResult closeResult = close();
+        if (!closeResult.succeeded()) {
+            return operationResult(
+                svm::transport::SerialOperationKind::Open,
+                failureOperationStatus(closeResult.error.category),
+                svm::transport::kUnassignedSerialSessionGeneration,
+                requestedEndpoint,
+                {},
+                0,
+                closeResult.error.category,
+                closeResult.error.nativeCode,
+                allocateOperationId());
+        }
     }
 
     const svm::transport::SerialOperationId operationId = allocateOperationId();
-    const std::string requestedEndpoint = options.portName;
     {
         WriteLock lock(writeLock_);
         state_ = svm::transport::SerialSessionState::Opening;
@@ -307,7 +237,6 @@ svm::transport::SerialOperationResult Win32SerialSession::openOperation(SerialOp
     if (!validation.ok) {
         WriteLock lock(writeLock_);
         state_ = svm::transport::SerialSessionState::Faulted;
-        lastErrorText_ = validation.errorMessage;
         return operationResult(
             svm::transport::SerialOperationKind::Open,
             svm::transport::SerialOperationStatus::RejectedInvalid,
@@ -323,7 +252,6 @@ svm::transport::SerialOperationResult Win32SerialSession::openOperation(SerialOp
     const std::string devicePath = makeWin32DevicePath(options.portName);
     const std::wstring wideDevicePath = utf8ToWide(devicePath);
     DWORD nativeCode = 0;
-    std::string diagnostic;
     HANDLE handle = nullptr;
     {
         WriteLock ioLock(ioLock_);
@@ -338,35 +266,32 @@ svm::transport::SerialOperationResult Win32SerialSession::openOperation(SerialOp
 
         if (!isValidHandle(handle)) {
             nativeCode = GetLastError();
-            diagnostic = win32SerialErrorText(nativeCode, "打开串口");
         } else if (!SetupComm(handle, static_cast<DWORD>(options.readBufferSize), 4096)) {
             nativeCode = GetLastError();
-            diagnostic = win32SerialErrorText(nativeCode, "初始化串口缓冲区");
         } else if (!PurgeComm(handle, PURGE_RXABORT | PURGE_RXCLEAR | PURGE_TXABORT | PURGE_TXCLEAR)) {
             nativeCode = GetLastError();
-            diagnostic = win32SerialErrorText(nativeCode, "清理串口缓冲区");
-        } else if (!configureSerialState(handle, options, diagnostic, nativeCode)
-            || !applyControlLines(handle, options, diagnostic, nativeCode)) {
+        } else if (!configureSerialState(handle, options, nativeCode)
+            || !applyControlLines(handle, options, nativeCode)) {
         } else {
             handle_ = handle;
         }
 
         if (nativeCode != 0 && isValidHandle(handle)) {
-            CloseHandle(handle);
-            handle = nullptr;
+            if (CloseHandle(handle)) {
+                handle = nullptr;
+            } else {
+                handle_ = handle;
+            }
         }
     }
 
     if (nativeCode != 0 || !isValidHandle(handle)) {
         WriteLock lock(writeLock_);
         state_ = svm::transport::SerialSessionState::Faulted;
-        lastErrorText_ = std::move(diagnostic);
         const svm::transport::SerialErrorCategory category = nativeErrorCategory(nativeCode, false);
         return operationResult(
             svm::transport::SerialOperationKind::Open,
-            category == svm::transport::SerialErrorCategory::Disconnected
-                ? svm::transport::SerialOperationStatus::Disconnected
-                : svm::transport::SerialOperationStatus::Failed,
+            failureOperationStatus(category),
             generation_,
             requestedEndpoint,
             {},
@@ -384,7 +309,6 @@ svm::transport::SerialOperationResult Win32SerialSession::openOperation(SerialOp
             options_ = std::move(options);
             options_.portName = stripWin32DevicePrefix(devicePath);
             state_ = svm::transport::SerialSessionState::Open;
-            lastErrorText_.clear();
             return operationResult(
                 svm::transport::SerialOperationKind::Open,
                 svm::transport::SerialOperationStatus::Succeeded,
@@ -397,12 +321,16 @@ svm::transport::SerialOperationResult Win32SerialSession::openOperation(SerialOp
                 operationId);
         }
         state_ = svm::transport::SerialSessionState::Faulted;
-        lastErrorText_ = "串口会话 generation 已耗尽。";
     }
+    DWORD closeNativeCode = 0;
     {
         WriteLock ioLock(ioLock_);
-        CloseHandle(handle);
-        handle_ = nullptr;
+        if (CloseHandle(handle)) {
+            handle_ = nullptr;
+        } else {
+            closeNativeCode = GetLastError();
+            handle_ = handle;
+        }
     }
     {
         WriteLock lock(writeLock_);
@@ -413,17 +341,15 @@ svm::transport::SerialOperationResult Win32SerialSession::openOperation(SerialOp
             requestedEndpoint,
             {},
             0,
-            svm::transport::SerialErrorCategory::IoFailure,
-            0,
+            closeNativeCode == 0
+                ? svm::transport::SerialErrorCategory::IoFailure
+                : svm::transport::SerialErrorCategory::NativeFailure,
+            closeNativeCode,
             operationId);
     }
 }
 
-void Win32SerialSession::close() {
-    closeOperation();
-}
-
-svm::transport::SerialOperationResult Win32SerialSession::closeOperation() {
+svm::transport::SerialOperationResult Win32SerialSession::close() {
     WriteLock lifecycleLock(lifecycleLock_);
     svm::transport::SerialSessionGeneration closingGeneration = 0;
     std::string closingEndpoint;
@@ -444,17 +370,56 @@ svm::transport::SerialOperationResult Win32SerialSession::closeOperation() {
         generation_ = svm::transport::kUnassignedSerialSessionGeneration;
     }
 
-    stopWriteWorker();
+    const svm::transport::SerialOperationId operationId = allocateOperationId();
+    const WorkerStopOutcome workerStop = stopWriteWorker();
+    if (!workerStop.joined) {
+        WriteLock lock(writeLock_);
+        state_ = svm::transport::SerialSessionState::Faulted;
+        return operationResult(
+            svm::transport::SerialOperationKind::Close,
+            svm::transport::SerialOperationStatus::Failed,
+            closingGeneration,
+            closingEndpoint,
+            {},
+            0,
+            svm::transport::SerialErrorCategory::NativeFailure,
+            workerStop.nativeCode,
+            operationId);
+    }
+
+    DWORD closeNativeCode = 0;
     {
         WriteLock ioLock(ioLock_);
         HANDLE handle = asHandle(handle_);
         if (isValidHandle(handle)) {
-            CloseHandle(handle);
+            if (!CloseHandle(handle)) {
+                closeNativeCode = GetLastError();
+            } else {
+                handle_ = nullptr;
+            }
+        } else {
+            handle_ = nullptr;
         }
-        handle_ = nullptr;
     }
 
     WriteLock lock(writeLock_);
+    const DWORD nativeCode = closeNativeCode != 0 ? closeNativeCode : workerStop.nativeCode;
+    if (!workerStop.threadHandleClosed
+        || !workerStop.wakeEventHandleClosed
+        || closeNativeCode != 0
+        || nativeCode != 0) {
+        state_ = svm::transport::SerialSessionState::Faulted;
+        return operationResult(
+            svm::transport::SerialOperationKind::Close,
+            svm::transport::SerialOperationStatus::Failed,
+            closingGeneration,
+            std::move(closingEndpoint),
+            {},
+            0,
+            svm::transport::SerialErrorCategory::NativeFailure,
+            nativeCode,
+            operationId);
+    }
     options_ = {};
     state_ = svm::transport::SerialSessionState::Closed;
     return operationResult(
@@ -466,44 +431,20 @@ svm::transport::SerialOperationResult Win32SerialSession::closeOperation() {
         0,
         svm::transport::SerialErrorCategory::None,
         0,
-        allocateOperationId());
+        operationId);
 }
 
-bool Win32SerialSession::isOpen() const noexcept {
-    WriteLock lock(writeLock_);
-    return state_ == svm::transport::SerialSessionState::Open;
-}
-
-std::string Win32SerialSession::endpoint() const {
-    WriteLock lock(writeLock_);
-    return options_.portName;
-}
-
-std::string Win32SerialSession::lastErrorText() const {
-    WriteLock lock(writeLock_);
-    return lastErrorText_;
-}
-
-bool Win32SerialSession::usesHardwareRtsCts() const noexcept {
-    WriteLock lock(writeLock_);
-    return options_.flowControl == SerialFlowControl::HardwareRtsCts;
-}
-
-bool Win32SerialSession::setDataTerminalReady(bool enabled) {
-    return setDataTerminalReadyOperation(enabled).succeeded();
-}
-
-bool Win32SerialSession::setRequestToSend(bool enabled) {
-    return setRequestToSendOperation(enabled).succeeded();
-}
-
-svm::transport::SerialSession& Win32SerialSession::sessionCapability() noexcept {
-    return capabilityView_;
-}
-
-svm::transport::SerialSessionSnapshot Win32SerialSession::sessionSnapshot() const {
+svm::transport::SerialSessionSnapshot Win32SerialSession::snapshot() const {
     WriteLock lock(writeLock_);
     return sessionSnapshotLocked();
+}
+
+svm::transport::SerialByteStream& Win32SerialSession::byteStream() noexcept {
+    return *this;
+}
+
+svm::transport::SerialWriteScheduler& Win32SerialSession::writeScheduler() noexcept {
+    return *this;
 }
 
 svm::transport::SerialSessionSnapshot Win32SerialSession::sessionSnapshotLocked() const {
@@ -516,13 +457,12 @@ svm::transport::SerialSessionSnapshot Win32SerialSession::sessionSnapshotLocked(
 }
 
 svm::transport::SerialOperationResult
-Win32SerialSession::setDataTerminalReadyOperation(bool enabled) {
+Win32SerialSession::setDataTerminalReady(bool enabled) {
     svm::transport::SerialSessionSnapshot snapshot;
     {
         WriteLock lock(writeLock_);
         snapshot = sessionSnapshotLocked();
         if (!snapshot.open()) {
-            lastErrorText_ = "串口未打开，无法设置 DTR 信号。";
             return rejectedClosed(
                 svm::transport::SerialOperationKind::SetDataTerminalReady,
                 snapshot);
@@ -560,27 +500,21 @@ Win32SerialSession::setDataTerminalReadyOperation(bool enabled) {
     const auto category = nativeCode == 0
         ? svm::transport::SerialErrorCategory::None
         : nativeErrorCategory(nativeCode, false);
-    const std::string diagnostic = nativeCode == 0
-        ? std::string{}
-        : win32SerialErrorText(nativeCode, "设置 DTR 信号");
     if (category == svm::transport::SerialErrorCategory::Disconnected) {
-        markGenerationDisconnected(snapshot.generation, diagnostic);
+        markGenerationDisconnected(snapshot.generation);
     }
     {
         WriteLock lock(writeLock_);
-        if (state_ == svm::transport::SerialSessionState::Open && generation_ == snapshot.generation) {
-            lastErrorText_ = diagnostic;
-            if (nativeCode == 0) {
-                options_.dataTerminalReady = enabled;
-            }
+        if (nativeCode == 0
+            && state_ == svm::transport::SerialSessionState::Open
+            && generation_ == snapshot.generation) {
+            options_.dataTerminalReady = enabled;
         }
     }
     if (nativeCode != 0) {
         return operationResult(
             svm::transport::SerialOperationKind::SetDataTerminalReady,
-            category == svm::transport::SerialErrorCategory::Disconnected
-                ? svm::transport::SerialOperationStatus::Disconnected
-                : svm::transport::SerialOperationStatus::Failed,
+            failureOperationStatus(category),
             snapshot.generation,
             snapshot.endpoint,
             {},
@@ -602,17 +536,15 @@ Win32SerialSession::setDataTerminalReadyOperation(bool enabled) {
 }
 
 svm::transport::SerialOperationResult
-Win32SerialSession::setRequestToSendOperation(bool enabled) {
+Win32SerialSession::setRequestToSend(bool enabled) {
     svm::transport::SerialSessionSnapshot snapshot;
     {
         WriteLock lock(writeLock_);
         snapshot = sessionSnapshotLocked();
         if (!snapshot.open()) {
-            lastErrorText_ = "串口未打开，无法设置 RTS 信号。";
             return rejectedClosed(svm::transport::SerialOperationKind::SetRequestToSend, snapshot);
         }
         if (snapshot.usesHardwareRtsCts()) {
-            lastErrorText_ = "RTS 正由 RTS/CTS 硬件流控自动管理，不能手动切换。";
             return operationResult(
                 svm::transport::SerialOperationKind::SetRequestToSend,
                 svm::transport::SerialOperationStatus::RejectedInvalid,
@@ -657,27 +589,21 @@ Win32SerialSession::setRequestToSendOperation(bool enabled) {
     const auto category = nativeCode == 0
         ? svm::transport::SerialErrorCategory::None
         : nativeErrorCategory(nativeCode, false);
-    const std::string diagnostic = nativeCode == 0
-        ? std::string{}
-        : win32SerialErrorText(nativeCode, "设置 RTS 信号");
     if (category == svm::transport::SerialErrorCategory::Disconnected) {
-        markGenerationDisconnected(snapshot.generation, diagnostic);
+        markGenerationDisconnected(snapshot.generation);
     }
     {
         WriteLock lock(writeLock_);
-        if (state_ == svm::transport::SerialSessionState::Open && generation_ == snapshot.generation) {
-            lastErrorText_ = diagnostic;
-            if (nativeCode == 0) {
-                options_.requestToSend = enabled;
-            }
+        if (nativeCode == 0
+            && state_ == svm::transport::SerialSessionState::Open
+            && generation_ == snapshot.generation) {
+            options_.requestToSend = enabled;
         }
     }
     if (nativeCode != 0) {
         return operationResult(
             svm::transport::SerialOperationKind::SetRequestToSend,
-            category == svm::transport::SerialErrorCategory::Disconnected
-                ? svm::transport::SerialOperationStatus::Disconnected
-                : svm::transport::SerialOperationStatus::Failed,
+            failureOperationStatus(category),
             snapshot.generation,
             snapshot.endpoint,
             {},
@@ -698,23 +624,9 @@ Win32SerialSession::setRequestToSendOperation(bool enabled) {
         operationId);
 }
 
-SerialIoResult Win32SerialSession::writeBytes(const std::vector<std::uint8_t>& payload) {
-    return writeBytes(payload.data(), payload.size());
-}
-
-SerialIoResult Win32SerialSession::writeBytes(const std::uint8_t* payload, std::size_t size) {
-    NativeIoOutcome outcome = writeBytesInternal(payload, size, true);
-    return {
-        .ok = outcome.ok,
-        .byteCount = outcome.byteCount,
-        .errorMessage = std::move(outcome.diagnostic),
-    };
-}
-
 Win32SerialSession::NativeIoOutcome Win32SerialSession::writeBytesInternal(
     const std::uint8_t* payload,
     std::size_t size,
-    bool updateLastError,
     svm::transport::SerialSessionGeneration expectedGeneration) {
     svm::transport::SerialSessionGeneration generation = expectedGeneration;
     {
@@ -725,13 +637,7 @@ Win32SerialSession::NativeIoOutcome Win32SerialSession::writeBytesInternal(
             NativeIoOutcome outcome{
                 .ok = false,
                 .category = svm::transport::SerialErrorCategory::SessionClosed,
-                .diagnostic = "串口未打开，无法发送数据。",
             };
-            if (updateLastError
-                && (generation == svm::transport::kUnassignedSerialSessionGeneration
-                    || generation_ == generation)) {
-                lastErrorText_ = outcome.diagnostic;
-            }
             return outcome;
         }
         generation = generation_;
@@ -740,14 +646,7 @@ Win32SerialSession::NativeIoOutcome Win32SerialSession::writeBytesInternal(
         NativeIoOutcome outcome{
             .ok = false,
             .category = svm::transport::SerialErrorCategory::InvalidInput,
-            .diagnostic = "待发送数据为空指针，无法写入串口。",
         };
-        if (updateLastError) {
-            WriteLock lock(writeLock_);
-            if (state_ == svm::transport::SerialSessionState::Open && generation_ == generation) {
-                lastErrorText_ = outcome.diagnostic;
-            }
-        }
         return outcome;
     }
 
@@ -760,22 +659,14 @@ Win32SerialSession::NativeIoOutcome Win32SerialSession::writeBytesInternal(
             : NativeIoOutcome{
                   .ok = false,
                   .category = svm::transport::SerialErrorCategory::SessionClosed,
-                  .diagnostic = "串口会话已在写入前关闭。",
               };
         if (isValidHandle(handle) && validatedHandleForGeneration(generation) != handle) {
             outcome.ok = false;
             outcome.category = svm::transport::SerialErrorCategory::SessionClosed;
-            outcome.diagnostic = "串口会话已在写入期间关闭。";
         }
     }
     if (outcome.category == svm::transport::SerialErrorCategory::Disconnected) {
-        markGenerationDisconnected(generation, outcome.diagnostic);
-    }
-    if (updateLastError) {
-        WriteLock lock(writeLock_);
-        if (state_ == svm::transport::SerialSessionState::Open && generation_ == generation) {
-            lastErrorText_ = outcome.ok ? std::string{} : outcome.diagnostic;
-        }
+        markGenerationDisconnected(generation);
     }
     return outcome;
 }
@@ -802,7 +693,6 @@ Win32SerialSession::NativeIoOutcome Win32SerialSession::writeBytesToHandle(
                 .byteCount = totalWritten,
                 .nativeCode = nativeCode,
                 .category = nativeErrorCategory(nativeCode, false),
-                .diagnostic = win32SerialErrorText(nativeCode, "写入串口"),
             };
         }
 
@@ -812,7 +702,6 @@ Win32SerialSession::NativeIoOutcome Win32SerialSession::writeBytesToHandle(
                 .ok = false,
                 .byteCount = totalWritten,
                 .category = svm::transport::SerialErrorCategory::IoFailure,
-                .diagnostic = "串口驱动没有写入任何字节。设备可能已断开、缓冲区已满，或流控阻止继续发送。",
             };
         }
     }
@@ -833,10 +722,10 @@ HANDLE Win32SerialSession::validatedHandleForGeneration(
     return isValidHandle(handle) ? handle : nullptr;
 }
 
-svm::transport::SerialTerminalResult Win32SerialSession::writeOperation(
+svm::transport::SerialTerminalResult Win32SerialSession::writeBytes(
     std::vector<std::uint8_t> payload,
     svm::transport::SerialDeadline deadline) {
-    const auto snapshot = sessionSnapshot();
+    const auto snapshot = this->snapshot();
     if (!snapshot.open()) {
         return rejectedClosed(svm::transport::SerialOperationKind::Write, snapshot, deadline);
     }
@@ -867,21 +756,14 @@ svm::transport::SerialTerminalResult Win32SerialSession::writeOperation(
     NativeIoOutcome outcome = writeBytesInternal(
         payload.data(),
         payload.size(),
-        true,
         snapshot.generation);
     svm::transport::SerialOperationStatus status = svm::transport::SerialOperationStatus::Succeeded;
     svm::transport::SerialErrorCategory category = outcome.category;
-    if (deadlineExpired(deadline)) {
+    if (!outcome.ok) {
+        status = failureOperationStatus(outcome.category);
+    } else if (deadlineExpired(deadline)) {
         status = svm::transport::SerialOperationStatus::Timeout;
         category = svm::transport::SerialErrorCategory::Timeout;
-    } else if (!outcome.ok) {
-        status = outcome.category == svm::transport::SerialErrorCategory::SessionClosed
-            ? svm::transport::SerialOperationStatus::Cancelled
-            : (outcome.category == svm::transport::SerialErrorCategory::Disconnected
-                  ? svm::transport::SerialOperationStatus::Disconnected
-                  : (outcome.category == svm::transport::SerialErrorCategory::Timeout
-                        ? svm::transport::SerialOperationStatus::Timeout
-                        : svm::transport::SerialOperationStatus::Failed));
     }
     return operationResult(
         svm::transport::SerialOperationKind::Write,
@@ -895,28 +777,18 @@ svm::transport::SerialTerminalResult Win32SerialSession::writeOperation(
         requestId);
 }
 
-svm::transport::SerialWriteResult Win32SerialSession::enqueueWrite(
-    std::vector<std::uint8_t> payload,
-    std::optional<int> timeoutMs) {
-    return enqueueWriteCore(std::move(payload), timeoutMs, {}).result;
-}
-
 Win32SerialSession::WriteAdmission Win32SerialSession::enqueueWriteCore(
     std::vector<std::uint8_t> payload,
-    std::optional<int> timeoutMs,
     svm::transport::SerialDeadline deadline) {
     WriteAdmission admission;
-    bool wakeWorker = false;
     {
         WriteLock lock(writeLock_);
         admission.endpoint = options_.portName;
         if (state_ != svm::transport::SerialSessionState::Open) {
-            lastErrorText_ = "串口未打开，无法发送数据。";
             admission.result = {
                 .generation = generation_,
                 .status = svm::transport::SerialWriteResultStatus::Failed,
                 .deadline = deadline,
-                .message = lastErrorText_,
             };
             admission.status = svm::transport::SerialOperationStatus::RejectedClosed;
             admission.category = svm::transport::SerialErrorCategory::SessionClosed;
@@ -925,10 +797,10 @@ Win32SerialSession::WriteAdmission Win32SerialSession::enqueueWriteCore(
 
         admission.result = writeQueue_.enqueue(
             std::move(payload),
-            timeoutMs.value_or(std::max(1, options_.writeTimeoutMs)),
+            std::max(1, options_.writeTimeoutMs),
             generation_,
             deadline);
-        if (admission.result.accepted() && !ensureWriteWorkerLocked()) {
+        const auto failAdmission = [&](std::uint32_t nativeCode) {
             writeQueue_.cancelPending(admission.result.requestId);
             admission.result = {
                 .requestId = admission.result.requestId,
@@ -936,14 +808,20 @@ Win32SerialSession::WriteAdmission Win32SerialSession::enqueueWriteCore(
                 .status = svm::transport::SerialWriteResultStatus::Failed,
                 .byteCount = 0,
                 .deadline = admission.result.deadline,
-                .message = lastErrorText_.empty() ? "启动串口写入后台线程失败。" : lastErrorText_,
             };
-            admission.status = svm::transport::SerialOperationStatus::Failed;
             admission.category = svm::transport::SerialErrorCategory::NativeFailure;
+            admission.status = svm::transport::SerialOperationStatus::Failed;
+            admission.nativeCode = nativeCode;
+        };
+        std::uint32_t nativeCode = 0;
+        if (admission.result.accepted() && !ensureWriteWorkerLocked(nativeCode)) {
+            failAdmission(nativeCode);
+        } else if (admission.result.accepted() && !SetEvent(writeWakeEvent_)) {
+            nativeCode = GetLastError();
+            failAdmission(nativeCode);
         } else if (admission.result.accepted()) {
             admission.status = svm::transport::SerialOperationStatus::Accepted;
             admission.category = svm::transport::SerialErrorCategory::None;
-            wakeWorker = true;
         } else if (admission.result.status == svm::transport::SerialWriteResultStatus::RejectedFull) {
             admission.status = svm::transport::SerialOperationStatus::RejectedFull;
             admission.category = svm::transport::SerialErrorCategory::QueueFull;
@@ -951,26 +829,14 @@ Win32SerialSession::WriteAdmission Win32SerialSession::enqueueWriteCore(
             admission.status = svm::transport::SerialOperationStatus::RejectedInvalid;
             admission.category = svm::transport::SerialErrorCategory::InvalidInput;
         }
-        if (admission.result.accepted()) {
-            lastErrorText_.clear();
-        } else if (!admission.result.message.empty()) {
-            lastErrorText_ = admission.result.message;
-        }
-    }
-
-    if (wakeWorker && writeWakeEvent_ != nullptr) {
-        SetEvent(writeWakeEvent_);
     }
     return admission;
 }
 
-svm::transport::SerialWriteAdmissionResult Win32SerialSession::enqueueOperation(
+svm::transport::SerialWriteAdmissionResult Win32SerialSession::enqueueWrite(
     std::vector<std::uint8_t> payload,
     svm::transport::SerialDeadline deadline) {
-    const WriteAdmission admission = enqueueWriteCore(
-        std::move(payload),
-        std::nullopt,
-        deadline);
+    const WriteAdmission admission = enqueueWriteCore(std::move(payload), deadline);
     return operationResult(
         svm::transport::SerialOperationKind::Write,
         admission.status,
@@ -979,28 +845,12 @@ svm::transport::SerialWriteAdmissionResult Win32SerialSession::enqueueOperation(
         admission.result.deadline,
         admission.result.byteCount,
         admission.category,
-        0,
+        admission.nativeCode,
         admission.result.requestId);
 }
 
-std::vector<svm::transport::SerialWriteResult> Win32SerialSession::cancelPendingWrites() {
-    const auto typedResults = cancelPendingOperations();
-    std::vector<svm::transport::SerialWriteResult> results;
-    results.reserve(typedResults.size());
-    for (const auto& result : typedResults) {
-        results.push_back({
-            .requestId = result.operation.requestId,
-            .generation = result.operation.generation,
-            .status = svm::transport::SerialWriteResultStatus::Cancelled,
-            .byteCount = result.byteCount,
-            .deadline = result.operation.deadline,
-        });
-    }
-    return results;
-}
-
 std::vector<svm::transport::SerialTerminalResult>
-Win32SerialSession::cancelPendingOperations() {
+Win32SerialSession::cancelPendingWrites() {
     std::vector<svm::transport::SerialTerminalResult> results;
     {
         WriteLock lock(writeLock_);
@@ -1012,31 +862,20 @@ Win32SerialSession::cancelPendingOperations() {
                 svm::transport::SerialErrorCategory::Cancelled,
                 currentEndpoint));
         }
-    }
-    if (writeWakeEvent_ != nullptr) {
-        SetEvent(writeWakeEvent_);
-    }
-    return results;
-}
-
-std::vector<svm::transport::SerialWriteResult> Win32SerialSession::takeCompletedWrites() {
-    WriteLock lock(writeLock_);
-    std::vector<svm::transport::SerialWriteResult> results;
-    results.reserve(completedWrites_.size());
-    while (!completedWrites_.empty()) {
-        results.push_back(legacyResult(completedWrites_.front()));
-        completedWrites_.pop_front();
+        if (writeWakeEvent_ != nullptr) {
+            SetEvent(writeWakeEvent_);
+        }
     }
     return results;
 }
 
 std::vector<svm::transport::SerialTerminalResult>
-Win32SerialSession::takeCompletedOperations() {
+Win32SerialSession::takeCompletedWrites() {
     WriteLock lock(writeLock_);
     std::vector<svm::transport::SerialTerminalResult> results;
     results.reserve(completedWrites_.size());
     while (!completedWrites_.empty()) {
-        results.push_back(std::move(completedWrites_.front().result));
+        results.push_back(std::move(completedWrites_.front()));
         completedWrites_.pop_front();
     }
     return results;
@@ -1047,21 +886,41 @@ svm::transport::SerialWriteQueueSnapshot Win32SerialSession::writeQueueSnapshot(
     return writeQueue_.snapshot();
 }
 
-bool Win32SerialSession::ensureWriteWorkerLocked() {
+bool Win32SerialSession::ensureWriteWorkerLocked(std::uint32_t& nativeCode) {
+    nativeCode = 0;
     if (writeThread_ != nullptr) {
-        return true;
+        const DWORD waitResult = WaitForSingleObject(writeThread_, 0);
+        if (waitResult == WAIT_TIMEOUT) {
+            return true;
+        }
+        if (waitResult == WAIT_FAILED) {
+            nativeCode = GetLastError();
+            return false;
+        }
+        if (!CloseHandle(writeThread_)) {
+            nativeCode = GetLastError();
+            return false;
+        }
+        writeThread_ = nullptr;
+        if (writeWakeEvent_ != nullptr) {
+            if (!CloseHandle(writeWakeEvent_)) {
+                nativeCode = GetLastError();
+                return false;
+            }
+            writeWakeEvent_ = nullptr;
+        }
     }
     if (writeWakeEvent_ == nullptr) {
         writeWakeEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         if (writeWakeEvent_ == nullptr) {
-            lastErrorText_ = win32SerialErrorText(GetLastError(), "创建串口写入事件");
+            nativeCode = GetLastError();
             return false;
         }
     }
     writeWorkerStopRequested_ = false;
     writeThread_ = CreateThread(nullptr, 0, &Win32SerialSession::writeWorkerThreadProc, this, 0, nullptr);
     if (writeThread_ == nullptr) {
-        lastErrorText_ = win32SerialErrorText(GetLastError(), "启动串口写入线程");
+        nativeCode = GetLastError();
         return false;
     }
     return true;
@@ -1080,9 +939,7 @@ void Win32SerialSession::settlePendingWritesLocked(
 }
 
 void Win32SerialSession::markGenerationDisconnected(
-    svm::transport::SerialSessionGeneration generation,
-    const std::string& diagnostic) {
-    bool wakeWorker = false;
+    svm::transport::SerialSessionGeneration generation) {
     {
         WriteLock lock(writeLock_);
         if (state_ != svm::transport::SerialSessionState::Open || generation_ != generation) {
@@ -1090,20 +947,20 @@ void Win32SerialSession::markGenerationDisconnected(
         }
         state_ = svm::transport::SerialSessionState::Faulted;
         generation_ = svm::transport::kUnassignedSerialSessionGeneration;
-        lastErrorText_ = diagnostic;
         writeWorkerStopRequested_ = true;
         if (activeWrite_.has_value()) {
             activeCancellationCategory_ = svm::transport::SerialErrorCategory::Disconnected;
         }
         settlePendingWritesLocked(svm::transport::SerialErrorCategory::Disconnected);
-        wakeWorker = true;
-    }
-    if (wakeWorker && writeWakeEvent_ != nullptr) {
-        SetEvent(writeWakeEvent_);
+        if (writeWakeEvent_ != nullptr) {
+            SetEvent(writeWakeEvent_);
+        }
     }
 }
 
-void Win32SerialSession::stopWriteWorker(svm::transport::SerialErrorCategory category) {
+Win32SerialSession::WorkerStopOutcome Win32SerialSession::stopWriteWorker(
+    svm::transport::SerialErrorCategory category) {
+    WorkerStopOutcome outcome;
     HANDLE thread = nullptr;
     HANDLE handle = nullptr;
     svm::transport::SerialErrorCategory activeCategory = category;
@@ -1122,16 +979,31 @@ void Win32SerialSession::stopWriteWorker(svm::transport::SerialErrorCategory cat
         handle = asHandle(handle_);
         settlePendingWritesLocked(category);
     }
-    if (writeWakeEvent_ != nullptr) {
-        SetEvent(writeWakeEvent_);
-    }
     if (thread != nullptr) {
-        CancelSynchronousIo(thread);
-        if (isValidHandle(handle)) {
-            PurgeComm(handle, PURGE_TXABORT | PURGE_RXABORT);
+        DWORD waitResult = WaitForSingleObject(thread, 0);
+        if (waitResult == WAIT_TIMEOUT) {
+            bool wakeSignalFailed = false;
+            if (writeWakeEvent_ == nullptr || !SetEvent(writeWakeEvent_)) {
+                outcome.nativeCode = writeWakeEvent_ == nullptr ? ERROR_INVALID_HANDLE : GetLastError();
+                wakeSignalFailed = true;
+            }
+            CancelSynchronousIo(thread);
+            if (isValidHandle(handle)) {
+                PurgeComm(handle, PURGE_TXABORT | PURGE_RXABORT);
+            }
+            waitResult = WaitForSingleObject(thread, wakeSignalFailed ? 1000 : INFINITE);
         }
-        WaitForSingleObject(thread, INFINITE);
-        CloseHandle(thread);
+        if (waitResult != WAIT_OBJECT_0) {
+            outcome.joined = false;
+            outcome.threadHandleClosed = false;
+            outcome.nativeCode = waitResult == WAIT_FAILED ? GetLastError() : ERROR_TIMEOUT;
+            return outcome;
+        }
+        if (!CloseHandle(thread)) {
+            const DWORD nativeCode = GetLastError();
+            outcome.threadHandleClosed = false;
+            outcome.nativeCode = nativeCode;
+        }
     }
     {
         WriteLock lock(writeLock_);
@@ -1144,16 +1016,24 @@ void Win32SerialSession::stopWriteWorker(svm::transport::SerialErrorCategory cat
                     : svm::transport::SerialWriteResultStatus::Closed,
                 0,
                 activeCategory,
-                0,
-                {});
+                0);
         }
-        if (writeThread_ == thread) {
+        if (outcome.threadHandleClosed && writeThread_ == thread) {
             writeThread_ = nullptr;
         }
         writeWorkerStopRequested_ = false;
         activeCancellationCategory_ = svm::transport::SerialErrorCategory::None;
         activeWrite_.reset();
+        if (writeWakeEvent_ != nullptr) {
+            if (CloseHandle(writeWakeEvent_)) {
+                writeWakeEvent_ = nullptr;
+            } else {
+                outcome.wakeEventHandleClosed = false;
+                outcome.nativeCode = GetLastError();
+            }
+        }
     }
+    return outcome;
 }
 
 void Win32SerialSession::writeWorkerLoop() {
@@ -1180,7 +1060,9 @@ void Win32SerialSession::writeWorkerLoop() {
                     break;
                 }
             }
-            WaitForSingleObject(writeWakeEvent_, INFINITE);
+            if (WaitForSingleObject(writeWakeEvent_, INFINITE) != WAIT_OBJECT_0) {
+                return;
+            }
         }
 
         if (!request.has_value()) {
@@ -1192,13 +1074,11 @@ void Win32SerialSession::writeWorkerLoop() {
             outcome = {
                 .ok = false,
                 .category = svm::transport::SerialErrorCategory::Timeout,
-                .diagnostic = "串口写入请求在执行前已超时。",
             };
         } else {
             outcome = writeBytesInternal(
                 request->payload.data(),
                 request->payload.size(),
-                false,
                 request->generation);
         }
 
@@ -1214,23 +1094,23 @@ void Win32SerialSession::writeWorkerLoop() {
                 status = category == svm::transport::SerialErrorCategory::Disconnected
                     ? svm::transport::SerialWriteResultStatus::Disconnected
                     : svm::transport::SerialWriteResultStatus::Closed;
-            } else if (deadlineExpired(request->deadline)
-                || outcome.category == svm::transport::SerialErrorCategory::Timeout) {
+            } else if (!outcome.ok) {
+                status = outcome.category == svm::transport::SerialErrorCategory::Timeout
+                    ? svm::transport::SerialWriteResultStatus::Timeout
+                    : (outcome.category == svm::transport::SerialErrorCategory::Disconnected
+                          ? svm::transport::SerialWriteResultStatus::Disconnected
+                          : (outcome.category == svm::transport::SerialErrorCategory::Cancelled
+                                ? svm::transport::SerialWriteResultStatus::Cancelled
+                                : svm::transport::SerialWriteResultStatus::Failed));
+            } else if (deadlineExpired(request->deadline)) {
                 status = svm::transport::SerialWriteResultStatus::Timeout;
                 category = svm::transport::SerialErrorCategory::Timeout;
-            } else if (!outcome.ok) {
-                status = outcome.category == svm::transport::SerialErrorCategory::Disconnected
-                    ? svm::transport::SerialWriteResultStatus::Disconnected
-                    : (outcome.category == svm::transport::SerialErrorCategory::Cancelled
-                          ? svm::transport::SerialWriteResultStatus::Cancelled
-                          : svm::transport::SerialWriteResultStatus::Failed);
             }
             if (category == svm::transport::SerialErrorCategory::Disconnected
                 && state_ == svm::transport::SerialSessionState::Open
                 && generation_ == request->generation) {
                 state_ = svm::transport::SerialSessionState::Faulted;
                 generation_ = svm::transport::kUnassignedSerialSessionGeneration;
-                lastErrorText_ = outcome.diagnostic;
                 writeWorkerStopRequested_ = true;
                 settlePendingWritesLocked(svm::transport::SerialErrorCategory::Disconnected);
             }
@@ -1239,8 +1119,7 @@ void Win32SerialSession::writeWorkerLoop() {
                 status,
                 outcome.byteCount,
                 category,
-                outcome.nativeCode,
-                std::move(outcome.diagnostic));
+                outcome.nativeCode);
             activeWrite_.reset();
             activeCancellationCategory_ = svm::transport::SerialErrorCategory::None;
             if (writeWorkerStopRequested_) {
@@ -1259,80 +1138,7 @@ DWORD WINAPI Win32SerialSession::writeWorkerThreadProc(void* parameter) {
     return 0;
 }
 
-bool Win32SerialSession::waitForReadyRead(int timeoutMs) {
-    svm::transport::SerialSessionSnapshot snapshot;
-    {
-        WriteLock lock(writeLock_);
-        snapshot = sessionSnapshotLocked();
-        if (!snapshot.open()) {
-            lastErrorText_ = "串口未打开，无法等待接收数据。";
-            return false;
-        }
-    }
-
-    const ULONGLONG startedAt = GetTickCount64();
-    const ULONGLONG safeTimeout = timeoutMs > 0 ? static_cast<ULONGLONG>(timeoutMs) : 0;
-
-    while (true) {
-        COMSTAT status = {};
-        DWORD errors = 0;
-        DWORD nativeCode = 0;
-        bool leased = false;
-        bool completedCurrent = false;
-        {
-            WriteLock ioLock(ioLock_);
-            const HANDLE handle = validatedHandleForGeneration(snapshot.generation);
-            leased = isValidHandle(handle);
-            if (leased && !ClearCommError(handle, &errors, &status)) {
-                nativeCode = GetLastError();
-            }
-            completedCurrent = leased
-                && validatedHandleForGeneration(snapshot.generation) == handle;
-        }
-        if (!completedCurrent) {
-            return false;
-        }
-        if (nativeCode != 0 || errors != 0) {
-            const std::string diagnostic = errors != 0
-                ? commStatusErrorText(errors)
-                : win32SerialErrorText(nativeCode, "查询串口接收状态");
-            if (nativeCode != 0
-                && nativeErrorCategory(nativeCode, false)
-                    == svm::transport::SerialErrorCategory::Disconnected) {
-                markGenerationDisconnected(snapshot.generation, diagnostic);
-            }
-            WriteLock lock(writeLock_);
-            if (state_ == svm::transport::SerialSessionState::Open
-                && generation_ == snapshot.generation) {
-                lastErrorText_ = diagnostic;
-            }
-            return false;
-        }
-
-        if (status.cbInQue > 0) {
-            WriteLock lock(writeLock_);
-            if (state_ == svm::transport::SerialSessionState::Open
-                && generation_ == snapshot.generation) {
-                lastErrorText_.clear();
-            }
-            return true;
-        }
-
-        if (safeTimeout == 0 || GetTickCount64() - startedAt >= safeTimeout) {
-            return false;
-        }
-
-        const ULONGLONG elapsed = GetTickCount64() - startedAt;
-        const DWORD remaining = static_cast<DWORD>(std::min<ULONGLONG>(safeTimeout - elapsed, 10));
-        Sleep(std::max<DWORD>(remaining, 1));
-    }
-}
-
-std::vector<std::uint8_t> Win32SerialSession::readAvailable(std::size_t maxBytes) {
-    return readOperation(maxBytes, {}).bytes;
-}
-
-svm::transport::SerialReadResult Win32SerialSession::readOperation(
+svm::transport::SerialReadResult Win32SerialSession::readAvailable(
     std::size_t maxBytes,
     svm::transport::SerialDeadline deadline) {
     svm::transport::SerialSessionSnapshot snapshot;
@@ -1340,7 +1146,6 @@ svm::transport::SerialReadResult Win32SerialSession::readOperation(
         WriteLock lock(writeLock_);
         snapshot = sessionSnapshotLocked();
         if (!snapshot.open()) {
-            lastErrorText_ = "串口未打开，无法读取数据。";
             return {
                 .operation = rejectedClosed(
                     svm::transport::SerialOperationKind::Read,
@@ -1350,11 +1155,6 @@ svm::transport::SerialReadResult Win32SerialSession::readOperation(
         }
     }
     if (maxBytes == 0) {
-        WriteLock lock(writeLock_);
-        if (state_ == svm::transport::SerialSessionState::Open
-            && generation_ == snapshot.generation) {
-            lastErrorText_.clear();
-        }
         return {
             .operation = operationResult(
                 svm::transport::SerialOperationKind::Read,
@@ -1387,7 +1187,6 @@ svm::transport::SerialReadResult Win32SerialSession::readOperation(
     COMSTAT status = {};
     DWORD errors = 0;
     DWORD nativeCode = 0;
-    std::string diagnostic;
     std::vector<std::uint8_t> buffer;
     DWORD bytesRead = 0;
     bool leased = false;
@@ -1398,10 +1197,8 @@ svm::transport::SerialReadResult Win32SerialSession::readOperation(
         leased = isValidHandle(handle);
         if (leased && !ClearCommError(handle, &errors, &status)) {
             nativeCode = GetLastError();
-            diagnostic = win32SerialErrorText(nativeCode, "查询串口接收状态");
         } else if (leased && errors != 0) {
             nativeCode = errors;
-            diagnostic = commStatusErrorText(errors);
         } else if (leased && status.cbInQue > 0) {
             const DWORD bytesToRead = static_cast<DWORD>(std::min<std::size_t>(
                 maxBytes,
@@ -1409,7 +1206,6 @@ svm::transport::SerialReadResult Win32SerialSession::readOperation(
             buffer.resize(bytesToRead);
             if (!ReadFile(handle, buffer.data(), bytesToRead, &bytesRead, nullptr)) {
                 nativeCode = GetLastError();
-                diagnostic = win32SerialErrorText(nativeCode, "读取串口");
                 buffer.clear();
             } else {
                 buffer.resize(bytesRead);
@@ -1435,30 +1231,17 @@ svm::transport::SerialReadResult Win32SerialSession::readOperation(
 
     svm::transport::SerialOperationStatus operationStatus = svm::transport::SerialOperationStatus::Succeeded;
     svm::transport::SerialErrorCategory category = svm::transport::SerialErrorCategory::None;
-    if (deadlineExpired(deadline)) {
-        operationStatus = svm::transport::SerialOperationStatus::Timeout;
-        category = svm::transport::SerialErrorCategory::Timeout;
-    } else if (nativeCode != 0) {
+    if (nativeCode != 0) {
         category = errors != 0
             ? svm::transport::SerialErrorCategory::IoFailure
             : nativeErrorCategory(nativeCode, false);
-        operationStatus = category == svm::transport::SerialErrorCategory::Disconnected
-            ? svm::transport::SerialOperationStatus::Disconnected
-            : (category == svm::transport::SerialErrorCategory::Timeout
-                  ? svm::transport::SerialOperationStatus::Timeout
-                  : svm::transport::SerialOperationStatus::Failed);
+        operationStatus = failureOperationStatus(category);
+    } else if (deadlineExpired(deadline)) {
+        operationStatus = svm::transport::SerialOperationStatus::Timeout;
+        category = svm::transport::SerialErrorCategory::Timeout;
     }
     if (category == svm::transport::SerialErrorCategory::Disconnected) {
-        markGenerationDisconnected(snapshot.generation, diagnostic);
-    }
-    {
-        WriteLock lock(writeLock_);
-        if (state_ == svm::transport::SerialSessionState::Open
-            && generation_ == snapshot.generation) {
-            lastErrorText_ = operationStatus == svm::transport::SerialOperationStatus::Succeeded
-                ? std::string{}
-                : diagnostic;
-        }
+        markGenerationDisconnected(snapshot.generation);
     }
     return {
         .operation = operationResult(
@@ -1562,13 +1345,8 @@ svm::transport::SerialTerminalResult Win32SerialSession::terminalResult(
     };
 }
 
-void Win32SerialSession::publishCompletion(
-    svm::transport::SerialTerminalResult result,
-    std::string diagnostic) {
-    completedWrites_.push_back({
-        .result = std::move(result),
-        .diagnostic = std::move(diagnostic),
-    });
+void Win32SerialSession::publishCompletion(svm::transport::SerialTerminalResult result) {
+    completedWrites_.push_back(std::move(result));
 }
 
 bool Win32SerialSession::completeActiveWrite(
@@ -1576,14 +1354,12 @@ bool Win32SerialSession::completeActiveWrite(
     svm::transport::SerialWriteResultStatus status,
     std::size_t byteCount,
     svm::transport::SerialErrorCategory category,
-    std::uint32_t nativeCode,
-    std::string diagnostic) {
+    std::uint32_t nativeCode) {
     const svm::transport::SerialWriteResult completed = writeQueue_.completeActive(
         request.requestId,
         request.generation,
         status,
-        byteCount,
-        diagnostic);
+        byteCount);
     if (completed.rejected()) {
         return false;
     }
@@ -1593,8 +1369,7 @@ bool Win32SerialSession::completeActiveWrite(
             operationStatus(completed.status),
             category,
             request.endpoint,
-            nativeCode),
-        std::move(diagnostic));
+            nativeCode));
     return true;
 }
 
@@ -1639,45 +1414,6 @@ svm::transport::SerialOperationStatus Win32SerialSession::operationStatus(
         return svm::transport::SerialOperationStatus::Failed;
     }
     return svm::transport::SerialOperationStatus::Failed;
-}
-
-svm::transport::SerialWriteResult Win32SerialSession::legacyResult(const CompletedWrite& completed) {
-    svm::transport::SerialWriteResultStatus status = svm::transport::SerialWriteResultStatus::Failed;
-    switch (completed.result.status) {
-    case svm::transport::SerialOperationStatus::Succeeded:
-        status = svm::transport::SerialWriteResultStatus::Sent;
-        break;
-    case svm::transport::SerialOperationStatus::Timeout:
-        status = svm::transport::SerialWriteResultStatus::Timeout;
-        break;
-    case svm::transport::SerialOperationStatus::Cancelled:
-        status = svm::transport::SerialWriteResultStatus::Cancelled;
-        break;
-    case svm::transport::SerialOperationStatus::Disconnected:
-        status = svm::transport::SerialWriteResultStatus::Disconnected;
-        break;
-    case svm::transport::SerialOperationStatus::Accepted:
-        status = svm::transport::SerialWriteResultStatus::Accepted;
-        break;
-    case svm::transport::SerialOperationStatus::RejectedFull:
-        status = svm::transport::SerialWriteResultStatus::RejectedFull;
-        break;
-    case svm::transport::SerialOperationStatus::RejectedInvalid:
-    case svm::transport::SerialOperationStatus::RejectedClosed:
-        status = svm::transport::SerialWriteResultStatus::RejectedInvalid;
-        break;
-    case svm::transport::SerialOperationStatus::Failed:
-        status = svm::transport::SerialWriteResultStatus::Failed;
-        break;
-    }
-    return {
-        .requestId = completed.result.operation.requestId,
-        .generation = completed.result.operation.generation,
-        .status = status,
-        .byteCount = completed.result.byteCount,
-        .deadline = completed.result.operation.deadline,
-        .message = completed.diagnostic,
-    };
 }
 
 bool Win32SerialSession::deadlineExpired(const svm::transport::SerialDeadline& deadline) noexcept {

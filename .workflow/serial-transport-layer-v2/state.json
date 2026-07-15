@@ -2,7 +2,7 @@
   "version": "1.0",
   "project_name": "Serial Transport Layer v2",
   "created_at": "2026-07-11T03:50:05+08:00",
-  "updated_at": "2026-07-15T12:34:31+08:00",
+  "updated_at": "2026-07-16T01:21:24+08:00",
   "current_phase": "execution",
   "phase_history": [
     {
@@ -61,7 +61,7 @@
     "domain_knowledge": ".workflow/serial-transport-layer-v2/context/domain-knowledge.md",
     "interview_transcript": ".workflow/serial-transport-layer-v2/context/interview-transcript.md",
     "hypothesis_tracker": ".workflow/serial-transport-layer-v2/context/hypothesis-tracker.md",
-    "last_updated": "2026-07-12T14:52:58+08:00"
+    "last_updated": "2026-07-16T01:21:24+08:00"
   },
   "requirements": {
     "status": "completed",
@@ -153,7 +153,7 @@
   "execution": {
     "status": "in_progress",
     "current_phase_index": 2,
-    "current_task_index": 5,
+    "current_task_index": 6,
     "total_phases": 4,
     "phases": {
       "1": {
@@ -171,15 +171,15 @@
       "2": {
         "name": "Win32 Session and Caller Migration",
         "total_tasks": 6,
-        "completed_tasks": 5,
-        "status": "in_progress",
+        "completed_tasks": 6,
+        "status": "completed",
         "tasks": {
           "1": { "name": "Harden Win32 Session Owner", "status": "completed", "started_at": "2026-07-13T10:35:01+08:00", "completed_at": "2026-07-13T10:49:31+08:00" },
           "2": { "name": "Implement Generation and Settlement", "status": "completed", "started_at": "2026-07-13T10:51:33+08:00", "completed_at": "2026-07-14T17:49:28+08:00" },
           "3": { "name": "Migrate Main-Window Lifecycle", "status": "completed", "started_at": "2026-07-14T17:52:29+08:00", "completed_at": "2026-07-14T18:48:58+08:00" },
           "4": { "name": "Migrate Main-Window I/O", "status": "completed", "started_at": "2026-07-14T18:53:27+08:00", "completed_at": "2026-07-15T11:38:26+08:00" },
           "5": { "name": "Migrate RTU and Modbus Borrowing", "status": "completed", "started_at": "2026-07-15T11:40:15+08:00", "completed_at": "2026-07-15T12:34:31+08:00" },
-          "6": { "name": "Remove Broad Transport Facade", "status": "pending", "started_at": null, "completed_at": null }
+          "6": { "name": "Remove Broad Transport Facade", "status": "completed", "started_at": "2026-07-15T12:36:55+08:00", "completed_at": "2026-07-16T01:21:24+08:00" }
         }
       },
       "3": {

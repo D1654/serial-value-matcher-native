@@ -1,12 +1,12 @@
 #include "win32/win32_serial_session.h"
 
-#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <cstdint>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -37,42 +37,53 @@ bool parsePositiveIntEnv(const char* name, int defaultValue, int maxValue, int& 
     return true;
 }
 
-std::vector<std::uint8_t> readExpectedBytes(
-    svm::transport::SerialTransport& port,
+svm::transport::SerialDeadline deadlineAfter(int timeoutMs) {
+    return {
+        .expiresAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs),
+    };
+}
+
+void printOperationEvidence(const svm::transport::SerialOperationResult& result) {
+    std::cerr << " status=" << static_cast<int>(result.status)
+              << " category=" << static_cast<int>(result.error.category)
+              << " nativeCode=" << result.error.nativeCode
+              << " bytes=" << result.byteCount;
+}
+
+bool readExpectedBytes(
+    svm::transport::SerialByteStream& stream,
     std::size_t byteCount,
-    int timeoutMs) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
-    std::vector<std::uint8_t> bytes;
+    const svm::transport::SerialDeadline& deadline,
+    int reopenIndex,
+    int iterationIndex,
+    std::vector<std::uint8_t>& bytes) {
     while (bytes.size() < byteCount) {
-        const auto now = std::chrono::steady_clock::now();
-        if (now >= deadline) {
+        if (deadline.expiresAt.has_value()
+            && std::chrono::steady_clock::now() >= *deadline.expiresAt) {
             break;
         }
 
-        const int remainingMs = static_cast<int>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count());
-        const int pollMs = std::clamp(remainingMs, 1, 100);
-        if (!port.waitForReadyRead(pollMs)) {
-            if (!port.lastErrorText().empty()) {
-                break;
-            }
+        svm::transport::SerialReadResult read = stream.readAvailable(byteCount - bytes.size(), deadline);
+        if (read.operation.status == svm::transport::SerialOperationStatus::Timeout) {
+            break;
+        }
+        if (!read.operation.succeeded()) {
+            std::cerr << "read failed reopen=" << reopenIndex << " iteration=" << iterationIndex;
+            printOperationEvidence(read.operation);
+            std::cerr << '\n';
+            return false;
+        }
+        if (read.bytes.empty()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
             continue;
         }
-
-        std::vector<std::uint8_t> chunk = port.readAvailable(byteCount - bytes.size());
-        if (chunk.empty()) {
-            if (!port.lastErrorText().empty()) {
-                break;
-            }
-            continue;
-        }
-        bytes.insert(bytes.end(), chunk.begin(), chunk.end());
+        bytes.insert(bytes.end(), read.bytes.begin(), read.bytes.end());
     }
-    return bytes;
+    return true;
 }
 
 bool transact(
-    svm::transport::SerialTransport& port,
+    svm::transport::SerialByteStream& stream,
     const std::vector<std::uint8_t>& request,
     const std::vector<std::uint8_t>& expected,
     int reopenIndex,
@@ -81,44 +92,72 @@ bool transact(
     if (trace && iterationIndex == 0) {
         std::cerr << "trace: writing first request reopen=" << reopenIndex << '\n';
     }
-    const auto writeResult = port.writeBytes(request);
-    if (!writeResult.ok || writeResult.byteCount != request.size()) {
-        std::cerr << "write failed reopen=" << reopenIndex << " iteration=" << iterationIndex
-                  << " error=" << writeResult.errorMessage << " bytes=" << writeResult.byteCount << '\n';
+    const svm::transport::SerialDeadline deadline = deadlineAfter(2000);
+    const svm::transport::SerialTerminalResult writeResult = stream.writeBytes(request, deadline);
+    if (!writeResult.succeeded() || writeResult.byteCount != request.size()) {
+        std::cerr << "write failed reopen=" << reopenIndex << " iteration=" << iterationIndex;
+        printOperationEvidence(writeResult);
+        std::cerr << '\n';
         return false;
     }
 
     if (trace && iterationIndex == 0) {
         std::cerr << "trace: waiting first response reopen=" << reopenIndex << '\n';
     }
-    const std::vector<std::uint8_t> response = readExpectedBytes(port, expected.size(), 2000);
+    std::vector<std::uint8_t> response;
+    if (!readExpectedBytes(stream, expected.size(), deadline, reopenIndex, iterationIndex, response)) {
+        return false;
+    }
     if (response != expected) {
         std::cerr << "unexpected response reopen=" << reopenIndex << " iteration=" << iterationIndex
                   << " expected=";
         printBytes(std::cerr, expected);
         std::cerr << " actual=";
         printBytes(std::cerr, response);
-        std::cerr << " lastError=" << port.lastErrorText() << '\n';
+        std::cerr << '\n';
         return false;
     }
 
     return true;
 }
 
-bool waitForNoData(svm::transport::SerialTransport& port, int timeoutMs, const char* scenarioName) {
-    if (port.waitForReadyRead(timeoutMs)) {
-        const std::vector<std::uint8_t> unexpected = port.readAvailable(260);
-        std::cerr << "unexpected ready-read scenario=" << scenarioName << " bytes=";
-        printBytes(std::cerr, unexpected);
-        std::cerr << '\n';
-        return false;
-    }
-    if (!port.lastErrorText().empty()) {
-        std::cerr << "unexpected wait error scenario=" << scenarioName
-                  << " error=" << port.lastErrorText() << '\n';
-        return false;
+bool waitForNoData(
+    svm::transport::SerialByteStream& stream,
+    int timeoutMs,
+    const char* scenarioName) {
+    const svm::transport::SerialDeadline deadline = deadlineAfter(timeoutMs);
+    while (!deadline.expiresAt.has_value()
+           || std::chrono::steady_clock::now() < *deadline.expiresAt) {
+        svm::transport::SerialReadResult read = stream.readAvailable(260, deadline);
+        if (read.operation.status == svm::transport::SerialOperationStatus::Timeout) {
+            return true;
+        }
+        if (!read.operation.succeeded()) {
+            std::cerr << "unexpected read error scenario=" << scenarioName;
+            printOperationEvidence(read.operation);
+            std::cerr << '\n';
+            return false;
+        }
+        if (!read.bytes.empty()) {
+            std::cerr << "unexpected ready-read scenario=" << scenarioName << " bytes=";
+            printBytes(std::cerr, read.bytes);
+            std::cerr << '\n';
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     return true;
+}
+
+bool closeSession(svm::transport::SerialSession& session, const char* scenarioName) {
+    const svm::transport::SerialOperationResult result = session.close();
+    if (result.succeeded()) {
+        return true;
+    }
+    std::cerr << "close failed scenario=" << scenarioName;
+    printOperationEvidence(result);
+    std::cerr << '\n';
+    return false;
 }
 
 } // namespace
@@ -171,14 +210,21 @@ int main() {
 
     if (scenario == "timeout") {
         svm::win32::Win32SerialSession port;
-        if (!port.open(options)) {
-            std::cerr << "open failed scenario=timeout: " << port.lastErrorText() << '\n';
+        svm::transport::SerialSession& session = port;
+        svm::transport::SerialByteStream& stream = session.byteStream();
+        const svm::transport::SerialOperationResult openResult = session.open(options);
+        if (!openResult.succeeded()) {
+            std::cerr << "open failed scenario=timeout";
+            printOperationEvidence(openResult);
+            std::cerr << '\n';
             return 2;
         }
-        if (!waitForNoData(port, timeoutMs, "timeout")) {
+        if (!waitForNoData(stream, timeoutMs, "timeout")) {
             return 4;
         }
-        port.close();
+        if (!closeSession(session, "timeout")) {
+            return 5;
+        }
         std::cout << "native_win32_serial_loopback_tests passed scenario=timeout port=" << portNameEnv
                   << " timeout-ms=" << timeoutMs << " transactions=0 tx=0 rx=0\n";
         return 0;
@@ -186,20 +232,29 @@ int main() {
 
     if (scenario == "cancel") {
         svm::win32::Win32SerialSession port;
-        if (!port.open(options)) {
-            std::cerr << "open failed scenario=cancel: " << port.lastErrorText() << '\n';
+        svm::transport::SerialSession& session = port;
+        svm::transport::SerialByteStream& stream = session.byteStream();
+        const svm::transport::SerialOperationResult openResult = session.open(options);
+        if (!openResult.succeeded()) {
+            std::cerr << "open failed scenario=cancel";
+            printOperationEvidence(openResult);
+            std::cerr << '\n';
             return 2;
         }
-        const auto writeResult = port.writeBytes(request);
-        if (!writeResult.ok || writeResult.byteCount != request.size()) {
-            std::cerr << "cancel write failed error=" << writeResult.errorMessage
-                      << " bytes=" << writeResult.byteCount << '\n';
+        const svm::transport::SerialTerminalResult writeResult =
+            stream.writeBytes(request, deadlineAfter(options.writeTimeoutMs));
+        if (!writeResult.succeeded() || writeResult.byteCount != request.size()) {
+            std::cerr << "cancel write failed";
+            printOperationEvidence(writeResult);
+            std::cerr << '\n';
             return 3;
         }
-        if (!waitForNoData(port, cancelWaitMs, "cancel")) {
+        if (!waitForNoData(stream, cancelWaitMs, "cancel")) {
             return 4;
         }
-        port.close();
+        if (!closeSession(session, "cancel")) {
+            return 5;
+        }
         std::cout << "native_win32_serial_loopback_tests passed scenario=cancel port=" << portNameEnv
                   << " cancel-wait-ms=" << cancelWaitMs
                   << " transactions=1 tx=" << request.size() << " rx=0\n";
@@ -208,11 +263,16 @@ int main() {
 
     for (int reopenIndex = 0; reopenIndex < reopenCount; ++reopenIndex) {
         svm::win32::Win32SerialSession port;
+        svm::transport::SerialSession& session = port;
+        svm::transport::SerialByteStream& stream = session.byteStream();
         if (trace) {
             std::cerr << "trace: opening reopen=" << reopenIndex << '\n';
         }
-        if (!port.open(options)) {
-            std::cerr << "open failed reopen=" << reopenIndex << ": " << port.lastErrorText() << '\n';
+        const svm::transport::SerialOperationResult openResult = session.open(options);
+        if (!openResult.succeeded()) {
+            std::cerr << "open failed reopen=" << reopenIndex;
+            printOperationEvidence(openResult);
+            std::cerr << '\n';
             return 2;
         }
         if (trace) {
@@ -220,12 +280,14 @@ int main() {
         }
 
         for (int iterationIndex = 0; iterationIndex < iterations; ++iterationIndex) {
-            if (!transact(port, request, expected, reopenIndex, iterationIndex, trace)) {
+            if (!transact(stream, request, expected, reopenIndex, iterationIndex, trace)) {
                 return 3;
             }
         }
 
-        port.close();
+        if (!closeSession(session, scenario.c_str())) {
+            return 5;
+        }
     }
 
     const long long transactionCount = static_cast<long long>(iterations) * static_cast<long long>(reopenCount);

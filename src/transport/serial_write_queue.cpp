@@ -177,10 +177,6 @@ SerialWriteResult SerialWriteQueue::enqueue(
     };
 }
 
-SerialWriteResult SerialWriteQueue::enqueueWrite(std::vector<std::uint8_t> payload, std::optional<int> timeoutMs) {
-    return enqueue(std::move(payload), timeoutMs.value_or(kDefaultSerialWriteTimeoutMs));
-}
-
 std::optional<SerialWriteRequest> SerialWriteQueue::peek() const {
     if (pending_.empty()) {
         return std::nullopt;

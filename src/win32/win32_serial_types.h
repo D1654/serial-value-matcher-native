@@ -11,7 +11,6 @@ using SerialParity = transport::SerialParity;
 using SerialStopBits = transport::SerialStopBits;
 using SerialFlowControl = transport::SerialFlowControl;
 using SerialOpenOptions = transport::SerialOpenOptions;
-using SerialIoResult = transport::SerialIoResult;
 
 struct SerialPortDescriptor {
     std::string portName;
