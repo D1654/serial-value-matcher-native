@@ -143,6 +143,10 @@ void NativeMainWindow::connectSerial() {
         setStatus(tx(T::AlreadyConnected));
         return;
     }
+    if (serialIoState_.isOwnedBy(NativeSerialIoOwner::ModbusScan)) {
+        setStatus(tx(T::ModbusRunning));
+        return;
+    }
     if (currentSession.state != svm::transport::SerialSessionState::Closed) {
         closeSerialPort({});
     }
@@ -242,6 +246,7 @@ std::wstring NativeMainWindow::serialIoBusyStatus() const {
 
 void NativeMainWindow::releaseModbusScanOwnership() {
     modbusScanRunning_ = false;
+    modbusScanGeneration_ = svm::transport::kUnassignedSerialSessionGeneration;
     serialIoState_.release(NativeSerialIoOwner::ModbusScan);
 }
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "transport/serial_types.h"
+
 #include <string_view>
 
 namespace svm::win32 {
@@ -39,5 +41,10 @@ NativeModbusAttemptResultKind classifyNativeModbusAttemptResult(
 const wchar_t* nativeModbusAttemptResultLabel(NativeModbusAttemptResultKind kind) noexcept;
 bool nativeModbusAttemptCountsAsSuccess(NativeModbusAttemptResultKind kind) noexcept;
 bool nativeModbusAttemptCountsAsFailure(NativeModbusAttemptResultKind kind) noexcept;
+bool nativeModbusScanMessageMatchesSession(
+    svm::transport::SerialSessionGeneration messageGeneration,
+    svm::transport::SerialSessionGeneration activeScanGeneration,
+    const svm::transport::SerialSessionSnapshot& session,
+    bool allowFaulted) noexcept;
 
 } // namespace svm::win32

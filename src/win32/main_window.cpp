@@ -161,7 +161,7 @@ LRESULT NativeMainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lPar
         repaintWorkbenchTabControls();
         return 0;
     case kNativeModbusScanDoneMessage:
-        handleModbusScanDone(reinterpret_cast<NativeModbusScanResult*>(lParam));
+        handleModbusScanDone();
         return 0;
     case kNativeModbusScanProgressMessage:
         handleModbusScanProgress(reinterpret_cast<NativeModbusScanProgress*>(lParam));

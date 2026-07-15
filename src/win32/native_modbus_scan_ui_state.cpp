@@ -131,4 +131,19 @@ bool nativeModbusAttemptCountsAsFailure(NativeModbusAttemptResultKind kind) noex
     return true;
 }
 
+bool nativeModbusScanMessageMatchesSession(
+    svm::transport::SerialSessionGeneration messageGeneration,
+    svm::transport::SerialSessionGeneration activeScanGeneration,
+    const svm::transport::SerialSessionSnapshot& session,
+    bool allowFaulted) noexcept {
+    if (messageGeneration == svm::transport::kUnassignedSerialSessionGeneration
+        || messageGeneration != activeScanGeneration) {
+        return false;
+    }
+    if (session.open()) {
+        return session.generation == messageGeneration;
+    }
+    return allowFaulted && session.state == svm::transport::SerialSessionState::Faulted;
+}
+
 } // namespace svm::win32

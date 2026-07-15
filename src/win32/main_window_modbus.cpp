@@ -59,9 +59,10 @@ void NativeMainWindow::updateModbusScanProgress(
 }
 
 void NativeMainWindow::runModbusScan() {
+    const svm::transport::SerialSessionSnapshot initialSession = serialLifecycle_.snapshot();
     const NativeModbusScanDecision scanDecision = modbusAnalysisController_.scanDecision(
         serialIoState_.isOwnedBy(NativeSerialIoOwner::ModbusScan),
-        serialTransport_.isOpen(),
+        initialSession.open(),
         store_.isOpen(),
         serialIoState_);
     if (scanDecision.cancelsScan()) {
@@ -106,22 +107,43 @@ void NativeMainWindow::runModbusScan() {
         return;
     }
 
-    appendLog(uiString(T::SystemModbusStartPrefix) + utf8ToWide(requestInput.scanSessionId));
-    closeModbusScanThread();
+    if (closeModbusScanThread() != NativeModbusThreadCloseResult::Settled) {
+        return;
+    }
+    delete modbusScanTerminalResult_.exchange(nullptr, std::memory_order_acq_rel);
+    const svm::transport::SerialSessionSnapshot scanSession = serialLifecycle_.snapshot();
+    if (!scanSession.open()
+        || scanSession.generation == svm::transport::kUnassignedSerialSessionGeneration) {
+        setStatus(tx(T::ConnectBeforeModbus));
+        return;
+    }
+    if (!store_.isOpen()) {
+        setStatus(tx(T::StorageModbusClosed));
+        return;
+    }
     modbusScanCancelRequested_ = false;
     disconnectAfterModbusScan_ = false;
     if (!serialIoState_.tryAcquire(scanDecision.owner)) {
         setStatus(serialIoBusyStatus());
         return;
     }
+    modbusScanGeneration_ = scanSession.generation;
+    appendLog(uiString(T::SystemModbusStartPrefix) + utf8ToWide(requestInput.scanSessionId));
     setModbusScanRunningUi(true);
     updateModbusScanProgress(0, requestResult.request.plan.blocks.size(), 0, 0, 0);
     setStatus(tx(T::ModbusRunning));
 
     auto context = std::make_unique<NativeModbusScanContext>();
     context->notifyWindow = window_;
-    context->serialTransport = &serialTransport_;
+    context->byteStream = &serialByteStream_;
+    context->generation = scanSession.generation;
+    context->endpoint = scanSession.endpoint;
+    context->generationIsCurrent = [session = &serialLifecycle_](svm::transport::SerialSessionGeneration generation) {
+        const svm::transport::SerialSessionSnapshot current = session->snapshot();
+        return current.open() && current.generation == generation;
+    };
     context->cancelRequested = &modbusScanCancelRequested_;
+    context->terminalResult = &modbusScanTerminalResult_;
     context->plan = std::move(requestResult.request.plan);
     context->execution = std::move(requestResult.request.execution);
     context->scanSessionId = requestInput.scanSessionId;
@@ -146,7 +168,13 @@ void NativeMainWindow::requestCancelModbusScan() {
 
 void NativeMainWindow::handleModbusScanProgress(NativeModbusScanProgress* progressPointer) {
     std::unique_ptr<NativeModbusScanProgress> progress(progressPointer);
-    if (!progress) {
+    if (!progress
+        || !modbusScanRunning_.load(std::memory_order_relaxed)
+        || !nativeModbusScanMessageMatchesSession(
+            progress->generation,
+            modbusScanGeneration_,
+            serialLifecycle_.snapshot(),
+            true)) {
         return;
     }
 
@@ -174,7 +202,13 @@ void NativeMainWindow::handleModbusScanProgress(NativeModbusScanProgress* progre
 
 void NativeMainWindow::handleModbusScanDataBatch(NativeModbusScanDataBatch* batchPointer) {
     std::unique_ptr<NativeModbusScanDataBatch> batch(batchPointer);
-    if (!batch) {
+    if (!batch
+        || !modbusScanRunning_.load(std::memory_order_relaxed)
+        || !nativeModbusScanMessageMatchesSession(
+            batch->generation,
+            modbusScanGeneration_,
+            serialLifecycle_.snapshot(),
+            true)) {
         return;
     }
 
@@ -194,13 +228,27 @@ void NativeMainWindow::handleModbusScanDataBatch(NativeModbusScanDataBatch* batc
     }
 }
 
-void NativeMainWindow::handleModbusScanDone(NativeModbusScanResult* resultPointer) {
-    std::unique_ptr<NativeModbusScanResult> result(resultPointer);
+void NativeMainWindow::handleModbusScanDone() {
+    std::unique_ptr<NativeModbusScanResult> result(
+        modbusScanTerminalResult_.exchange(nullptr, std::memory_order_acq_rel));
+    if (!result || result->generation != modbusScanGeneration_) {
+        return;
+    }
+    const NativeModbusThreadCloseResult closeResult = closeModbusScanThread();
+    if (closeResult == NativeModbusThreadCloseResult::NotJoined) {
+        modbusScanTerminalResult_.store(result.release(), std::memory_order_release);
+        return;
+    }
     const bool shouldDisconnectAfterScan = disconnectAfterModbusScan_;
     disconnectAfterModbusScan_ = false;
-    closeModbusScanThread();
-    if (!result) {
-        setModbusScanRunningUi(false);
+    const bool resultMatchesSession = result
+        && nativeModbusScanMessageMatchesSession(
+            result->generation,
+            modbusScanGeneration_,
+            serialLifecycle_.snapshot(),
+            result->serialFailed);
+    setModbusScanRunningUi(false);
+    if (!resultMatchesSession) {
         return;
     }
 
@@ -209,7 +257,6 @@ void NativeMainWindow::handleModbusScanDone(NativeModbusScanResult* resultPointe
     if (!summary.empty()) {
         appendLog(std::wstring(L"[\u7CFB\u7EDF] ") + summary);
     }
-    setModbusScanRunningUi(false);
     if (handleCompletedModbusScanDisconnect(*result, shouldDisconnectAfterScan)) {
         return;
     }
@@ -220,13 +267,40 @@ void NativeMainWindow::handleModbusScanDone(NativeModbusScanResult* resultPointe
     setStatus(summary);
 }
 
-void NativeMainWindow::closeModbusScanThread() {
+NativeMainWindow::NativeModbusThreadCloseResult NativeMainWindow::closeModbusScanThread() {
     if (modbusScanThread_ == nullptr) {
-        return;
+        return NativeModbusThreadCloseResult::Settled;
     }
-    WaitForSingleObject(modbusScanThread_, INFINITE);
-    CloseHandle(modbusScanThread_);
+    const DWORD waitResult = WaitForSingleObject(modbusScanThread_, INFINITE);
+    if (waitResult != WAIT_OBJECT_0) {
+        const DWORD nativeCode = waitResult == WAIT_FAILED ? GetLastError() : waitResult;
+        const std::wstring message = L"等待 Modbus 扫描线程结束失败 (native="
+            + std::to_wstring(nativeCode) + L")";
+        appendLog(NativeLogKind::Error, message);
+        setStatus(message);
+        return NativeModbusThreadCloseResult::NotJoined;
+    }
+    if (!CloseHandle(modbusScanThread_)) {
+        const std::wstring message = L"关闭 Modbus 扫描线程句柄失败 (native="
+            + std::to_wstring(GetLastError()) + L")";
+        appendLog(NativeLogKind::Error, message);
+        setStatus(message);
+        return NativeModbusThreadCloseResult::HandleCloseFailed;
+    }
     modbusScanThread_ = nullptr;
+    return NativeModbusThreadCloseResult::Settled;
+}
+
+void NativeMainWindow::discardPendingModbusScanMessages() {
+    MSG message = {};
+    while (PeekMessageW(&message, window_, kNativeModbusScanProgressMessage, kNativeModbusScanProgressMessage, PM_REMOVE)) {
+        delete reinterpret_cast<NativeModbusScanProgress*>(message.lParam);
+    }
+    while (PeekMessageW(&message, window_, kNativeModbusScanDataMessage, kNativeModbusScanDataMessage, PM_REMOVE)) {
+        delete reinterpret_cast<NativeModbusScanDataBatch*>(message.lParam);
+    }
+    while (PeekMessageW(&message, window_, kNativeModbusScanDoneMessage, kNativeModbusScanDoneMessage, PM_REMOVE)) {
+    }
 }
 
 void NativeMainWindow::updateCompletedModbusScanProgress(const NativeModbusScanResult& result) {
@@ -271,11 +345,12 @@ void NativeMainWindow::setModbusScanRunningUi(bool running) {
         serialIoState_.tryAcquire(NativeSerialIoOwner::ModbusScan);
     } else if (!running) {
         serialIoState_.release(NativeSerialIoOwner::ModbusScan);
+        modbusScanGeneration_ = svm::transport::kUnassignedSerialSessionGeneration;
     }
     if (running) {
         KillTimer(window_, IDT_SERIAL_POLL);
         KillTimer(window_, IDT_TIMED_SEND);
-    } else if (serialTransport_.isOpen()) {
+    } else if (serialLifecycle_.snapshot().open()) {
         SetTimer(window_, IDT_SERIAL_POLL, 50, nullptr);
         updateTimedSendTimer();
     }

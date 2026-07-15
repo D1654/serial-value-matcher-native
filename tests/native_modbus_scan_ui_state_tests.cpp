@@ -49,6 +49,25 @@ void attemptResultLabelsAndCountersAreStable() {
     assert(svm::win32::nativeModbusAttemptCountsAsFailure(NativeModbusAttemptResultKind::TransportError));
 }
 
+void scanMessagesCannotCrossSessionGenerations() {
+    svm::transport::SerialSessionSnapshot session;
+    session.state = svm::transport::SerialSessionState::Open;
+    session.generation = 7;
+    assert(svm::win32::nativeModbusScanMessageMatchesSession(7, 7, session, false));
+    assert(!svm::win32::nativeModbusScanMessageMatchesSession(6, 7, session, false));
+    assert(!svm::win32::nativeModbusScanMessageMatchesSession(7, 8, session, false));
+    assert(!svm::win32::nativeModbusScanMessageMatchesSession(0, 7, session, true));
+
+    session.state = svm::transport::SerialSessionState::Closed;
+    session.generation = 0;
+    assert(!svm::win32::nativeModbusScanMessageMatchesSession(7, 7, session, true));
+
+    session.state = svm::transport::SerialSessionState::Faulted;
+    assert(!svm::win32::nativeModbusScanMessageMatchesSession(7, 7, session, false));
+    assert(svm::win32::nativeModbusScanMessageMatchesSession(7, 7, session, true));
+    assert(!svm::win32::nativeModbusScanMessageMatchesSession(7, 8, session, true));
+}
+
 void controllerRoutesScanStartCancelAndGates() {
     svm::win32::NativeModbusAnalysisController controller;
     svm::win32::NativeSerialIoState ioState;
@@ -106,6 +125,7 @@ int main() {
     runningSnapshotSwitchesToStopAndLocksExclusiveControls();
     attemptResultClassifierNormalizesNativeStatuses();
     attemptResultLabelsAndCountersAreStable();
+    scanMessagesCannotCrossSessionGenerations();
     controllerRoutesScanStartCancelAndGates();
     controllerKeepsAnalysisAndReportDecisionsPure();
 

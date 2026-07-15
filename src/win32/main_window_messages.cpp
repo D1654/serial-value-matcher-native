@@ -112,6 +112,10 @@ std::optional<LRESULT> NativeMainWindow::handleTimerMessage(WPARAM wParam) {
         return 0;
     }
     if (wParam == IDT_STATUS_CLOCK) {
+        if (modbusScanRunning_.load(std::memory_order_relaxed)
+            && modbusScanTerminalResult_.load(std::memory_order_acquire) != nullptr) {
+            handleModbusScanDone();
+        }
         scheduleStatusFrame();
         return 0;
     }
@@ -126,7 +130,12 @@ LRESULT NativeMainWindow::handleDestroyMessage() {
     }
     stopFileSend({});
     requestCancelModbusScan();
-    closeModbusScanThread();
+    const NativeModbusThreadCloseResult closeResult = closeModbusScanThread();
+    if (closeResult == NativeModbusThreadCloseResult::NotJoined) {
+        ExitProcess(1);
+    }
+    discardPendingModbusScanMessages();
+    delete modbusScanTerminalResult_.exchange(nullptr, std::memory_order_acq_rel);
     releaseModbusScanOwnership();
     shutdownSerialPort();
     if (ownsUiFont_ && uiFont_ != nullptr) {

@@ -116,23 +116,39 @@ void applyExecutionResult(
 
 DWORD WINAPI nativeModbusScanThreadProc(void* parameter) {
     std::unique_ptr<NativeModbusScanContext> context(static_cast<NativeModbusScanContext*>(parameter));
-    if (!context || context->notifyWindow == nullptr || context->serialTransport == nullptr || context->cancelRequested == nullptr) {
+    if (!context
+        || context->notifyWindow == nullptr
+        || context->byteStream == nullptr
+        || context->generation == transport::kUnassignedSerialSessionGeneration
+        || context->endpoint.empty()
+        || !context->generationIsCurrent
+        || context->cancelRequested == nullptr
+        || context->terminalResult == nullptr) {
         return 1;
     }
 
     auto* result = new NativeModbusScanResult;
+    result->generation = context->generation;
     result->execution = std::move(context->execution);
     const std::string scanSessionId = context->scanSessionId;
-    const std::string endpoint = context->serialTransport->endpoint();
+    const std::string endpoint = context->endpoint;
     NativeModbusScanDataBatch dataBatch;
+    dataBatch.generation = context->generation;
 
-    const auto postDataBatch = [&](bool force = false) {
+    const auto generationCurrent = [&]() {
+        return context->generationIsCurrent(context->generation);
+    };
+
+    const auto postDataBatch = [&](bool force = false, bool allowInactiveGeneration = false) {
         const std::size_t itemCount = dataBatch.rawEvents.size() + dataBatch.logEntries.size();
-        if (itemCount == 0 || (!force && itemCount < kModbusDataBatchMinItems)) {
+        if ((!generationCurrent() && !allowInactiveGeneration)
+            || itemCount == 0
+            || (!force && itemCount < kModbusDataBatchMinItems)) {
             return;
         }
         auto* postedBatch = new NativeModbusScanDataBatch(std::move(dataBatch));
         dataBatch = {};
+        dataBatch.generation = context->generation;
         if (!PostMessageW(context->notifyWindow, kNativeModbusScanDataMessage, 0, reinterpret_cast<LPARAM>(postedBatch))) {
             delete postedBatch;
         }
@@ -169,7 +185,11 @@ DWORD WINAPI nativeModbusScanThreadProc(void* parameter) {
                                   std::size_t successBlocks,
                                   std::size_t failedBlocks,
                                   std::size_t observations,
-                                  bool force = false) {
+                                  bool force = false,
+                                  bool allowInactiveGeneration = false) {
+        if (!generationCurrent() && !allowInactiveGeneration) {
+            return;
+        }
         const ULONGLONG now = GetTickCount64();
         const bool complete = completedBlocks >= totalBlocks;
         if (!force
@@ -180,6 +200,7 @@ DWORD WINAPI nativeModbusScanThreadProc(void* parameter) {
         }
         lastProgressPostTick = now;
         auto* progress = new NativeModbusScanProgress;
+        progress->generation = context->generation;
         progress->completedBlocks = completedBlocks;
         progress->totalBlocks = totalBlocks;
         progress->successBlocks = successBlocks;
@@ -192,8 +213,13 @@ DWORD WINAPI nativeModbusScanThreadProc(void* parameter) {
 
     try {
         transport::SerialRtuTransport serialTransport(
-            *context->serialTransport,
+            *context->byteStream,
             {
+                .generation = context->generation,
+                .endpoint = endpoint,
+                .generationIsCurrent = [&](transport::SerialSessionGeneration generation) {
+                    return generation == context->generation && generationCurrent();
+                },
                 .shouldCancel = [&]() {
                     return context->cancelRequested->load(std::memory_order_relaxed);
                 },
@@ -205,7 +231,9 @@ DWORD WINAPI nativeModbusScanThreadProc(void* parameter) {
         core::modbus::ScanExecutionOptions options;
         options.responseTimeoutMs = 1200;
         options.shouldCancel = [&]() {
-            return context->cancelRequested->load(std::memory_order_relaxed);
+            return context->cancelRequested->load(std::memory_order_relaxed)
+                || serialTransport.cancelObserved()
+                || (serialTransport.serialFailed() && !generationCurrent());
         };
         options.sleepForMs = [](int delayMs) {
             Sleep(static_cast<DWORD>(std::max(0, delayMs)));
@@ -262,11 +290,12 @@ DWORD WINAPI nativeModbusScanThreadProc(void* parameter) {
         static_cast<std::size_t>(std::max(0, result->execution.session.successBlockCount)),
         static_cast<std::size_t>(std::max(0, result->execution.session.failedBlockCount)),
         result->execution.observations.size(),
-        true);
-    postDataBatch(true);
-    if (!PostMessageW(context->notifyWindow, kNativeModbusScanDoneMessage, 0, reinterpret_cast<LPARAM>(result))) {
-        delete result;
-    }
+        true,
+        result->serialFailed);
+    postDataBatch(true, result->serialFailed);
+    NativeModbusScanResult* displaced = context->terminalResult->exchange(result, std::memory_order_acq_rel);
+    delete displaced;
+    PostMessageW(context->notifyWindow, kNativeModbusScanDoneMessage, 0, 0);
     return 0;
 }
 

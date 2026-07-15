@@ -77,6 +77,12 @@ private:
         File,
     };
 
+    enum class NativeModbusThreadCloseResult {
+        Settled,
+        NotJoined,
+        HandleCloseFailed,
+    };
+
     struct NativePendingSerialWrite {
         NativeSerialWriteKey key;
         NativePendingSerialWriteSource source = NativePendingSerialWriteSource::Manual;
@@ -183,8 +189,9 @@ private:
     void requestCancelModbusScan();
     void handleModbusScanProgress(NativeModbusScanProgress* progress);
     void handleModbusScanDataBatch(NativeModbusScanDataBatch* batch);
-    void handleModbusScanDone(NativeModbusScanResult* result);
-    void closeModbusScanThread();
+    void handleModbusScanDone();
+    NativeModbusThreadCloseResult closeModbusScanThread();
+    void discardPendingModbusScanMessages();
     void updateCompletedModbusScanProgress(const NativeModbusScanResult& result);
     std::wstring persistCompletedModbusScan(const NativeModbusScanResult& result);
     bool handleCompletedModbusScanDisconnect(const NativeModbusScanResult& result, bool shouldDisconnectAfterScan);
@@ -414,7 +421,6 @@ private:
     svm::transport::SerialSession& serialLifecycle_ = serialSession_.sessionCapability();
     svm::transport::SerialByteStream& serialByteStream_ = serialLifecycle_.byteStream();
     svm::transport::SerialWriteScheduler& serialWriteScheduler_ = serialLifecycle_.writeScheduler();
-    svm::transport::SerialTransport& serialTransport_ = serialSession_;
     NativeSerialIoState serialIoState_;
     std::deque<NativePendingSerialWrite> pendingSerialWrites_;
     native_storage::NativeSessionStore store_;
@@ -436,6 +442,9 @@ private:
     HANDLE modbusScanThread_ = nullptr;
     std::atomic_bool modbusScanCancelRequested_ = false;
     std::atomic_bool modbusScanRunning_ = false;
+    std::atomic<NativeModbusScanResult*> modbusScanTerminalResult_ = nullptr;
+    svm::transport::SerialSessionGeneration modbusScanGeneration_ =
+        svm::transport::kUnassignedSerialSessionGeneration;
     bool disconnectAfterModbusScan_ = false;
     bool timedSendConfirmed_ = false;
 };
