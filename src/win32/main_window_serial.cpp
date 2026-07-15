@@ -138,9 +138,13 @@ void NativeMainWindow::toggleConnection() {
 }
 
 void NativeMainWindow::connectSerial() {
-    if (serialLifecycle_.snapshot().open()) {
+    const svm::transport::SerialSessionSnapshot currentSession = serialLifecycle_.snapshot();
+    if (currentSession.open()) {
         setStatus(tx(T::AlreadyConnected));
         return;
+    }
+    if (currentSession.state != svm::transport::SerialSessionState::Closed) {
+        closeSerialPort({});
     }
 
     SerialOpenOptions options = currentOpenOptions();

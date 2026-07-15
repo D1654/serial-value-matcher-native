@@ -23,7 +23,10 @@ std::filesystem::path NativeMainWindow::defaultStoreDirectory() const {
     return std::filesystem::path(tempPath) / L"SerialValueMatcherNative" / L"native-store";
 }
 
-void NativeMainWindow::saveRawEvent(std::string direction, const std::vector<std::uint8_t>& payload) {
+void NativeMainWindow::saveRawEvent(
+    std::string direction,
+    std::string endpoint,
+    const std::vector<std::uint8_t>& payload) {
     if (!store_.isOpen()) {
         return;
     }
@@ -31,7 +34,7 @@ void NativeMainWindow::saveRawEvent(std::string direction, const std::vector<std
     event.sessionId = sessionId_;
     event.direction = std::move(direction);
     event.timestampUtc = nativeUtcTimestampText();
-    event.endpoint = serialLifecycle_.snapshot().endpoint;
+    event.endpoint = std::move(endpoint);
     event.payload = payload;
     saveRawEvents({std::move(event)});
 }

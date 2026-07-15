@@ -13,10 +13,61 @@ enum class NativeSerialIoOwner {
     ModbusScan,
 };
 
-struct NativeSerialWriteQueueStatus {
-    std::size_t pendingCount = 0;
-    std::size_t capacity = 0;
+struct NativeSerialWriteKey {
+    svm::transport::SerialSessionGeneration generation =
+        svm::transport::kUnassignedSerialSessionGeneration;
+    svm::transport::SerialOperationId requestId =
+        svm::transport::kUnassignedSerialOperationId;
 
+    bool assigned() const noexcept;
+    bool matches(const svm::transport::SerialOperationDescriptor& operation) const noexcept;
+};
+
+NativeSerialWriteKey nativeSerialWriteKeyForAdmission(
+    const svm::transport::SerialWriteAdmissionResult& result,
+    svm::transport::SerialSessionGeneration expectedGeneration) noexcept;
+
+bool nativeSerialWriteCancellationMatches(
+    const NativeSerialWriteKey& pending,
+    const svm::transport::SerialTerminalResult& result,
+    svm::transport::SerialSessionGeneration expectedGeneration) noexcept;
+
+enum class NativeSerialWriteCompletionDecision {
+    Ignore,
+    Succeeded,
+    Cancelled,
+    Failed,
+};
+
+NativeSerialWriteCompletionDecision nativeSerialWriteCompletionDecision(
+    const NativeSerialWriteKey& pending,
+    const svm::transport::SerialTerminalResult& result,
+    const svm::transport::SerialSessionSnapshot& currentSession,
+    svm::transport::SerialSessionGeneration faultGeneration) noexcept;
+
+enum class NativeSerialReadDecision {
+    Append,
+    Stop,
+    Fail,
+    ReportError,
+};
+
+NativeSerialReadDecision nativeSerialReadDecision(
+    const svm::transport::SerialReadResult& result,
+    svm::transport::SerialSessionGeneration expectedGeneration) noexcept;
+
+struct NativeSerialWriteQueueStatus {
+    svm::transport::SerialSessionGeneration generation =
+        svm::transport::kUnassignedSerialSessionGeneration;
+    std::size_t pendingCount = 0;
+    std::size_t activeCount = 0;
+    std::size_t requestCapacity = 0;
+    std::size_t pendingBytes = 0;
+    std::size_t activeBytes = 0;
+    std::size_t byteCapacity = 0;
+
+    std::size_t countedCount() const noexcept;
+    std::size_t countedBytes() const noexcept;
     bool empty() const noexcept;
     bool full() const noexcept;
 };
@@ -42,8 +93,9 @@ public:
     bool shouldDeferDisconnect() const noexcept;
 
     NativeSerialWriteQueueStatus writeQueueStatus() const noexcept;
-    void updateWriteQueueStatus(std::size_t pendingCount, std::size_t capacity) noexcept;
-    void updateWriteQueueStatus(const svm::transport::SerialWriteQueueSnapshot& snapshot) noexcept;
+    void updateWriteQueueStatus(
+        svm::transport::SerialSessionGeneration generation,
+        const svm::transport::SerialWriteQueueSnapshot& snapshot) noexcept;
     bool hasPendingSerialWrites() const noexcept;
     bool serialWriteQueueHasBackpressure() const noexcept;
 

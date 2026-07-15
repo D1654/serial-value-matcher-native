@@ -25,54 +25,104 @@ const wchar_t* tx(T id) {
     return uiText(id);
 }
 
-std::wstring writeResultMessage(const svm::transport::SerialWriteResult& result) {
-    if (!result.message.empty()) {
-        return utf8ToWide(result.message);
-    }
+std::wstring writeResultMessage(const svm::transport::SerialOperationResult& result) {
     switch (result.status) {
-    case svm::transport::SerialWriteResultStatus::Timeout:
-        return L"串口写入超时。";
-    case svm::transport::SerialWriteResultStatus::Cancelled:
-        return L"串口写入已取消。";
-    case svm::transport::SerialWriteResultStatus::Failed:
-        return L"串口写入失败。";
-    case svm::transport::SerialWriteResultStatus::RejectedFull:
-        return L"串口写入队列已满。";
-    case svm::transport::SerialWriteResultStatus::RejectedInvalid:
-        return L"串口写入请求无效。";
-    case svm::transport::SerialWriteResultStatus::Accepted:
+    case svm::transport::SerialOperationStatus::Accepted:
         return L"串口写入请求已接受。";
-    case svm::transport::SerialWriteResultStatus::Sent:
+    case svm::transport::SerialOperationStatus::Succeeded:
         return {};
+    case svm::transport::SerialOperationStatus::RejectedInvalid:
+        return L"串口写入请求无效。";
+    case svm::transport::SerialOperationStatus::RejectedFull:
+        return L"串口写入队列已满。";
+    case svm::transport::SerialOperationStatus::RejectedClosed:
+        return L"串口会话已关闭，无法写入。";
+    case svm::transport::SerialOperationStatus::Timeout:
+        return L"串口写入超时。";
+    case svm::transport::SerialOperationStatus::Cancelled:
+        return L"串口写入已取消。";
+    case svm::transport::SerialOperationStatus::Disconnected:
+        return result.error.nativeCode == 0
+            ? std::wstring(L"串口设备已断开。")
+            : utf8ToWide(win32SerialErrorText(result.error.nativeCode, "写入串口"));
+    case svm::transport::SerialOperationStatus::Failed:
+        break;
     }
-    return L"串口写入状态未知。";
+    if (result.error.nativeCode != 0
+        && result.error.category == svm::transport::SerialErrorCategory::NativeFailure) {
+        return utf8ToWide(win32SerialErrorText(result.error.nativeCode, "写入串口"));
+    }
+    if (result.byteCount > 0) {
+        return L"串口写入在发送 " + std::to_wstring(result.byteCount) + L" 字节后失败。";
+    }
+    return L"串口写入失败。";
+}
+
+std::wstring readResultMessage(const svm::transport::SerialOperationResult& result) {
+    if (result.status == svm::transport::SerialOperationStatus::Disconnected) {
+        return result.error.nativeCode == 0
+            ? std::wstring(L"串口设备已断开。")
+            : utf8ToWide(win32SerialErrorText(result.error.nativeCode, "读取串口"));
+    }
+    if (result.error.nativeCode != 0
+        && result.error.category == svm::transport::SerialErrorCategory::NativeFailure) {
+        return utf8ToWide(win32SerialErrorText(result.error.nativeCode, "读取串口"));
+    }
+    if (result.error.category == svm::transport::SerialErrorCategory::IoFailure) {
+        return L"串口接收状态异常。";
+    }
+    return L"串口读取失败。";
 }
 
 } // namespace
 
 void NativeMainWindow::updateSerialWriteQueueStatus() {
-    serialIoState_.updateWriteQueueStatus(serialTransport_.writeQueueSnapshot());
+    const svm::transport::SerialSessionSnapshot session = serialLifecycle_.snapshot();
+    const svm::transport::SerialWriteQueueSnapshot queue = serialWriteScheduler_.writeQueueSnapshot();
+    svm::transport::SerialSessionGeneration queueGeneration = session.generation;
+    if (queueGeneration == svm::transport::kUnassignedSerialSessionGeneration) {
+        const auto pending = std::find_if(
+            pendingSerialWrites_.begin(),
+            pendingSerialWrites_.end(),
+            [](const NativePendingSerialWrite& write) {
+                return write.key.assigned();
+            });
+        if (pending != pendingSerialWrites_.end()) {
+            queueGeneration = pending->key.generation;
+        } else if (!queue.empty()) {
+            queueGeneration = serialIoState_.writeQueueStatus().generation;
+        }
+    }
+    serialIoState_.updateWriteQueueStatus(
+        queueGeneration,
+        queue);
 }
 
 void NativeMainWindow::clearPendingSerialWrites() {
     pendingSerialWrites_.clear();
-    serialTransport_.takeCompletedWrites();
+    serialWriteScheduler_.takeCompletedWrites();
     updateSerialWriteQueueStatus();
 }
 
 void NativeMainWindow::drainSerialWriteResults() {
-    const std::vector<svm::transport::SerialWriteResult> results = serialTransport_.takeCompletedWrites();
+    const std::vector<svm::transport::SerialTerminalResult> results =
+        serialWriteScheduler_.takeCompletedWrites();
     if (results.empty()) {
         updateSerialWriteQueueStatus();
         return;
     }
 
     for (const auto& result : results) {
+        if (!result.terminal()
+            || !result.operation.assigned()
+            || result.operation.kind != svm::transport::SerialOperationKind::Write) {
+            continue;
+        }
         const auto found = std::find_if(
             pendingSerialWrites_.begin(),
             pendingSerialWrites_.end(),
             [&result](const NativePendingSerialWrite& pending) {
-                return pending.requestId == result.requestId;
+                return pending.key.matches(result.operation);
             });
         if (found == pendingSerialWrites_.end()) {
             continue;
@@ -81,24 +131,35 @@ void NativeMainWindow::drainSerialWriteResults() {
         NativePendingSerialWrite pending = std::move(*found);
         pendingSerialWrites_.erase(found);
 
-        if (result.status == svm::transport::SerialWriteResultStatus::Cancelled) {
+        const svm::transport::SerialSessionSnapshot currentSession = serialLifecycle_.snapshot();
+        const NativeSerialWriteCompletionDecision decision =
+            nativeSerialWriteCompletionDecision(
+                pending.key,
+                result,
+                currentSession,
+                serialIoState_.writeQueueStatus().generation);
+        if (decision == NativeSerialWriteCompletionDecision::Ignore) {
+            continue;
+        }
+
+        if (decision == NativeSerialWriteCompletionDecision::Cancelled) {
             setStatus(writeResultMessage(result));
             continue;
         }
 
-        if (result.status != svm::transport::SerialWriteResultStatus::Sent) {
+        if (decision == NativeSerialWriteCompletionDecision::Failed) {
             const std::wstring message = writeResultMessage(result);
             if (pending.source == NativePendingSerialWriteSource::File && fileSend_.active()) {
                 stopFileSend(message);
             } else {
                 setStatus(message);
             }
-            handleSerialFailure(result.message.empty() ? "串口写入失败。" : result.message);
+            handleSerialFailure(wideToUtf8(message));
             continue;
         }
 
         if (pending.source == NativePendingSerialWriteSource::Manual) {
-            saveRawEvent("Tx", pending.payload);
+            saveRawEvent("Tx", result.endpoint, pending.payload);
             if (pending.saveHistory && store_.isOpen()) {
                 native_storage::SendHistoryEntry history = nativeMakeSendHistoryEntry(
                     wideToUtf8(pending.manualText),
@@ -116,16 +177,17 @@ void NativeMainWindow::drainSerialWriteResults() {
             continue;
         }
 
-        if (!fileSend_.active()) {
+        if (!fileSend_.active()
+            || fileSendGeneration_ != result.operation.generation) {
             continue;
         }
 
-        saveRawEvent("Tx", pending.payload);
+        saveRawEvent("Tx", result.endpoint, pending.payload);
         appendPayloadLog(NativeLogKind::Tx, pending.payload);
-        fileSend_.markBytesWritten(result.byteCount);
         statusCountersState_.addTxBytes(static_cast<std::uint64_t>(result.byteCount));
-        updateFileSendProgress();
         updateStatusSegments();
+        fileSend_.markBytesWritten(result.byteCount);
+        updateFileSendProgress();
 
         if (fileSend_.done()) {
             const std::wstring summary = uiString(T::FileSendDonePrefix) + std::to_wstring(fileSend_.sentBytes()) + uiString(T::BytesSuffix);
@@ -147,46 +209,57 @@ void NativeMainWindow::drainSerialWriteResults() {
 
 void NativeMainWindow::pollSerial() {
     drainSerialWriteResults();
-    if (!serialTransport_.isOpen()) {
+    const svm::transport::SerialSessionSnapshot polledSession = serialLifecycle_.snapshot();
+    if (!polledSession.open()) {
         return;
     }
     if (!serialIoState_.allowsSerialPoll()) {
         return;
     }
-    if (!serialTransport_.waitForReadyRead(0)) {
-        if (!serialTransport_.lastErrorText().empty()) {
-            handleSerialFailure(serialTransport_.lastErrorText());
-        }
-        return;
-    }
-
     std::vector<native_storage::RawIoEvent> events;
     std::vector<std::uint8_t> mergedPayload;
-    const std::string endpoint = serialTransport_.endpoint();
+    std::optional<std::wstring> failureMessage;
+    std::optional<std::wstring> statusMessage;
     for (int batch = 0; batch < 8; ++batch) {
-        const std::vector<std::uint8_t> payload = serialTransport_.readAvailable(4096);
-        if (payload.empty()) {
-            if (!serialTransport_.lastErrorText().empty()) {
-                handleSerialFailure(serialTransport_.lastErrorText());
-            }
+        svm::transport::SerialReadResult read = serialByteStream_.readAvailable(4096);
+        const NativeSerialReadDecision decision =
+            nativeSerialReadDecision(read, polledSession.generation);
+        if (decision == NativeSerialReadDecision::Stop) {
+            break;
+        }
+        if (decision == NativeSerialReadDecision::Fail) {
+            failureMessage = readResultMessage(read.operation);
+            break;
+        }
+        if (decision == NativeSerialReadDecision::ReportError) {
+            statusMessage = readResultMessage(read.operation);
             break;
         }
         native_storage::RawIoEvent event;
         event.sessionId = sessionId_;
         event.direction = "Rx";
         event.timestampUtc = nativeUtcTimestampText();
-        event.endpoint = endpoint;
-        event.payload = payload;
+        event.endpoint = read.operation.endpoint;
+        event.payload = read.bytes;
         events.push_back(std::move(event));
-        mergedPayload.insert(mergedPayload.end(), payload.begin(), payload.end());
+        mergedPayload.insert(mergedPayload.end(), read.bytes.begin(), read.bytes.end());
     }
-    if (mergedPayload.empty()) {
+
+    const svm::transport::SerialSessionSnapshot currentSession = serialLifecycle_.snapshot();
+    if (currentSession.open() && currentSession.generation != polledSession.generation) {
         return;
     }
-    saveRawEvents(std::move(events));
-    appendPayloadLog(NativeLogKind::Rx, mergedPayload);
-    statusCountersState_.addRxBytes(static_cast<std::uint64_t>(mergedPayload.size()));
-    updateStatusSegments();
+    if (!mergedPayload.empty()) {
+        saveRawEvents(std::move(events));
+        appendPayloadLog(NativeLogKind::Rx, mergedPayload);
+        statusCountersState_.addRxBytes(static_cast<std::uint64_t>(mergedPayload.size()));
+        updateStatusSegments();
+    }
+    if (failureMessage.has_value()) {
+        handleSerialFailure(wideToUtf8(*failureMessage));
+    } else if (statusMessage.has_value()) {
+        setStatus(*statusMessage);
+    }
 }
 
 void NativeMainWindow::handleSerialFailure(const std::string& message) {

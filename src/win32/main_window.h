@@ -78,7 +78,7 @@ private:
     };
 
     struct NativePendingSerialWrite {
-        svm::transport::SerialWriteRequestId requestId = 0;
+        NativeSerialWriteKey key;
         NativePendingSerialWriteSource source = NativePendingSerialWriteSource::Manual;
         std::vector<std::uint8_t> payload;
         std::wstring manualText;
@@ -255,7 +255,10 @@ private:
     void setWorkbenchTabControlsVisible(int tabIndex, bool visible);
     void updateSideHelp(int tabIndex);
     std::filesystem::path defaultStoreDirectory() const;
-    void saveRawEvent(std::string direction, const std::vector<std::uint8_t>& payload);
+    void saveRawEvent(
+        std::string direction,
+        std::string endpoint,
+        const std::vector<std::uint8_t>& payload);
     bool saveRawEvents(std::vector<native_storage::RawIoEvent> events);
 
     HINSTANCE instance_ = nullptr;
@@ -409,6 +412,8 @@ private:
     std::optional<native_storage::UiPreferences> lastSavedUiPreferences_;
     Win32SerialSession serialSession_;
     svm::transport::SerialSession& serialLifecycle_ = serialSession_.sessionCapability();
+    svm::transport::SerialByteStream& serialByteStream_ = serialLifecycle_.byteStream();
+    svm::transport::SerialWriteScheduler& serialWriteScheduler_ = serialLifecycle_.writeScheduler();
     svm::transport::SerialTransport& serialTransport_ = serialSession_;
     NativeSerialIoState serialIoState_;
     std::deque<NativePendingSerialWrite> pendingSerialWrites_;
@@ -424,6 +429,8 @@ private:
     NativeSendControlState sendControlState_;
     NativeSerialSendController serialSendController_;
     NativeFileSendState fileSend_;
+    svm::transport::SerialSessionGeneration fileSendGeneration_ =
+        svm::transport::kUnassignedSerialSessionGeneration;
     NativeModbusAnalysisController modbusAnalysisController_;
     NativeModbusScanUiState modbusScanUiState_;
     HANDLE modbusScanThread_ = nullptr;
