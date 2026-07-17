@@ -77,25 +77,7 @@ std::wstring readResultMessage(const svm::transport::SerialOperationResult& resu
 } // namespace
 
 void NativeMainWindow::updateSerialWriteQueueStatus() {
-    const svm::transport::SerialSessionSnapshot session = serialLifecycle_.snapshot();
-    const svm::transport::SerialWriteQueueSnapshot queue = serialWriteScheduler_.writeQueueSnapshot();
-    svm::transport::SerialSessionGeneration queueGeneration = session.generation;
-    if (queueGeneration == svm::transport::kUnassignedSerialSessionGeneration) {
-        const auto pending = std::find_if(
-            pendingSerialWrites_.begin(),
-            pendingSerialWrites_.end(),
-            [](const NativePendingSerialWrite& write) {
-                return write.key.assigned();
-            });
-        if (pending != pendingSerialWrites_.end()) {
-            queueGeneration = pending->key.generation;
-        } else if (!queue.empty()) {
-            queueGeneration = serialIoState_.writeQueueStatus().generation;
-        }
-    }
-    serialIoState_.updateWriteQueueStatus(
-        queueGeneration,
-        queue);
+    serialIoState_.updateWriteQueueSnapshot(serialWriteScheduler_.writeQueueSnapshot());
 }
 
 void NativeMainWindow::clearPendingSerialWrites() {
@@ -132,12 +114,15 @@ void NativeMainWindow::drainSerialWriteResults() {
         pendingSerialWrites_.erase(found);
 
         const svm::transport::SerialSessionSnapshot currentSession = serialLifecycle_.snapshot();
+        const auto& queueSnapshot = serialIoState_.writeQueueSnapshot();
         const NativeSerialWriteCompletionDecision decision =
             nativeSerialWriteCompletionDecision(
                 pending.key,
                 result,
                 currentSession,
-                serialIoState_.writeQueueStatus().generation);
+                queueSnapshot.has_value()
+                    ? queueSnapshot->generation
+                    : svm::transport::kUnassignedSerialSessionGeneration);
         if (decision == NativeSerialWriteCompletionDecision::Ignore) {
             continue;
         }

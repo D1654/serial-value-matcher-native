@@ -162,6 +162,7 @@ private:
     void closeSerialPort(const std::wstring& statusText);
     void shutdownSerialPort();
     std::wstring serialIoBusyStatus() const;
+    std::wstring serialWriteQueuePressureStatus() const;
     void releaseModbusScanOwnership();
     void sendPayload();
     bool sendPayloadFromText(const std::wstring& text, bool saveHistory);

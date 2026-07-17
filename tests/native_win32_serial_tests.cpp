@@ -3,6 +3,10 @@
 #include "win32/win32_serial_session.h"
 #endif
 
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+
 #include <algorithm>
 #include <cassert>
 #include <chrono>
@@ -45,6 +49,8 @@ public:
         svm::transport::SerialSessionGeneration generation,
         std::string endpoint) {
         EnterCriticalSection(&session.writeLock_);
+        const bool generationStarted = session.writeQueue_.beginGeneration(generation);
+        assert(generationStarted);
         session.state_ = svm::transport::SerialSessionState::Open;
         session.generation_ = generation;
         session.generationCounter_ = std::max(session.generationCounter_, generation);
@@ -359,6 +365,110 @@ void explicitCancellationUsesOneCompletionChannel() {
     assert(session.close().succeeded());
 }
 
+void productionQueueSnapshotTracksLimitsIdentityAndHighWater() {
+    using Access = svm::win32::Win32SerialSessionTestAccess;
+    svm::win32::Win32SerialSession session;
+    Access::publishSyntheticOpen(session, 14, "COM14");
+
+    auto snapshot = session.writeQueueSnapshot();
+    assert(snapshot.generation == 14);
+    assert(snapshot.capacity == svm::transport::kDefaultSerialWriteQueueCapacity);
+    assert(snapshot.byteCapacity == svm::transport::kDefaultSerialWriteQueueByteCapacity);
+    assert(snapshot.highWaterCount == 0);
+    assert(snapshot.highWaterBytes == 0);
+
+    for (std::size_t index = 0; index < svm::transport::kDefaultSerialWriteQueueCapacity; ++index) {
+        assert(Access::enqueueWithoutWorker(
+            session,
+            {static_cast<std::uint8_t>(index)},
+            deadlineAfter(500)).accepted());
+    }
+    const auto beforeRejection = session.writeQueueSnapshot();
+    const auto rejectionDeadline = deadlineAfter(500);
+    const auto rejected = session.enqueueWrite({0xFF}, rejectionDeadline);
+    snapshot = session.writeQueueSnapshot();
+    assert(rejected.status == svm::transport::SerialOperationStatus::RejectedFull);
+    assert(rejected.error.category == svm::transport::SerialErrorCategory::QueueFull);
+    assert(rejected.operation.generation == 14);
+    assert(rejected.operation.deadline.expiresAt == rejectionDeadline.expiresAt);
+    assert(!rejected.operation.assigned());
+    assert(snapshot.generation == 14);
+    assert(snapshot.countedCount() == svm::transport::kDefaultSerialWriteQueueCapacity);
+    assert(snapshot.highWaterCount == svm::transport::kDefaultSerialWriteQueueCapacity);
+    assert(snapshot.highWaterBytes == svm::transport::kDefaultSerialWriteQueueCapacity);
+    assert(snapshot.nextRequestId == beforeRejection.nextRequestId);
+
+    const auto active = Access::activateWithoutWorker(session);
+    assert(active.has_value());
+    snapshot = session.writeQueueSnapshot();
+    assert(snapshot.activeRequestId == active->id);
+    assert(snapshot.activeCount == 1);
+    assert(snapshot.pendingCount == svm::transport::kDefaultSerialWriteQueueCapacity - 1);
+    assert(snapshot.countedCount() == svm::transport::kDefaultSerialWriteQueueCapacity);
+
+    const auto cancelled = session.cancelPendingWrites();
+    assert(cancelled.size() == svm::transport::kDefaultSerialWriteQueueCapacity - 1);
+    assert(Access::completeActive(
+        session,
+        active->id,
+        14,
+        svm::transport::SerialWriteResultStatus::Sent,
+        1));
+    snapshot = session.writeQueueSnapshot();
+    assert(snapshot.empty());
+    assert(snapshot.generation == 14);
+    assert(snapshot.activeRequestId == svm::transport::kUnassignedSerialOperationId);
+    assert(snapshot.highWaterCount == svm::transport::kDefaultSerialWriteQueueCapacity);
+    assert(snapshot.highWaterBytes == svm::transport::kDefaultSerialWriteQueueCapacity);
+    assert(session.takeCompletedWrites().size() == 1);
+    assert(session.close().succeeded());
+
+    Access::publishSyntheticOpen(session, 15, "COM15");
+    snapshot = session.writeQueueSnapshot();
+    assert(snapshot.generation == 15);
+    assert(snapshot.highWaterCount == 0);
+    assert(snapshot.highWaterBytes == 0);
+    assert(session.close().succeeded());
+
+    svm::win32::Win32SerialSession byteSession;
+    Access::publishSyntheticOpen(byteSession, 16, "COM16");
+    std::vector<std::uint8_t> exactPayload(
+        svm::transport::kDefaultSerialWriteQueueByteCapacity,
+        0x5A);
+    assert(Access::enqueueWithoutWorker(
+        byteSession,
+        std::move(exactPayload),
+        deadlineAfter(500)).accepted());
+    const auto byteRejectionDeadline = deadlineAfter(500);
+    const auto byteRejected = byteSession.enqueueWrite({0x01}, byteRejectionDeadline);
+    const auto byteSnapshot = byteSession.writeQueueSnapshot();
+    assert(byteRejected.status == svm::transport::SerialOperationStatus::RejectedFull);
+    assert(byteRejected.error.category == svm::transport::SerialErrorCategory::QueueFull);
+    assert(byteRejected.operation.generation == 16);
+    assert(byteRejected.operation.deadline.expiresAt == byteRejectionDeadline.expiresAt);
+    assert(!byteRejected.operation.assigned());
+    assert(byteSnapshot.countedBytes() == svm::transport::kDefaultSerialWriteQueueByteCapacity);
+    assert(byteSnapshot.highWaterBytes == svm::transport::kDefaultSerialWriteQueueByteCapacity);
+    assert(byteSession.cancelPendingWrites().size() == 1);
+    assert(byteSession.close().succeeded());
+
+    svm::win32::Win32SerialSession oversizedSession;
+    Access::publishSyntheticOpen(oversizedSession, 17, "COM17");
+    std::vector<std::uint8_t> oversizedPayload(
+        svm::transport::kDefaultSerialWriteQueueByteCapacity + 1,
+        0xA5);
+    const auto oversized = oversizedSession.enqueueWrite(
+        std::move(oversizedPayload),
+        deadlineAfter(500));
+    assert(oversized.status == svm::transport::SerialOperationStatus::RejectedFull);
+    assert(oversized.error.category == svm::transport::SerialErrorCategory::QueueFull);
+    assert(oversized.operation.generation == 17);
+    assert(!oversized.operation.assigned());
+    assert(oversizedSession.writeQueueSnapshot().empty());
+    assert(oversizedSession.writeQueueSnapshot().highWaterBytes == 0);
+    assert(oversizedSession.close().succeeded());
+}
+
 void disconnectInvalidatesGenerationAndSettlesPendingWrites() {
     using Access = svm::win32::Win32SerialSessionTestAccess;
     svm::win32::Win32SerialSession session;
@@ -506,6 +616,7 @@ int main() {
     expiredTypedWriteTimesOutBeforeNativeIo();
     typedEmptyWriteIsRejectedBeforeNativeIo();
     explicitCancellationUsesOneCompletionChannel();
+    productionQueueSnapshotTracksLimitsIdentityAndHighWater();
     disconnectInvalidatesGenerationAndSettlesPendingWrites();
     staleSnapshotCannotRewriteReplacementSessionEvidence();
     closeSettlesPendingAndActiveWritesExactlyOnce();

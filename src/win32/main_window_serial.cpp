@@ -227,7 +227,9 @@ void NativeMainWindow::shutdownSerialPort() {
 
 std::wstring NativeMainWindow::serialIoBusyStatus() const {
     if (serialIoState_.hasPendingSerialWrites()) {
-        return L"串口写入队列仍有待发送数据，请稍后再试。";
+        return L"串口写入队列仍有待发送数据（"
+            + serialWriteQueuePressureStatus()
+            + L"），请稍后再试。";
     }
     if (!serialIoState_.isBusy()) {
         return tx(T::SerialIoBusyStatus);
@@ -242,6 +244,21 @@ std::wstring NativeMainWindow::serialIoBusyStatus() const {
         break;
     }
     return tx(T::SerialIoBusyStatus);
+}
+
+std::wstring NativeMainWindow::serialWriteQueuePressureStatus() const {
+    const auto& snapshot = serialIoState_.writeQueueSnapshot();
+    if (!snapshot.has_value()) {
+        return {};
+    }
+    return L"请求 "
+        + std::to_wstring(snapshot->countedCount())
+        + L"/"
+        + std::to_wstring(snapshot->capacity)
+        + L"，字节 "
+        + std::to_wstring(snapshot->countedBytes())
+        + L"/"
+        + std::to_wstring(snapshot->byteCapacity);
 }
 
 void NativeMainWindow::releaseModbusScanOwnership() {
@@ -295,8 +312,12 @@ std::wstring NativeMainWindow::serialOperationErrorMessage(
         return L"串口参数无效。";
     case svm::transport::SerialErrorCategory::SessionClosed:
         return L"串口会话已关闭。";
-    case svm::transport::SerialErrorCategory::QueueFull:
-        return L"串口写入队列已满。";
+    case svm::transport::SerialErrorCategory::QueueFull: {
+        const std::wstring pressure = serialWriteQueuePressureStatus();
+        return pressure.empty()
+            ? std::wstring(L"串口写入请求因队列达到上限被拒绝。")
+            : L"串口写入请求因队列达到上限被拒绝（当前压力：" + pressure + L"）。";
+    }
     case svm::transport::SerialErrorCategory::Timeout:
         return L"串口操作超时。";
     case svm::transport::SerialErrorCategory::Cancelled:

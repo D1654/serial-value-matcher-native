@@ -1,6 +1,10 @@
 #include "transport/serial_session.h"
 #include "transport/serial_write_queue.h"
 
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+
 #include <algorithm>
 #include <cassert>
 #include <chrono>
@@ -77,6 +81,8 @@ public:
 
         ++generationCounter_;
         generation_ = generationCounter_;
+        const bool generationStarted = queue_.beginGeneration(generation_);
+        assert(generationStarted);
         options_ = std::move(options);
         state_ = SerialSessionState::Open;
         recordState();

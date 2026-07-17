@@ -60,3 +60,15 @@ inheritance, compatibility adapters, and localized transport error channel are
 gone. `Win32SerialSession` directly owns the three narrow contracts, all active
 callers and loopback tests use typed results, and the portable plus MinGW/Wine
 test trees pass. Execution pauses at the Phase 2 milestone before Phase 3.
+
+The user approved Phase 3 on 2026-07-16. Production hardening begins with real
+session queue backpressure: counted requests and bytes must include active work,
+reject immediately at fixed limits, and expose coherent typed snapshots to the
+UI before exactly-once completion and evidence tasks proceed.
+
+Phase 3 Task 1 completed on 2026-07-17. The production session now enforces the
+64-request and 256 KiB budgets with generation-aware snapshots, active request
+identity, per-generation high-water evidence, and immediate typed rejection.
+The UI consumes the canonical snapshot directly, obsolete queue bypasses are
+removed, and host, MinGW/Wine, PTY, self-test, UI-performance, package, and
+documentation gates all pass.

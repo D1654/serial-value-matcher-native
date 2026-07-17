@@ -12,6 +12,7 @@ constexpr const char* kEmptyPayloadMessage = "串口写入请求没有 payload�
 constexpr const char* kInvalidTimeoutMessage = "串口写入请求超时时间必须大于 0 ms。";
 constexpr const char* kInvalidLimitsMessage = "串口写入队列容量配置无效。";
 constexpr const char* kQueueFullMessage = "串口写入队列已满，请等待前序请求完成。";
+constexpr const char* kGenerationMismatchMessage = "串口写入请求不属于当前会话。";
 constexpr const char* kRequestIdExhaustedMessage = "串口写入请求 ID 已耗尽。";
 constexpr const char* kRequestNotFoundMessage = "未找到待取消的串口写入请求。";
 constexpr const char* kNoActiveRequestMessage = "串口写入队列没有活动请求。";
@@ -58,25 +59,6 @@ bool SerialWriteResult::terminal() const noexcept {
     return isSerialWriteResultTerminal(status);
 }
 
-std::size_t SerialWriteQueueSnapshot::countedCount() const noexcept {
-    return pendingCount + activeCount;
-}
-
-std::size_t SerialWriteQueueSnapshot::countedBytes() const noexcept {
-    return pendingBytes + activeBytes;
-}
-
-bool SerialWriteQueueSnapshot::empty() const noexcept {
-    return countedCount() == 0;
-}
-
-bool SerialWriteQueueSnapshot::full() const noexcept {
-    if (capacity == 0 || byteCapacity == 0) {
-        return true;
-    }
-    return countedCount() >= capacity || countedBytes() >= byteCapacity;
-}
-
 SerialWriteQueue::SerialWriteQueue(std::size_t capacity)
     : limits_({
           .requestCapacity = capacity,
@@ -114,14 +96,30 @@ bool SerialWriteQueue::full() const noexcept {
 
 SerialWriteQueueSnapshot SerialWriteQueue::snapshot() const noexcept {
     return {
+        .generation = generation_,
         .capacity = limits_.requestCapacity,
         .byteCapacity = limits_.byteCapacity,
         .pendingCount = pending_.size(),
         .activeCount = activeCount(),
+        .activeRequestId = active_.has_value()
+            ? active_->requestId
+            : kUnassignedSerialOperationId,
         .pendingBytes = pendingBytes_,
         .activeBytes = active_.has_value() ? active_->payloadBytes : 0,
+        .highWaterCount = highWaterCount_,
+        .highWaterBytes = highWaterBytes_,
         .nextRequestId = nextRequestId_,
     };
+}
+
+bool SerialWriteQueue::beginGeneration(SerialSessionGeneration generation) noexcept {
+    if (generation == kUnassignedSerialSessionGeneration || !empty()) {
+        return false;
+    }
+    generation_ = generation;
+    highWaterCount_ = 0;
+    highWaterBytes_ = 0;
+    return true;
 }
 
 SerialWriteResult SerialWriteQueue::enqueue(
@@ -130,26 +128,43 @@ SerialWriteResult SerialWriteQueue::enqueue(
     SerialSessionGeneration generation,
     SerialDeadline deadline) {
     if (payload.empty()) {
-        return reject(SerialWriteResultStatus::RejectedInvalid, kEmptyPayloadMessage);
+        return reject(SerialWriteResultStatus::RejectedInvalid, kEmptyPayloadMessage, generation, deadline);
     }
     if (timeoutMs <= 0) {
-        return reject(SerialWriteResultStatus::RejectedInvalid, kInvalidTimeoutMessage);
+        return reject(SerialWriteResultStatus::RejectedInvalid, kInvalidTimeoutMessage, generation, deadline);
     }
     if (!limits_.valid()) {
-        return reject(SerialWriteResultStatus::RejectedInvalid, kInvalidLimitsMessage);
+        return reject(SerialWriteResultStatus::RejectedInvalid, kInvalidLimitsMessage, generation, deadline);
     }
-
+    if (generation != generation_
+        && (!empty() || generation_ != kUnassignedSerialSessionGeneration)) {
+        return reject(
+            SerialWriteResultStatus::RejectedInvalid,
+            kGenerationMismatchMessage,
+            generation,
+            deadline);
+    }
     const SerialWriteQueueSnapshot current = snapshot();
     const std::size_t payloadBytes = payload.size();
     if (current.countedCount() >= limits_.requestCapacity
         || payloadBytes > limits_.byteCapacity
         || current.countedBytes() > limits_.byteCapacity - payloadBytes) {
-        return reject(SerialWriteResultStatus::RejectedFull, kQueueFullMessage);
+        return reject(SerialWriteResultStatus::RejectedFull, kQueueFullMessage, generation, deadline);
     }
 
     const std::optional<SerialWriteRequestId> requestId = allocateRequestId();
     if (!requestId.has_value()) {
-        return reject(SerialWriteResultStatus::RejectedInvalid, kRequestIdExhaustedMessage);
+        return reject(
+            SerialWriteResultStatus::RejectedInvalid,
+            kRequestIdExhaustedMessage,
+            generation,
+            deadline);
+    }
+    if (generation_ == kUnassignedSerialSessionGeneration
+        && generation != kUnassignedSerialSessionGeneration) {
+        generation_ = generation;
+        highWaterCount_ = 0;
+        highWaterBytes_ = 0;
     }
     if (!deadline.set()) {
         deadline = deadlineFromTimeout(timeoutMs);
@@ -168,6 +183,8 @@ SerialWriteResult SerialWriteQueue::enqueue(
     request.deadline = deadline;
     pending_.push_back(std::move(request));
     pendingBytes_ += payloadBytes;
+    highWaterCount_ = std::max(highWaterCount_, snapshot().countedCount());
+    highWaterBytes_ = std::max(highWaterBytes_, snapshot().countedBytes());
     return {
         .requestId = *requestId,
         .generation = generation,
@@ -198,16 +215,6 @@ std::optional<SerialWriteRequest> SerialWriteQueue::activateNext() {
         .payloadBytes = request.payloadBytes,
         .deadline = request.deadline,
     };
-    return request;
-}
-
-std::optional<SerialWriteRequest> SerialWriteQueue::takeNext() {
-    if (active_.has_value() || pending_.empty()) {
-        return std::nullopt;
-    }
-    SerialWriteRequest request = std::move(pending_.front());
-    pending_.pop_front();
-    pendingBytes_ -= request.payloadBytes;
     return request;
 }
 
@@ -304,12 +311,6 @@ SerialWriteResult SerialWriteQueue::completeActive(
     };
 }
 
-void SerialWriteQueue::clear() noexcept {
-    pending_.clear();
-    pendingBytes_ = 0;
-    active_.reset();
-}
-
 std::optional<SerialWriteRequestId> SerialWriteQueue::allocateRequestId() noexcept {
     if (nextRequestId_ == 0) {
         return std::nullopt;
@@ -323,9 +324,15 @@ std::optional<SerialWriteRequestId> SerialWriteQueue::allocateRequestId() noexce
     return requestId;
 }
 
-SerialWriteResult SerialWriteQueue::reject(SerialWriteResultStatus status, std::string message) const {
+SerialWriteResult SerialWriteQueue::reject(
+    SerialWriteResultStatus status,
+    std::string message,
+    SerialSessionGeneration generation,
+    SerialDeadline deadline) const {
     return {
+        .generation = generation,
         .status = status,
+        .deadline = deadline,
         .message = std::move(message),
     };
 }

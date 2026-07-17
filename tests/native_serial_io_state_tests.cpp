@@ -1,5 +1,9 @@
 #include "win32/native_serial_io_state.h"
 
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -19,14 +23,21 @@ using svm::win32::NativeSerialWriteKey;
 svm::transport::SerialWriteQueueSnapshot queueSnapshot(
     std::size_t pendingCount,
     std::size_t activeCount,
-    std::size_t capacity = 4) {
+    std::size_t capacity = 4,
+    svm::transport::SerialSessionGeneration generation = 7) {
     return {
+        .generation = generation,
         .capacity = capacity,
         .byteCapacity = 1024,
         .pendingCount = pendingCount,
         .activeCount = activeCount,
+        .activeRequestId = activeCount == 0
+            ? svm::transport::kUnassignedSerialOperationId
+            : 91,
         .pendingBytes = pendingCount * 16,
         .activeBytes = activeCount * 16,
+        .highWaterCount = pendingCount + activeCount,
+        .highWaterBytes = (pendingCount + activeCount) * 16,
     };
 }
 
@@ -134,46 +145,49 @@ void modbusScanOwnsThePortUntilFinished() {
 
 void writeQueueStatusTracksPendingCapacityAndBackpressure() {
     NativeSerialIoState state;
-    assert(state.writeQueueStatus().empty());
-    assert(!state.writeQueueStatus().full());
+    assert(!state.writeQueueSnapshot().has_value());
     assert(!state.hasPendingSerialWrites());
     assert(!state.serialWriteQueueHasBackpressure());
 
-    state.updateWriteQueueStatus(7, queueSnapshot(1, 0));
-    assert(state.writeQueueStatus().generation == 7);
-    assert(state.writeQueueStatus().pendingCount == 1);
-    assert(state.writeQueueStatus().activeCount == 0);
-    assert(state.writeQueueStatus().requestCapacity == 4);
-    assert(state.writeQueueStatus().pendingBytes == 16);
-    assert(state.writeQueueStatus().activeBytes == 0);
-    assert(state.writeQueueStatus().byteCapacity == 1024);
-    assert(state.writeQueueStatus().countedCount() == 1);
-    assert(state.writeQueueStatus().countedBytes() == 16);
+    state.updateWriteQueueSnapshot(queueSnapshot(1, 0));
+    assert(state.writeQueueSnapshot()->generation == 7);
+    assert(state.writeQueueSnapshot()->pendingCount == 1);
+    assert(state.writeQueueSnapshot()->activeCount == 0);
+    assert(state.writeQueueSnapshot()->capacity == 4);
+    assert(state.writeQueueSnapshot()->pendingBytes == 16);
+    assert(state.writeQueueSnapshot()->activeBytes == 0);
+    assert(state.writeQueueSnapshot()->byteCapacity == 1024);
+    assert(state.writeQueueSnapshot()->countedCount() == 1);
+    assert(state.writeQueueSnapshot()->countedBytes() == 16);
+    assert(state.writeQueueSnapshot()->highWaterCount == 1);
+    assert(state.writeQueueSnapshot()->highWaterBytes == 16);
     assert(state.hasPendingSerialWrites());
     assert(!state.serialWriteQueueHasBackpressure());
 
-    state.updateWriteQueueStatus(7, queueSnapshot(3, 1));
+    state.updateWriteQueueSnapshot(queueSnapshot(3, 1));
+    assert(state.writeQueueSnapshot()->activeRequestId == 91);
     assert(state.serialWriteQueueHasBackpressure());
+    assert(state.allowsSerialPoll());
 
     svm::transport::SerialWriteQueueSnapshot byteFull = queueSnapshot(1, 1, 8);
     byteFull.byteCapacity = byteFull.pendingBytes + byteFull.activeBytes;
-    state.updateWriteQueueStatus(7, byteFull);
-    assert(state.writeQueueStatus().countedCount() < state.writeQueueStatus().requestCapacity);
+    state.updateWriteQueueSnapshot(byteFull);
+    assert(state.writeQueueSnapshot()->countedCount() < state.writeQueueSnapshot()->capacity);
     assert(state.serialWriteQueueHasBackpressure());
 
-    svm::transport::SerialWriteQueueSnapshot snapshot = queueSnapshot(2, 1, 8);
-    state.updateWriteQueueStatus(8, snapshot);
-    assert(state.writeQueueStatus().generation == 8);
-    assert(state.writeQueueStatus().requestCapacity == 8);
-    assert(state.writeQueueStatus().pendingCount == 2);
-    assert(state.writeQueueStatus().activeCount == 1);
-    assert(state.writeQueueStatus().countedCount() == 3);
+    svm::transport::SerialWriteQueueSnapshot snapshot = queueSnapshot(2, 1, 8, 8);
+    state.updateWriteQueueSnapshot(snapshot);
+    assert(state.writeQueueSnapshot()->generation == 8);
+    assert(state.writeQueueSnapshot()->capacity == 8);
+    assert(state.writeQueueSnapshot()->pendingCount == 2);
+    assert(state.writeQueueSnapshot()->activeCount == 1);
+    assert(state.writeQueueSnapshot()->countedCount() == 3);
     assert(!state.serialWriteQueueHasBackpressure());
 }
 
 void pendingWritesBlockExclusiveOwnersButAllowManualBacklog() {
     NativeSerialIoState state;
-    state.updateWriteQueueStatus(7, queueSnapshot(1, 0));
+    state.updateWriteQueueSnapshot(queueSnapshot(1, 0));
 
     assert(state.hasPendingSerialWrites());
     assert(state.allowsManualSend());
@@ -189,7 +203,7 @@ void pendingWritesBlockExclusiveOwnersButAllowManualBacklog() {
 
 void fullWriteQueueBlocksManualBacklogToo() {
     NativeSerialIoState state;
-    state.updateWriteQueueStatus(7, queueSnapshot(3, 1));
+    state.updateWriteQueueSnapshot(queueSnapshot(3, 1));
 
     assert(state.serialWriteQueueHasBackpressure());
     assert(!state.allowsManualSend());
@@ -199,17 +213,24 @@ void fullWriteQueueBlocksManualBacklogToo() {
 
 void activeWriteRemainsOutstandingUntilTerminalSnapshot() {
     NativeSerialIoState state;
-    state.updateWriteQueueStatus(11, queueSnapshot(0, 1));
+    state.updateWriteQueueSnapshot(queueSnapshot(0, 1, 4, 11));
 
-    assert(!state.writeQueueStatus().empty());
+    assert(!state.writeQueueSnapshot()->empty());
+    assert(state.writeQueueSnapshot()->activeRequestId == 91);
     assert(state.hasPendingSerialWrites());
     assert(state.allowsManualSend());
     assert(!state.allowsFileSend());
     assert(!state.allowsModbusScan());
     assert(!state.allowsLineControl());
 
-    state.updateWriteQueueStatus(11, queueSnapshot(0, 0));
-    assert(state.writeQueueStatus().empty());
+    svm::transport::SerialWriteQueueSnapshot terminal = queueSnapshot(0, 0, 4, 11);
+    terminal.highWaterCount = 1;
+    terminal.highWaterBytes = 16;
+    state.updateWriteQueueSnapshot(terminal);
+    assert(state.writeQueueSnapshot()->empty());
+    assert(state.writeQueueSnapshot()->activeRequestId == svm::transport::kUnassignedSerialOperationId);
+    assert(state.writeQueueSnapshot()->highWaterCount == 1);
+    assert(state.writeQueueSnapshot()->highWaterBytes == 16);
     assert(!state.hasPendingSerialWrites());
     assert(state.allowsFileSend());
     assert(state.allowsModbusScan());
@@ -218,13 +239,15 @@ void activeWriteRemainsOutstandingUntilTerminalSnapshot() {
 
 void generationReplacementDropsOldQueueAccounting() {
     NativeSerialIoState state;
-    state.updateWriteQueueStatus(21, queueSnapshot(1, 1));
+    state.updateWriteQueueSnapshot(queueSnapshot(1, 1, 4, 21));
     assert(state.hasPendingSerialWrites());
 
-    state.updateWriteQueueStatus(22, queueSnapshot(0, 0));
-    assert(state.writeQueueStatus().generation == 22);
-    assert(state.writeQueueStatus().countedCount() == 0);
-    assert(state.writeQueueStatus().countedBytes() == 0);
+    state.updateWriteQueueSnapshot(queueSnapshot(0, 0, 4, 22));
+    assert(state.writeQueueSnapshot()->generation == 22);
+    assert(state.writeQueueSnapshot()->countedCount() == 0);
+    assert(state.writeQueueSnapshot()->countedBytes() == 0);
+    assert(state.writeQueueSnapshot()->highWaterCount == 0);
+    assert(state.writeQueueSnapshot()->highWaterBytes == 0);
     assert(!state.serialWriteQueueHasBackpressure());
 }
 

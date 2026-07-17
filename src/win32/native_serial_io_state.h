@@ -2,7 +2,7 @@
 
 #include "transport/serial_write_queue.h"
 
-#include <cstddef>
+#include <optional>
 
 namespace svm::win32 {
 
@@ -56,22 +56,6 @@ NativeSerialReadDecision nativeSerialReadDecision(
     const svm::transport::SerialReadResult& result,
     svm::transport::SerialSessionGeneration expectedGeneration) noexcept;
 
-struct NativeSerialWriteQueueStatus {
-    svm::transport::SerialSessionGeneration generation =
-        svm::transport::kUnassignedSerialSessionGeneration;
-    std::size_t pendingCount = 0;
-    std::size_t activeCount = 0;
-    std::size_t requestCapacity = 0;
-    std::size_t pendingBytes = 0;
-    std::size_t activeBytes = 0;
-    std::size_t byteCapacity = 0;
-
-    std::size_t countedCount() const noexcept;
-    std::size_t countedBytes() const noexcept;
-    bool empty() const noexcept;
-    bool full() const noexcept;
-};
-
 class NativeSerialIoState final {
 public:
     NativeSerialIoOwner owner() const noexcept;
@@ -92,16 +76,14 @@ public:
     bool allowsLineControl() const noexcept;
     bool shouldDeferDisconnect() const noexcept;
 
-    NativeSerialWriteQueueStatus writeQueueStatus() const noexcept;
-    void updateWriteQueueStatus(
-        svm::transport::SerialSessionGeneration generation,
-        const svm::transport::SerialWriteQueueSnapshot& snapshot) noexcept;
+    const std::optional<svm::transport::SerialWriteQueueSnapshot>& writeQueueSnapshot() const noexcept;
+    void updateWriteQueueSnapshot(svm::transport::SerialWriteQueueSnapshot snapshot) noexcept;
     bool hasPendingSerialWrites() const noexcept;
     bool serialWriteQueueHasBackpressure() const noexcept;
 
 private:
     NativeSerialIoOwner owner_ = NativeSerialIoOwner::None;
-    NativeSerialWriteQueueStatus writeQueueStatus_;
+    std::optional<svm::transport::SerialWriteQueueSnapshot> writeQueueSnapshot_;
 };
 
 } // namespace svm::win32

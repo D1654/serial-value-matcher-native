@@ -74,18 +74,36 @@ struct SerialWriteResult {
 };
 
 struct SerialWriteQueueSnapshot {
+    SerialSessionGeneration generation = kUnassignedSerialSessionGeneration;
     std::size_t capacity = 0;
     std::size_t byteCapacity = 0;
     std::size_t pendingCount = 0;
     std::size_t activeCount = 0;
+    SerialWriteRequestId activeRequestId = kUnassignedSerialOperationId;
     std::size_t pendingBytes = 0;
     std::size_t activeBytes = 0;
+    std::size_t highWaterCount = 0;
+    std::size_t highWaterBytes = 0;
     SerialWriteRequestId nextRequestId = 1;
 
-    std::size_t countedCount() const noexcept;
-    std::size_t countedBytes() const noexcept;
-    bool empty() const noexcept;
-    bool full() const noexcept;
+    std::size_t countedCount() const noexcept {
+        return pendingCount + activeCount;
+    }
+
+    std::size_t countedBytes() const noexcept {
+        return pendingBytes + activeBytes;
+    }
+
+    bool empty() const noexcept {
+        return countedCount() == 0;
+    }
+
+    bool full() const noexcept {
+        return capacity == 0
+            || byteCapacity == 0
+            || countedCount() >= capacity
+            || countedBytes() >= byteCapacity;
+    }
 };
 
 class SerialWriteQueue final {
@@ -100,6 +118,7 @@ public:
     bool empty() const noexcept;
     bool full() const noexcept;
     SerialWriteQueueSnapshot snapshot() const noexcept;
+    bool beginGeneration(SerialSessionGeneration generation) noexcept;
 
     SerialWriteResult enqueue(
         std::vector<std::uint8_t> payload,
@@ -108,7 +127,6 @@ public:
         SerialDeadline deadline = {});
     std::optional<SerialWriteRequest> peek() const;
     std::optional<SerialWriteRequest> activateNext();
-    std::optional<SerialWriteRequest> takeNext();
 
     SerialWriteResult cancelPending(SerialWriteRequestId requestId);
     SerialWriteResult cancelPending(SerialWriteCancellationToken token);
@@ -120,8 +138,6 @@ public:
         std::size_t byteCount = 0,
         std::string message = {});
 
-    void clear() noexcept;
-
 private:
     struct ActiveReservation {
         SerialWriteRequestId requestId = 0;
@@ -131,15 +147,22 @@ private:
     };
 
     std::optional<SerialWriteRequestId> allocateRequestId() noexcept;
-    SerialWriteResult reject(SerialWriteResultStatus status, std::string message) const;
+    SerialWriteResult reject(
+        SerialWriteResultStatus status,
+        std::string message,
+        SerialSessionGeneration generation = kUnassignedSerialSessionGeneration,
+        SerialDeadline deadline = {}) const;
     SerialWriteResult rejectCompletion(
         SerialWriteRequestId requestId,
         SerialSessionGeneration generation,
         std::string message) const;
 
     SerialWriteQueueLimits limits_;
+    SerialSessionGeneration generation_ = kUnassignedSerialSessionGeneration;
     SerialWriteRequestId nextRequestId_ = 1;
     std::size_t pendingBytes_ = 0;
+    std::size_t highWaterCount_ = 0;
+    std::size_t highWaterBytes_ = 0;
     std::deque<SerialWriteRequest> pending_;
     std::optional<ActiveReservation> active_;
 };

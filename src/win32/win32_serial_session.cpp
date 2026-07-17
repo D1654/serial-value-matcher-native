@@ -305,21 +305,24 @@ svm::transport::SerialOperationResult Win32SerialSession::open(SerialOpenOptions
         WriteLock lock(writeLock_);
         if (generationCounter_ != std::numeric_limits<svm::transport::SerialSessionGeneration>::max()) {
             ++generationCounter_;
-            generation_ = generationCounter_;
-            options_ = std::move(options);
-            options_.portName = stripWin32DevicePrefix(devicePath);
-            state_ = svm::transport::SerialSessionState::Open;
-            return operationResult(
-                svm::transport::SerialOperationKind::Open,
-                svm::transport::SerialOperationStatus::Succeeded,
-                generation_,
-                options_.portName,
-                {},
-                0,
-                svm::transport::SerialErrorCategory::None,
-                0,
-                operationId);
+            if (writeQueue_.beginGeneration(generationCounter_)) {
+                generation_ = generationCounter_;
+                options_ = std::move(options);
+                options_.portName = stripWin32DevicePrefix(devicePath);
+                state_ = svm::transport::SerialSessionState::Open;
+                return operationResult(
+                    svm::transport::SerialOperationKind::Open,
+                    svm::transport::SerialOperationStatus::Succeeded,
+                    generation_,
+                    options_.portName,
+                    {},
+                    0,
+                    svm::transport::SerialErrorCategory::None,
+                    0,
+                    operationId);
+            }
         }
+        generation_ = svm::transport::kUnassignedSerialSessionGeneration;
         state_ = svm::transport::SerialSessionState::Faulted;
     }
     DWORD closeNativeCode = 0;

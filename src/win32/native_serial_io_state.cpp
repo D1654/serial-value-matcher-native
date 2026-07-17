@@ -1,5 +1,7 @@
 #include "win32/native_serial_io_state.h"
 
+#include <utility>
+
 namespace svm::win32 {
 
 bool NativeSerialWriteKey::assigned() const noexcept {
@@ -119,24 +121,6 @@ NativeSerialReadDecision nativeSerialReadDecision(
     return NativeSerialReadDecision::ReportError;
 }
 
-std::size_t NativeSerialWriteQueueStatus::countedCount() const noexcept {
-    return pendingCount + activeCount;
-}
-
-std::size_t NativeSerialWriteQueueStatus::countedBytes() const noexcept {
-    return pendingBytes + activeBytes;
-}
-
-bool NativeSerialWriteQueueStatus::empty() const noexcept {
-    return countedCount() == 0;
-}
-
-bool NativeSerialWriteQueueStatus::full() const noexcept {
-    return requestCapacity > 0
-        && byteCapacity > 0
-        && (countedCount() >= requestCapacity || countedBytes() >= byteCapacity);
-}
-
 NativeSerialIoOwner NativeSerialIoState::owner() const noexcept {
     return owner_;
 }
@@ -216,30 +200,22 @@ bool NativeSerialIoState::shouldDeferDisconnect() const noexcept {
     return owner_ == NativeSerialIoOwner::ModbusScan;
 }
 
-NativeSerialWriteQueueStatus NativeSerialIoState::writeQueueStatus() const noexcept {
-    return writeQueueStatus_;
+const std::optional<svm::transport::SerialWriteQueueSnapshot>&
+NativeSerialIoState::writeQueueSnapshot() const noexcept {
+    return writeQueueSnapshot_;
 }
 
-void NativeSerialIoState::updateWriteQueueStatus(
-    svm::transport::SerialSessionGeneration generation,
-    const svm::transport::SerialWriteQueueSnapshot& snapshot) noexcept {
-    writeQueueStatus_ = {
-        .generation = generation,
-        .pendingCount = snapshot.pendingCount,
-        .activeCount = snapshot.activeCount,
-        .requestCapacity = snapshot.capacity,
-        .pendingBytes = snapshot.pendingBytes,
-        .activeBytes = snapshot.activeBytes,
-        .byteCapacity = snapshot.byteCapacity,
-    };
+void NativeSerialIoState::updateWriteQueueSnapshot(
+    svm::transport::SerialWriteQueueSnapshot snapshot) noexcept {
+    writeQueueSnapshot_ = std::move(snapshot);
 }
 
 bool NativeSerialIoState::hasPendingSerialWrites() const noexcept {
-    return !writeQueueStatus_.empty();
+    return writeQueueSnapshot_.has_value() && !writeQueueSnapshot_->empty();
 }
 
 bool NativeSerialIoState::serialWriteQueueHasBackpressure() const noexcept {
-    return writeQueueStatus_.full();
+    return writeQueueSnapshot_.has_value() && writeQueueSnapshot_->full();
 }
 
 } // namespace svm::win32

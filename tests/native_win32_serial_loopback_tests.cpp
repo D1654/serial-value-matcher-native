@@ -261,10 +261,10 @@ int main() {
         return 0;
     }
 
+    svm::win32::Win32SerialSession port;
+    svm::transport::SerialSession& session = port;
+    svm::transport::SerialByteStream& stream = session.byteStream();
     for (int reopenIndex = 0; reopenIndex < reopenCount; ++reopenIndex) {
-        svm::win32::Win32SerialSession port;
-        svm::transport::SerialSession& session = port;
-        svm::transport::SerialByteStream& stream = session.byteStream();
         if (trace) {
             std::cerr << "trace: opening reopen=" << reopenIndex << '\n';
         }
@@ -277,6 +277,21 @@ int main() {
         }
         if (trace) {
             std::cerr << "trace: opened reopen=" << reopenIndex << '\n';
+        }
+        const svm::transport::SerialSessionSnapshot openedSession = session.snapshot();
+        const svm::transport::SerialWriteQueueSnapshot openedQueue =
+            session.writeScheduler().writeQueueSnapshot();
+        if (openedSession.generation == svm::transport::kUnassignedSerialSessionGeneration
+            || openedSession.generation != openResult.operation.generation
+            || openedQueue.generation != openedSession.generation
+            || openedQueue.highWaterCount != 0
+            || openedQueue.highWaterBytes != 0) {
+            std::cerr << "queue generation reset failed reopen=" << reopenIndex
+                      << " session-generation=" << openedSession.generation
+                      << " queue-generation=" << openedQueue.generation
+                      << " high-water-count=" << openedQueue.highWaterCount
+                      << " high-water-bytes=" << openedQueue.highWaterBytes << '\n';
+            return 7;
         }
 
         for (int iterationIndex = 0; iterationIndex < iterations; ++iterationIndex) {
