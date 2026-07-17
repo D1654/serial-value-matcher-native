@@ -74,6 +74,7 @@ private:
         svm::transport::SerialDeadline deadline;
         std::size_t payloadBytes = 0;
         std::string endpoint;
+        bool terminalPublished = false;
     };
 
     struct WriteAdmission {
@@ -102,8 +103,15 @@ private:
         const std::uint8_t* payload,
         std::size_t size,
         svm::transport::SerialSessionGeneration expectedGeneration =
-            svm::transport::kUnassignedSerialSessionGeneration);
-    NativeIoOutcome writeBytesToHandle(HANDLE handle, const std::uint8_t* payload, std::size_t size);
+            svm::transport::kUnassignedSerialSessionGeneration,
+        svm::transport::SerialDeadline deadline = {});
+    NativeIoOutcome writeBytesToHandle(
+        HANDLE handle,
+        const std::uint8_t* payload,
+        std::size_t size,
+        svm::transport::SerialDeadline deadline,
+        int readTimeoutMs,
+        int writeTimeoutMs);
     HANDLE validatedHandleForGeneration(svm::transport::SerialSessionGeneration generation) const noexcept;
     svm::transport::SerialOperationResult operationResult(
         svm::transport::SerialOperationKind kind,
@@ -126,13 +134,18 @@ private:
         std::string endpoint,
         std::uint32_t nativeCode = 0) const;
     void publishCompletion(svm::transport::SerialTerminalResult result);
-    bool completeActiveWrite(
-        const ActiveWrite& request,
+    bool finalizeActiveWriteLocked(
+        ActiveWrite request,
         svm::transport::SerialWriteResultStatus status,
         std::size_t byteCount,
         svm::transport::SerialErrorCategory category,
         std::uint32_t nativeCode);
-    void settlePendingWritesLocked(svm::transport::SerialErrorCategory category);
+    void publishInterruptedActiveWriteLocked(
+        svm::transport::SerialErrorCategory category,
+        std::uint32_t nativeCode);
+    void settlePendingWritesLocked(
+        svm::transport::SerialErrorCategory category,
+        std::uint32_t nativeCode = 0);
     void markGenerationDisconnected(svm::transport::SerialSessionGeneration generation);
     static svm::transport::SerialErrorCategory nativeErrorCategory(
         std::uint32_t nativeCode,

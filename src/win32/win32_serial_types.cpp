@@ -177,8 +177,13 @@ SerialValidationResult validateSerialOpenOptions(const SerialOpenOptions& option
         return {false, "停止位组合不受支持。Windows 串口 1.5 位停止位仅适用于 5 数据位。"};
     }
 
-    if (options.readTimeoutMs < 0 || options.writeTimeoutMs < 0) {
-        return {false, "串口读写超时不能为负数。"};
+    if (options.readTimeoutMs < 0) {
+        return {false, "串口读取超时不能为负数。"};
+    }
+
+    if (options.writeTimeoutMs <= 0
+        || options.writeTimeoutMs > svm::transport::kSerialTerminalResultTargetMs) {
+        return {false, "串口写入超时必须在 1 到 1000 ms 之间。"};
     }
 
     if (options.readBufferSize == 0 || options.readBufferSize > 1024 * 1024) {

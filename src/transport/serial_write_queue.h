@@ -14,7 +14,7 @@ using SerialWriteRequestId = SerialOperationId;
 
 inline constexpr std::size_t kDefaultSerialWriteQueueCapacity = 64;
 inline constexpr std::size_t kDefaultSerialWriteQueueByteCapacity = 256 * 1024;
-inline constexpr int kDefaultSerialWriteTimeoutMs = 1000;
+inline constexpr int kDefaultSerialWriteTimeoutMs = kSerialTerminalResultTargetMs;
 
 struct SerialWriteQueueLimits {
     std::size_t requestCapacity = kDefaultSerialWriteQueueCapacity;
@@ -119,6 +119,7 @@ public:
     bool full() const noexcept;
     SerialWriteQueueSnapshot snapshot() const noexcept;
     bool beginGeneration(SerialSessionGeneration generation) noexcept;
+    std::optional<SerialWriteRequestId> reserveRequestId() noexcept;
 
     SerialWriteResult enqueue(
         std::vector<std::uint8_t> payload,
@@ -146,7 +147,6 @@ private:
         SerialDeadline deadline;
     };
 
-    std::optional<SerialWriteRequestId> allocateRequestId() noexcept;
     SerialWriteResult reject(
         SerialWriteResultStatus status,
         std::string message,

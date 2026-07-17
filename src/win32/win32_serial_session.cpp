@@ -19,6 +19,9 @@
 namespace svm::win32 {
 namespace {
 
+constexpr DWORD kSerialWorkerJoinBudgetMs =
+    static_cast<DWORD>(svm::transport::kSerialTerminalResultTargetMs / 2);
+
 HANDLE asHandle(void* handle) noexcept {
     return static_cast<HANDLE>(handle);
 }
@@ -113,6 +116,63 @@ svm::transport::SerialOperationStatus failureOperationStatus(
     return svm::transport::SerialOperationStatus::Failed;
 }
 
+bool configureSerialTimeouts(
+    HANDLE handle,
+    int readTimeoutMs,
+    int writeTimeoutMs,
+    DWORD& nativeCode) {
+    COMMTIMEOUTS timeouts = {};
+    timeouts.ReadIntervalTimeout = MAXDWORD;
+    timeouts.ReadTotalTimeoutMultiplier = 0;
+    timeouts.ReadTotalTimeoutConstant = static_cast<DWORD>(std::max(0, readTimeoutMs));
+    timeouts.WriteTotalTimeoutMultiplier = 0;
+    timeouts.WriteTotalTimeoutConstant = static_cast<DWORD>(std::clamp(
+        writeTimeoutMs,
+        1,
+        svm::transport::kSerialTerminalResultTargetMs));
+    if (!SetCommTimeouts(handle, &timeouts)) {
+        nativeCode = GetLastError();
+        return false;
+    }
+    return true;
+}
+
+int writeTimeoutForDeadline(
+    const svm::transport::SerialDeadline& deadline,
+    int configuredTimeoutMs) noexcept {
+    const int boundedTimeoutMs = std::clamp(
+        configuredTimeoutMs,
+        1,
+        svm::transport::kSerialTerminalResultTargetMs);
+    if (!deadline.set()) {
+        return boundedTimeoutMs;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (*deadline.expiresAt <= now) {
+        return 1;
+    }
+    const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(
+        *deadline.expiresAt - now);
+    return static_cast<int>(std::clamp<std::int64_t>(
+        remaining.count(),
+        1,
+        boundedTimeoutMs));
+}
+
+svm::transport::SerialDeadline boundedWriteDeadline(
+    svm::transport::SerialDeadline deadline,
+    int configuredTimeoutMs) noexcept {
+    const auto configuredDeadline = std::chrono::steady_clock::now()
+        + std::chrono::milliseconds(std::clamp(
+            configuredTimeoutMs,
+            1,
+            svm::transport::kSerialTerminalResultTargetMs));
+    if (!deadline.set() || *deadline.expiresAt > configuredDeadline) {
+        deadline.expiresAt = configuredDeadline;
+    }
+    return deadline;
+}
+
 bool configureSerialState(
     HANDLE handle,
     const SerialOpenOptions& options,
@@ -149,14 +209,11 @@ bool configureSerialState(
         return false;
     }
 
-    COMMTIMEOUTS timeouts = {};
-    timeouts.ReadIntervalTimeout = MAXDWORD;
-    timeouts.ReadTotalTimeoutMultiplier = 0;
-    timeouts.ReadTotalTimeoutConstant = static_cast<DWORD>(options.readTimeoutMs);
-    timeouts.WriteTotalTimeoutMultiplier = 0;
-    timeouts.WriteTotalTimeoutConstant = static_cast<DWORD>(options.writeTimeoutMs);
-    if (!SetCommTimeouts(handle, &timeouts)) {
-        nativeCode = GetLastError();
+    if (!configureSerialTimeouts(
+        handle,
+        options.readTimeoutMs,
+        options.writeTimeoutMs,
+        nativeCode)) {
         return false;
     }
 
@@ -630,8 +687,10 @@ Win32SerialSession::setRequestToSend(bool enabled) {
 Win32SerialSession::NativeIoOutcome Win32SerialSession::writeBytesInternal(
     const std::uint8_t* payload,
     std::size_t size,
-    svm::transport::SerialSessionGeneration expectedGeneration) {
+    svm::transport::SerialSessionGeneration expectedGeneration,
+    svm::transport::SerialDeadline deadline) {
     svm::transport::SerialSessionGeneration generation = expectedGeneration;
+    SerialOpenOptions options;
     {
         WriteLock lock(writeLock_);
         if (state_ != svm::transport::SerialSessionState::Open
@@ -644,6 +703,7 @@ Win32SerialSession::NativeIoOutcome Win32SerialSession::writeBytesInternal(
             return outcome;
         }
         generation = generation_;
+        options = options_;
     }
     if (size > 0 && payload == nullptr) {
         NativeIoOutcome outcome{
@@ -658,7 +718,13 @@ Win32SerialSession::NativeIoOutcome Win32SerialSession::writeBytesInternal(
         WriteLock ioLock(ioLock_);
         const HANDLE handle = validatedHandleForGeneration(generation);
         outcome = isValidHandle(handle)
-            ? writeBytesToHandle(handle, payload, size)
+            ? writeBytesToHandle(
+                  handle,
+                  payload,
+                  size,
+                  deadline,
+                  options.readTimeoutMs,
+                  options.writeTimeoutMs)
             : NativeIoOutcome{
                   .ok = false,
                   .category = svm::transport::SerialErrorCategory::SessionClosed,
@@ -677,13 +743,36 @@ Win32SerialSession::NativeIoOutcome Win32SerialSession::writeBytesInternal(
 Win32SerialSession::NativeIoOutcome Win32SerialSession::writeBytesToHandle(
     HANDLE handle,
     const std::uint8_t* payload,
-    std::size_t size) {
+    std::size_t size,
+    svm::transport::SerialDeadline deadline,
+    int readTimeoutMs,
+    int writeTimeoutMs) {
     if (size == 0) {
         return {.ok = true};
     }
 
     std::size_t totalWritten = 0;
     while (totalWritten < size) {
+        if (deadlineExpired(deadline)) {
+            return {
+                .ok = false,
+                .byteCount = totalWritten,
+                .category = svm::transport::SerialErrorCategory::Timeout,
+            };
+        }
+        DWORD timeoutNativeCode = 0;
+        if (!configureSerialTimeouts(
+                handle,
+                readTimeoutMs,
+                writeTimeoutForDeadline(deadline, writeTimeoutMs),
+                timeoutNativeCode)) {
+            return {
+                .ok = false,
+                .byteCount = totalWritten,
+                .nativeCode = timeoutNativeCode,
+                .category = nativeErrorCategory(timeoutNativeCode, false),
+            };
+        }
         const std::size_t remaining = size - totalWritten;
         const DWORD chunkSize = static_cast<DWORD>(std::min<std::size_t>(
             remaining,
@@ -704,7 +793,7 @@ Win32SerialSession::NativeIoOutcome Win32SerialSession::writeBytesToHandle(
             return {
                 .ok = false,
                 .byteCount = totalWritten,
-                .category = svm::transport::SerialErrorCategory::IoFailure,
+                .category = svm::transport::SerialErrorCategory::Timeout,
             };
         }
     }
@@ -742,7 +831,22 @@ svm::transport::SerialTerminalResult Win32SerialSession::writeBytes(
             0,
             svm::transport::SerialErrorCategory::InvalidInput);
     }
-    const svm::transport::SerialOperationId requestId = allocateOperationId();
+    deadline = boundedWriteDeadline(deadline, snapshot.options.writeTimeoutMs);
+    std::optional<svm::transport::SerialWriteRequestId> requestId;
+    {
+        WriteLock lock(writeLock_);
+        requestId = writeQueue_.reserveRequestId();
+    }
+    if (!requestId.has_value()) {
+        return operationResult(
+            svm::transport::SerialOperationKind::Write,
+            svm::transport::SerialOperationStatus::Failed,
+            snapshot.generation,
+            snapshot.endpoint,
+            deadline,
+            0,
+            svm::transport::SerialErrorCategory::IoFailure);
+    }
     if (deadlineExpired(deadline)) {
         return operationResult(
             svm::transport::SerialOperationKind::Write,
@@ -753,13 +857,14 @@ svm::transport::SerialTerminalResult Win32SerialSession::writeBytes(
             0,
             svm::transport::SerialErrorCategory::Timeout,
             0,
-            requestId);
+            *requestId);
     }
 
     NativeIoOutcome outcome = writeBytesInternal(
         payload.data(),
         payload.size(),
-        snapshot.generation);
+        snapshot.generation,
+        deadline);
     svm::transport::SerialOperationStatus status = svm::transport::SerialOperationStatus::Succeeded;
     svm::transport::SerialErrorCategory category = outcome.category;
     if (!outcome.ok) {
@@ -777,7 +882,7 @@ svm::transport::SerialTerminalResult Win32SerialSession::writeBytes(
         outcome.byteCount,
         category,
         outcome.nativeCode,
-        requestId);
+        *requestId);
 }
 
 Win32SerialSession::WriteAdmission Win32SerialSession::enqueueWriteCore(
@@ -798,6 +903,7 @@ Win32SerialSession::WriteAdmission Win32SerialSession::enqueueWriteCore(
             return admission;
         }
 
+        deadline = boundedWriteDeadline(deadline, options_.writeTimeoutMs);
         admission.result = writeQueue_.enqueue(
             std::move(payload),
             std::max(1, options_.writeTimeoutMs),
@@ -930,14 +1036,18 @@ bool Win32SerialSession::ensureWriteWorkerLocked(std::uint32_t& nativeCode) {
 }
 
 void Win32SerialSession::settlePendingWritesLocked(
-    svm::transport::SerialErrorCategory category) {
-    const bool disconnected = category == svm::transport::SerialErrorCategory::Disconnected;
-    const auto status = disconnected
-        ? svm::transport::SerialOperationStatus::Disconnected
-        : svm::transport::SerialOperationStatus::Cancelled;
+    svm::transport::SerialErrorCategory category,
+    std::uint32_t nativeCode) {
+    svm::transport::SerialOperationStatus status = svm::transport::SerialOperationStatus::Failed;
+    if (category == svm::transport::SerialErrorCategory::Disconnected) {
+        status = svm::transport::SerialOperationStatus::Disconnected;
+    } else if (category == svm::transport::SerialErrorCategory::Cancelled
+        || category == svm::transport::SerialErrorCategory::SessionClosed) {
+        status = svm::transport::SerialOperationStatus::Cancelled;
+    }
     const std::string currentEndpoint = options_.portName;
     for (const auto& cancelled : writeQueue_.cancelAllPending()) {
-        publishCompletion(terminalResult(cancelled, status, category, currentEndpoint));
+        publishCompletion(terminalResult(cancelled, status, category, currentEndpoint, nativeCode));
     }
 }
 
@@ -985,21 +1095,45 @@ Win32SerialSession::WorkerStopOutcome Win32SerialSession::stopWriteWorker(
     if (thread != nullptr) {
         DWORD waitResult = WaitForSingleObject(thread, 0);
         if (waitResult == WAIT_TIMEOUT) {
-            bool wakeSignalFailed = false;
+            DWORD cancellationNativeCode = 0;
             if (writeWakeEvent_ == nullptr || !SetEvent(writeWakeEvent_)) {
-                outcome.nativeCode = writeWakeEvent_ == nullptr ? ERROR_INVALID_HANDLE : GetLastError();
-                wakeSignalFailed = true;
+                cancellationNativeCode = writeWakeEvent_ == nullptr
+                    ? ERROR_INVALID_HANDLE
+                    : GetLastError();
             }
-            CancelSynchronousIo(thread);
-            if (isValidHandle(handle)) {
-                PurgeComm(handle, PURGE_TXABORT | PURGE_RXABORT);
+            if (!CancelSynchronousIo(thread)) {
+                const DWORD nativeCode = GetLastError();
+                if (nativeCode != ERROR_NOT_FOUND && cancellationNativeCode == 0) {
+                    cancellationNativeCode = nativeCode;
+                }
             }
-            waitResult = WaitForSingleObject(thread, wakeSignalFailed ? 1000 : INFINITE);
+            if (isValidHandle(handle) && !PurgeComm(handle, PURGE_TXABORT | PURGE_RXABORT)) {
+                const DWORD nativeCode = GetLastError();
+                if (cancellationNativeCode == 0) {
+                    cancellationNativeCode = nativeCode;
+                }
+            }
+            waitResult = WaitForSingleObject(
+                thread,
+                kSerialWorkerJoinBudgetMs);
+            if (waitResult == WAIT_TIMEOUT) {
+                outcome.nativeCode = ERROR_TIMEOUT;
+            } else if (waitResult != WAIT_OBJECT_0 && cancellationNativeCode != 0) {
+                outcome.nativeCode = cancellationNativeCode;
+            }
         }
         if (waitResult != WAIT_OBJECT_0) {
             outcome.joined = false;
             outcome.threadHandleClosed = false;
-            outcome.nativeCode = waitResult == WAIT_FAILED ? GetLastError() : ERROR_TIMEOUT;
+            if (waitResult == WAIT_FAILED) {
+                outcome.nativeCode = GetLastError();
+            } else if (outcome.nativeCode == 0) {
+                outcome.nativeCode = ERROR_GEN_FAILURE;
+            }
+            {
+                WriteLock lock(writeLock_);
+                publishInterruptedActiveWriteLocked(activeCategory, outcome.nativeCode);
+            }
             return outcome;
         }
         if (!CloseHandle(thread)) {
@@ -1012,7 +1146,7 @@ Win32SerialSession::WorkerStopOutcome Win32SerialSession::stopWriteWorker(
         WriteLock lock(writeLock_);
         if (activeWrite_.has_value()) {
             const bool disconnected = activeCategory == svm::transport::SerialErrorCategory::Disconnected;
-            completeActiveWrite(
+            finalizeActiveWriteLocked(
                 *activeWrite_,
                 disconnected
                     ? svm::transport::SerialWriteResultStatus::Disconnected
@@ -1026,7 +1160,6 @@ Win32SerialSession::WorkerStopOutcome Win32SerialSession::stopWriteWorker(
         }
         writeWorkerStopRequested_ = false;
         activeCancellationCategory_ = svm::transport::SerialErrorCategory::None;
-        activeWrite_.reset();
         if (writeWakeEvent_ != nullptr) {
             if (CloseHandle(writeWakeEvent_)) {
                 writeWakeEvent_ = nullptr;
@@ -1063,7 +1196,20 @@ void Win32SerialSession::writeWorkerLoop() {
                     break;
                 }
             }
-            if (WaitForSingleObject(writeWakeEvent_, INFINITE) != WAIT_OBJECT_0) {
+            const DWORD waitResult = WaitForSingleObject(writeWakeEvent_, INFINITE);
+            if (waitResult != WAIT_OBJECT_0) {
+                const DWORD nativeCode = waitResult == WAIT_FAILED
+                    ? GetLastError()
+                    : ERROR_GEN_FAILURE;
+                WriteLock lock(writeLock_);
+                if (!writeWorkerStopRequested_) {
+                    state_ = svm::transport::SerialSessionState::Faulted;
+                    generation_ = svm::transport::kUnassignedSerialSessionGeneration;
+                    writeWorkerStopRequested_ = true;
+                    settlePendingWritesLocked(
+                        svm::transport::SerialErrorCategory::NativeFailure,
+                        nativeCode);
+                }
                 return;
             }
         }
@@ -1082,7 +1228,8 @@ void Win32SerialSession::writeWorkerLoop() {
             outcome = writeBytesInternal(
                 request->payload.data(),
                 request->payload.size(),
-                request->generation);
+                request->generation,
+                request->deadline);
         }
 
         {
@@ -1117,13 +1264,18 @@ void Win32SerialSession::writeWorkerLoop() {
                 writeWorkerStopRequested_ = true;
                 settlePendingWritesLocked(svm::transport::SerialErrorCategory::Disconnected);
             }
-            completeActiveWrite(
+            const bool finalized = finalizeActiveWriteLocked(
                 *activeWrite_,
                 status,
                 outcome.byteCount,
                 category,
                 outcome.nativeCode);
-            activeWrite_.reset();
+            if (!finalized) {
+                state_ = svm::transport::SerialSessionState::Faulted;
+                generation_ = svm::transport::kUnassignedSerialSessionGeneration;
+                writeWorkerStopRequested_ = true;
+                settlePendingWritesLocked(svm::transport::SerialErrorCategory::IoFailure);
+            }
             activeCancellationCategory_ = svm::transport::SerialErrorCategory::None;
             if (writeWorkerStopRequested_) {
                 return;
@@ -1352,12 +1504,17 @@ void Win32SerialSession::publishCompletion(svm::transport::SerialTerminalResult 
     completedWrites_.push_back(std::move(result));
 }
 
-bool Win32SerialSession::completeActiveWrite(
-    const ActiveWrite& request,
+bool Win32SerialSession::finalizeActiveWriteLocked(
+    ActiveWrite request,
     svm::transport::SerialWriteResultStatus status,
     std::size_t byteCount,
     svm::transport::SerialErrorCategory category,
     std::uint32_t nativeCode) {
+    if (!activeWrite_.has_value()
+        || activeWrite_->requestId != request.requestId
+        || activeWrite_->generation != request.generation) {
+        return false;
+    }
     const svm::transport::SerialWriteResult completed = writeQueue_.completeActive(
         request.requestId,
         request.generation,
@@ -1366,14 +1523,42 @@ bool Win32SerialSession::completeActiveWrite(
     if (completed.rejected()) {
         return false;
     }
+    if (!activeWrite_->terminalPublished) {
+        publishCompletion(
+            terminalResult(
+                completed,
+                operationStatus(completed.status),
+                category,
+                request.endpoint,
+                nativeCode));
+    }
+    activeWrite_.reset();
+    return true;
+}
+
+void Win32SerialSession::publishInterruptedActiveWriteLocked(
+    svm::transport::SerialErrorCategory category,
+    std::uint32_t nativeCode) {
+    if (!activeWrite_.has_value() || activeWrite_->terminalPublished) {
+        return;
+    }
+    const svm::transport::SerialWriteResult interrupted{
+        .requestId = activeWrite_->requestId,
+        .generation = activeWrite_->generation,
+        .status = category == svm::transport::SerialErrorCategory::Disconnected
+            ? svm::transport::SerialWriteResultStatus::Disconnected
+            : svm::transport::SerialWriteResultStatus::Closed,
+        .byteCount = 0,
+        .deadline = activeWrite_->deadline,
+    };
     publishCompletion(
         terminalResult(
-            completed,
-            operationStatus(completed.status),
+            interrupted,
+            operationStatus(interrupted.status),
             category,
-            request.endpoint,
+            activeWrite_->endpoint,
             nativeCode));
-    return true;
+    activeWrite_->terminalPublished = true;
 }
 
 svm::transport::SerialErrorCategory Win32SerialSession::nativeErrorCategory(
@@ -1387,7 +1572,8 @@ svm::transport::SerialErrorCategory Win32SerialSession::nativeErrorCategory(
     }
     if (nativeCode == ERROR_DEVICE_NOT_CONNECTED
         || nativeCode == ERROR_INVALID_HANDLE
-        || nativeCode == ERROR_GEN_FAILURE) {
+        || nativeCode == ERROR_GEN_FAILURE
+        || nativeCode == ERROR_IO_DEVICE) {
         return svm::transport::SerialErrorCategory::Disconnected;
     }
     return nativeCode == 0

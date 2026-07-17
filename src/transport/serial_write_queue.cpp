@@ -152,7 +152,7 @@ SerialWriteResult SerialWriteQueue::enqueue(
         return reject(SerialWriteResultStatus::RejectedFull, kQueueFullMessage, generation, deadline);
     }
 
-    const std::optional<SerialWriteRequestId> requestId = allocateRequestId();
+    const std::optional<SerialWriteRequestId> requestId = reserveRequestId();
     if (!requestId.has_value()) {
         return reject(
             SerialWriteResultStatus::RejectedInvalid,
@@ -311,7 +311,7 @@ SerialWriteResult SerialWriteQueue::completeActive(
     };
 }
 
-std::optional<SerialWriteRequestId> SerialWriteQueue::allocateRequestId() noexcept {
+std::optional<SerialWriteRequestId> SerialWriteQueue::reserveRequestId() noexcept {
     if (nextRequestId_ == 0) {
         return std::nullopt;
     }

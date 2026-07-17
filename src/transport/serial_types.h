@@ -29,6 +29,8 @@ enum class SerialFlowControl {
     SoftwareXonXoff,
 };
 
+inline constexpr int kSerialTerminalResultTargetMs = 1000;
+
 struct SerialOpenOptions {
     std::string portName;
     int baudRate = 115200;
@@ -39,7 +41,7 @@ struct SerialOpenOptions {
     bool dataTerminalReady = false;
     bool requestToSend = false;
     int readTimeoutMs = 1000;
-    int writeTimeoutMs = 1000;
+    int writeTimeoutMs = kSerialTerminalResultTargetMs;
     std::size_t readBufferSize = 4096;
 };
 

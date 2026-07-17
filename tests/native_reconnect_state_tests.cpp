@@ -1,5 +1,9 @@
 #include "win32/native_reconnect_state.h"
 
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+
 #include <cassert>
 #include <iostream>
 #include <optional>

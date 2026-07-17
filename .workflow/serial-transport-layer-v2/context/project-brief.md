@@ -72,3 +72,15 @@ identity, per-generation high-water evidence, and immediate typed rejection.
 The UI consumes the canonical snapshot directly, obsolete queue bypasses are
 removed, and host, MinGW/Wine, PTY, self-test, UI-performance, package, and
 documentation gates all pass.
+
+Phase 3 Task 2 completed on 2026-07-17. Accepted writes now share one request-ID
+sequence and publish each terminal state once across success, failure, timeout,
+cancellation, disconnect, close, and reconnect. Effective write deadlines are
+capped at one second. If a synchronous driver call does not settle within the
+join target, the session publishes one logical terminal result but retains the
+active queue reservation, worker, handle, and payload until native settlement;
+late cleanup cannot publish again or replay the request. A permanently stuck
+vendor driver remains a physical boundary: close/reopen stays unavailable and
+destruction fails fast rather than releasing live native ownership. Host 27/27,
+MinGW/Wine 34/34, the 5005-transaction PTY matrix, application self-tests,
+strict package inspection, and documentation consistency all pass.
