@@ -95,3 +95,15 @@ serial operation in order without classifying cancellation from Chinese text.
 Shutdown and normal scan completion both settle pending evidence before state is
 released. Host 27/27, MinGW/Wine 34/34, the 5005-transaction PTY matrix, strict
 package inspection, UI self-test/performance, and documentation checks pass.
+
+Phase 3 Task 4 completed on 2026-07-20. The Wine/PTTY harness now runs isolated
+normal, reopen, timeout, pending-cancel, close, stale-generation, and stress
+scenarios with two alternating Modbus fixtures. Timeout sends a real request;
+close interrupts an active bounded write; cancellation is explicitly limited to
+pending work; and exact stale-completion rejection remains a deterministic
+generation test rather than a false claim about untagged serial bytes. The
+harness restores COM mappings, serializes each Wine prefix, reaps children on
+errors and signals, and records local-only evidence without promoting PTY results
+to physical-driver or CI coverage. Host 27/27, MinGW/Wine 34/34, the final
+5008-transaction matrix, self-test/UI performance, strict package, hash, and
+documentation gates pass.

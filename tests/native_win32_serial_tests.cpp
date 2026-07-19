@@ -413,15 +413,26 @@ void productionQueueSnapshotTracksLimitsIdentityAndHighWater() {
     assert(snapshot.highWaterCount == 0);
     assert(snapshot.highWaterBytes == 0);
 
+    std::vector<svm::transport::SerialWriteResult> countAdmissions;
+    countAdmissions.reserve(svm::transport::kDefaultSerialWriteQueueCapacity);
     for (std::size_t index = 0; index < svm::transport::kDefaultSerialWriteQueueCapacity; ++index) {
-        assert(Access::enqueueWithoutWorker(
+        const auto admission = Access::enqueueWithoutWorker(
             session,
             {static_cast<std::uint8_t>(index)},
-            deadlineAfter(500)).accepted());
+            deadlineAfter(500));
+        assert(admission.accepted());
+        assert(admission.generation == 14);
+        assert(admission.requestId != svm::transport::kUnassignedSerialOperationId);
+        if (!countAdmissions.empty()) {
+            assert(admission.requestId == countAdmissions.back().requestId + 1);
+        }
+        countAdmissions.push_back(admission);
     }
     const auto beforeRejection = session.writeQueueSnapshot();
     const auto rejectionDeadline = deadlineAfter(500);
+    const auto rejectionStarted = std::chrono::steady_clock::now();
     const auto rejected = session.enqueueWrite({0xFF}, rejectionDeadline);
+    const auto rejectionElapsed = std::chrono::steady_clock::now() - rejectionStarted;
     snapshot = session.writeQueueSnapshot();
     assert(rejected.status == svm::transport::SerialOperationStatus::RejectedFull);
     assert(rejected.error.category == svm::transport::SerialErrorCategory::QueueFull);
@@ -433,9 +444,13 @@ void productionQueueSnapshotTracksLimitsIdentityAndHighWater() {
     assert(snapshot.highWaterCount == svm::transport::kDefaultSerialWriteQueueCapacity);
     assert(snapshot.highWaterBytes == svm::transport::kDefaultSerialWriteQueueCapacity);
     assert(snapshot.nextRequestId == beforeRejection.nextRequestId);
+    assert(rejectionElapsed < std::chrono::milliseconds(
+        svm::transport::kSerialTerminalResultTargetMs / 4));
 
     const auto active = Access::activateWithoutWorker(session);
     assert(active.has_value());
+    assert(active->id == countAdmissions.front().requestId);
+    assert(active->generation == countAdmissions.front().generation);
     snapshot = session.writeQueueSnapshot();
     assert(snapshot.activeRequestId == active->id);
     assert(snapshot.activeCount == 1);
@@ -444,6 +459,18 @@ void productionQueueSnapshotTracksLimitsIdentityAndHighWater() {
 
     const auto cancelled = session.cancelPendingWrites();
     assert(cancelled.size() == svm::transport::kDefaultSerialWriteQueueCapacity - 1);
+    for (std::size_t index = 0; index < cancelled.size(); ++index) {
+        assert(cancelled[index].operation.requestId == countAdmissions[index + 1].requestId);
+        assert(cancelled[index].operation.generation == 14);
+        assert(cancelled[index].operation.kind == svm::transport::SerialOperationKind::Write);
+        assert(cancelled[index].operation.deadline.expiresAt
+            == countAdmissions[index + 1].deadline.expiresAt);
+        assert(cancelled[index].status == svm::transport::SerialOperationStatus::Cancelled);
+        assert(cancelled[index].error.category == svm::transport::SerialErrorCategory::Cancelled);
+        assert(cancelled[index].byteCount == 0);
+        assert(cancelled[index].terminal());
+    }
+    assert(session.takeCompletedWrites().empty());
     assert(Access::completeActive(
         session,
         active->id,
@@ -456,7 +483,14 @@ void productionQueueSnapshotTracksLimitsIdentityAndHighWater() {
     assert(snapshot.activeRequestId == svm::transport::kUnassignedSerialOperationId);
     assert(snapshot.highWaterCount == svm::transport::kDefaultSerialWriteQueueCapacity);
     assert(snapshot.highWaterBytes == svm::transport::kDefaultSerialWriteQueueCapacity);
-    assert(session.takeCompletedWrites().size() == 1);
+    const auto countResults = session.takeCompletedWrites();
+    assert(countResults.size() == 1);
+    assert(countResults.front().operation.requestId == countAdmissions.front().requestId);
+    assert(countResults.front().operation.generation == 14);
+    assert(countResults.front().status == svm::transport::SerialOperationStatus::Succeeded);
+    assert(countResults.front().byteCount == 1);
+    assert(countResults.front().terminal());
+    assert(session.takeCompletedWrites().empty());
     assert(session.close().succeeded());
 
     Access::publishSyntheticOpen(session, 15, "COM15");
@@ -468,24 +502,82 @@ void productionQueueSnapshotTracksLimitsIdentityAndHighWater() {
 
     svm::win32::Win32SerialSession byteSession;
     Access::publishSyntheticOpen(byteSession, 16, "COM16");
-    std::vector<std::uint8_t> exactPayload(
-        svm::transport::kDefaultSerialWriteQueueByteCapacity,
-        0x5A);
-    assert(Access::enqueueWithoutWorker(
+    const std::size_t activePayloadBytes = svm::transport::kDefaultSerialWriteQueueByteCapacity / 2;
+    const std::size_t firstPendingBytes = svm::transport::kDefaultSerialWriteQueueByteCapacity / 4;
+    const std::size_t secondPendingBytes = svm::transport::kDefaultSerialWriteQueueByteCapacity
+        - activePayloadBytes
+        - firstPendingBytes;
+    const auto byteActive = Access::enqueueWithoutWorker(
         byteSession,
-        std::move(exactPayload),
-        deadlineAfter(500)).accepted());
+        std::vector<std::uint8_t>(activePayloadBytes, 0x5A),
+        deadlineAfter(500));
+    assert(byteActive.accepted());
+    const auto activatedBytes = Access::activateWithoutWorker(byteSession);
+    assert(activatedBytes.has_value());
+    assert(activatedBytes->id == byteActive.requestId);
+    const auto firstBytePending = Access::enqueueWithoutWorker(
+        byteSession,
+        std::vector<std::uint8_t>(firstPendingBytes, 0xA5),
+        deadlineAfter(500));
+    const auto secondBytePending = Access::enqueueWithoutWorker(
+        byteSession,
+        std::vector<std::uint8_t>(secondPendingBytes, 0xC3),
+        deadlineAfter(500));
+    assert(firstBytePending.accepted());
+    assert(secondBytePending.accepted());
+    assert(firstBytePending.requestId == byteActive.requestId + 1);
+    assert(secondBytePending.requestId == firstBytePending.requestId + 1);
+    const auto beforeByteRejection = byteSession.writeQueueSnapshot();
+    assert(beforeByteRejection.activeRequestId == byteActive.requestId);
+    assert(beforeByteRejection.activeBytes == activePayloadBytes);
+    assert(beforeByteRejection.pendingCount == 2);
+    assert(beforeByteRejection.pendingBytes == firstPendingBytes + secondPendingBytes);
+    assert(beforeByteRejection.countedBytes() == svm::transport::kDefaultSerialWriteQueueByteCapacity);
     const auto byteRejectionDeadline = deadlineAfter(500);
+    const auto byteRejectionStarted = std::chrono::steady_clock::now();
     const auto byteRejected = byteSession.enqueueWrite({0x01}, byteRejectionDeadline);
+    const auto byteRejectionElapsed = std::chrono::steady_clock::now() - byteRejectionStarted;
     const auto byteSnapshot = byteSession.writeQueueSnapshot();
     assert(byteRejected.status == svm::transport::SerialOperationStatus::RejectedFull);
     assert(byteRejected.error.category == svm::transport::SerialErrorCategory::QueueFull);
     assert(byteRejected.operation.generation == 16);
     assert(byteRejected.operation.deadline.expiresAt == byteRejectionDeadline.expiresAt);
     assert(!byteRejected.operation.assigned());
+    assert(byteRejectionElapsed < std::chrono::milliseconds(
+        svm::transport::kSerialTerminalResultTargetMs / 4));
+    assert(byteSnapshot.activeRequestId == byteActive.requestId);
+    assert(byteSnapshot.pendingCount == 2);
     assert(byteSnapshot.countedBytes() == svm::transport::kDefaultSerialWriteQueueByteCapacity);
+    assert(byteSnapshot.nextRequestId == beforeByteRejection.nextRequestId);
+    assert(byteSnapshot.highWaterCount == 3);
     assert(byteSnapshot.highWaterBytes == svm::transport::kDefaultSerialWriteQueueByteCapacity);
-    assert(byteSession.cancelPendingWrites().size() == 1);
+    const auto byteCancelled = byteSession.cancelPendingWrites();
+    assert(byteCancelled.size() == 2);
+    assert(byteCancelled[0].operation.requestId == firstBytePending.requestId);
+    assert(byteCancelled[1].operation.requestId == secondBytePending.requestId);
+    for (const auto& cancelledResult : byteCancelled) {
+        assert(cancelledResult.operation.generation == 16);
+        assert(cancelledResult.status == svm::transport::SerialOperationStatus::Cancelled);
+        assert(cancelledResult.error.category == svm::transport::SerialErrorCategory::Cancelled);
+        assert(cancelledResult.byteCount == 0);
+        assert(cancelledResult.terminal());
+    }
+    assert(byteSession.takeCompletedWrites().empty());
+    assert(Access::completeActive(
+        byteSession,
+        byteActive.requestId,
+        16,
+        svm::transport::SerialWriteResultStatus::Sent,
+        activePayloadBytes));
+    const auto byteResults = byteSession.takeCompletedWrites();
+    assert(byteResults.size() == 1);
+    assert(byteResults.front().operation.requestId == byteActive.requestId);
+    assert(byteResults.front().operation.generation == 16);
+    assert(byteResults.front().status == svm::transport::SerialOperationStatus::Succeeded);
+    assert(byteResults.front().byteCount == activePayloadBytes);
+    assert(byteResults.front().terminal());
+    assert(byteSession.writeQueueSnapshot().empty());
+    assert(byteSession.takeCompletedWrites().empty());
     assert(byteSession.close().succeeded());
 
     svm::win32::Win32SerialSession oversizedSession;
@@ -501,6 +593,7 @@ void productionQueueSnapshotTracksLimitsIdentityAndHighWater() {
     assert(oversized.operation.generation == 17);
     assert(!oversized.operation.assigned());
     assert(oversizedSession.writeQueueSnapshot().empty());
+    assert(oversizedSession.writeQueueSnapshot().nextRequestId == 1);
     assert(oversizedSession.writeQueueSnapshot().highWaterBytes == 0);
     assert(oversizedSession.close().succeeded());
 }
@@ -742,7 +835,27 @@ void reconnectNeverReplaysSettledRequests() {
     assert(replacement.accepted());
     assert(replacement.requestId != oldActive.requestId);
     assert(replacement.requestId != oldPending.requestId);
-    assert(Access::activateWithoutWorker(session).has_value());
+    const auto replacementActive = Access::activateWithoutWorker(session);
+    assert(replacementActive.has_value());
+    assert(replacementActive->id == replacement.requestId);
+    assert(replacementActive->generation == 41);
+    const auto beforeStaleCompletion = session.writeQueueSnapshot();
+
+    assert(!Access::completeActive(
+        session,
+        oldActive.requestId,
+        40,
+        svm::transport::SerialWriteResultStatus::Sent,
+        1));
+    const auto afterStaleCompletion = session.writeQueueSnapshot();
+    assert(afterStaleCompletion.generation == beforeStaleCompletion.generation);
+    assert(afterStaleCompletion.activeRequestId == replacement.requestId);
+    assert(afterStaleCompletion.activeCount == beforeStaleCompletion.activeCount);
+    assert(afterStaleCompletion.activeBytes == beforeStaleCompletion.activeBytes);
+    assert(afterStaleCompletion.pendingCount == beforeStaleCompletion.pendingCount);
+    assert(afterStaleCompletion.pendingBytes == beforeStaleCompletion.pendingBytes);
+    assert(afterStaleCompletion.nextRequestId == beforeStaleCompletion.nextRequestId);
+    assert(session.takeCompletedWrites().empty());
     assert(session.close().succeeded());
 
     const auto replacementResults = session.takeCompletedWrites();
