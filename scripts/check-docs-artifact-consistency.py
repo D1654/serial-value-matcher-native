@@ -14,6 +14,16 @@ UI_ARTIFACT = "windows-native-ui-screenshots"
 EXE_NAME = "svm-native-win32.exe"
 TARGET_NAME = "svm-native-win32"
 VERSION_SOURCE = "cmake/svm_version.cmake"
+SERIAL_PTY_SCENARIOS = "normal,reopen,timeout,cancel,stress,close,stale"
+SERIAL_PTY_SEPARATOR_PATTERN = r"\s*[,/、，]\s*"
+OBSOLETE_SERIAL_PTY_PATTERN = re.compile(
+    rf"normal{SERIAL_PTY_SEPARATOR_PATTERN}reopen"
+    rf"{SERIAL_PTY_SEPARATOR_PATTERN}timeout"
+    rf"{SERIAL_PTY_SEPARATOR_PATTERN}cancel"
+    rf"{SERIAL_PTY_SEPARATOR_PATTERN}stress"
+    rf"(?!{SERIAL_PTY_SEPARATOR_PATTERN}close{SERIAL_PTY_SEPARATOR_PATTERN}stale)",
+    re.IGNORECASE,
+)
 
 PACKAGE_WORKFLOW = ".github/workflows/windows-native-package.yml"
 UI_WORKFLOW = ".github/workflows/windows-native-ui-capture.yml"
@@ -51,6 +61,7 @@ REQUIRED_FILES = [
 
 PACKAGE_WORKFLOW_TERMS = [
     "PACKAGE_NAME: SerialValueMatcherNative-win32-native-x64",
+    "ctest --test-dir $env:BUILD_DIR --output-on-failure -C Release --no-tests=error",
     "--self-test",
     "--ui-perf-test",
     "native-self-test.log",
@@ -67,6 +78,22 @@ PACKAGE_WORKFLOW_TERMS = [
     "artifact-url",
     "artifact-digest",
     "GateStatus=documented-local-only",
+    "Classification=local-only-release-candidate-evidence",
+    "CiExecutesPtyMatrix=no",
+    f"ExpectedScenarios={SERIAL_PTY_SCENARIOS}",
+    f"LocalCommand=SVM_SERIAL_LOOPBACK_SCENARIOS={SERIAL_PTY_SCENARIOS}",
+    "TransportV2Coverage=queue,exactly-once,typed-errors,generation,pty-faults",
+    "serial_write_queue_tests",
+    "serial_session_contract_tests",
+    "native_modbus_transport_adapter_tests",
+    "native_serial_io_state_tests",
+    "native_reconnect_state_tests",
+    "native_win32_serial_tests",
+    "native_win32_serial_loopback_tests",
+    "Zip sha256 file matches: yes",
+    "Native exe present: yes",
+    "Max zip bytes: 5242880",
+    "Max extracted bytes: 8388608",
     "${{ env.PACKAGE_NAME }}.zip",
     "${{ env.PACKAGE_NAME }}.zip.sha256.txt",
     "${{ env.PACKAGE_NAME }}.package-summary.txt",
@@ -74,6 +101,7 @@ PACKAGE_WORKFLOW_TERMS = [
 
 UI_WORKFLOW_TERMS = [
     "name: windows-native-ui-screenshots",
+    "ctest --test-dir $env:BUILD_DIR --output-on-failure -C Release --no-tests=error",
     "--self-test",
     "--ui-perf-test",
     "capture-status.txt",
@@ -89,6 +117,35 @@ UI_WORKFLOW_TERMS = [
     "artifact-url",
     "artifact-digest",
     "GateStatus=passed",
+    '"scripts/run-windows-native-serial-pty-loopback.py"',
+    '"src/win32/**"',
+    '"src/transport/**"',
+    '"tests/**"',
+    '"CMakeLists.txt"',
+]
+
+CMAKE_TRANSPORT_TERMS = [
+    "src/transport/serial_write_queue.cpp",
+    "src/win32/win32_serial_session.cpp",
+    "add_test(NAME serial_write_queue_tests",
+    "add_test(NAME serial_session_contract_tests",
+    "add_test(NAME native_modbus_transport_adapter_tests",
+    "add_test(NAME native_serial_io_state_tests",
+    "add_test(NAME native_reconnect_state_tests",
+    "add_test(NAME native_win32_serial_tests",
+    "add_test(NAME native_win32_serial_loopback_tests",
+]
+
+MINGW_PACKAGE_GATE_TERMS = [
+    "set -euo pipefail",
+    "SVM_SKIP_WINE_TEST:-0",
+    "SVM_STRICT_WINE_TEST:-1",
+    "require_binary_env SVM_SKIP_WINE_TEST",
+    "require_binary_env SVM_STRICT_WINE_TEST",
+    "Wine gate status:",
+    "Wine gate strict:",
+    '--max-zip-bytes "$max_zip_bytes"',
+    '--max-extracted-bytes "$max_extracted_bytes"',
 ]
 
 REQUIRED_DOC_TERMS = {
@@ -276,9 +333,27 @@ def check_workflow_terms(root: Path, failures: list[str]) -> None:
     check_terms(ui_text, UI_WORKFLOW_TERMS, UI_WORKFLOW, failures)
 
 
+def check_transport_release_gate_terms(root: Path, failures: list[str]) -> None:
+    check_terms(read_text(root / "CMakeLists.txt"), CMAKE_TRANSPORT_TERMS, "CMakeLists.txt", failures)
+    check_terms(
+        read_text(root / "scripts/package-windows-native-mingw.sh"),
+        MINGW_PACKAGE_GATE_TERMS,
+        "scripts/package-windows-native-mingw.sh",
+        failures,
+    )
+
+
 def check_doc_required_terms(root: Path, failures: list[str]) -> None:
     for relative, terms in REQUIRED_DOC_TERMS.items():
         check_terms(read_text(root / relative), terms, relative, failures)
+
+
+def check_pty_matrix_docs(root: Path, failures: list[str]) -> None:
+    for relative in ACTIVE_DOCS:
+        text = read_text(root / relative)
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            if OBSOLETE_SERIAL_PTY_PATTERN.search(line):
+                add_failure(failures, relative, "references the obsolete five-scenario PTY matrix", line_no)
 
 
 def load_docs(root: Path, negative_smoke: bool) -> list[DocText]:
@@ -444,7 +519,9 @@ def main() -> int:
 
     docs = load_docs(root, args.negative_smoke)
     check_workflow_terms(root, failures)
+    check_transport_release_gate_terms(root, failures)
     check_doc_required_terms(root, failures)
+    check_pty_matrix_docs(root, failures)
     check_active_contradictions(docs, failures, warnings)
     check_package_summary_terms(root, failures)
     check_markdown_links(root, docs, failures)

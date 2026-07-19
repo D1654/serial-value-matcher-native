@@ -45,6 +45,18 @@ require_command() {
     fi
 }
 
+require_binary_env() {
+    local name="$1"
+    local value="$2"
+    if [[ "$value" != "0" && "$value" != "1" ]]; then
+        echo "$name 仅接受 0 或 1，当前值：$value" >&2
+        exit 2
+    fi
+}
+
+require_binary_env SVM_SKIP_WINE_TEST "$skip_wine"
+require_binary_env SVM_STRICT_WINE_TEST "$strict_wine"
+
 if [[ "$skip_build" -eq 0 ]]; then
     "$repo_root/scripts/build-windows-native-mingw.sh"
 fi

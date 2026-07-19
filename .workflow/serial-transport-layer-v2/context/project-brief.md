@@ -107,3 +107,16 @@ errors and signals, and records local-only evidence without promoting PTY result
 to physical-driver or CI coverage. Host 27/27, MinGW/Wine 34/34, the final
 5008-transaction matrix, self-test/UI performance, strict package, hash, and
 documentation gates pass.
+
+Phase 3 Task 5 completed on 2026-07-20. The existing CMake graph already
+registered every hardened serial source and test, so no duplicate target or
+compatibility code was added. Both Windows workflows now reject empty CTest
+trees, package evidence proves the transport-v2 test set and fixed size gates,
+and the retained backend closure records queue, exactly-once, typed-error,
+generation, and PTY-fault coverage. The seven-scenario PTY matrix remains
+explicitly local-only with `CiExecutesPtyMatrix=no`. MinGW packaging rejects
+malformed Wine gate flags, and the consistency checker now protects CMake,
+workflow, package, trigger, and all active-document PTY terms. Host 27/27,
+MinGW/Wine 34/34, the 5006-transaction PTY matrix, strict self-test/UI
+performance, package inspection, SHA256, documentation checks, and independent
+review all pass.

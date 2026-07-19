@@ -123,7 +123,7 @@ cmake --build build-windows-native --config Release --parallel 1
 5. 下载 package artifact，核对 zip SHA256 sidecar。
 6. 阅读 package summary，确认 `Gate status: passed`、`Unexpected DLL files: none`、`Required package files: passed`、`Package documentation file set: passed`。
 7. 阅读 UI artifact，确认 `ui-evidence-summary.txt` 为 `GateStatus=passed`，并人工查看默认窗口、标签页、紧凑标签页、resize、DPI 和分割条截图。
-8. 如果本次改动涉及串口 I/O、超时、取消、重连、批量发送或异步写队列，运行本地 PTY normal/reopen/timeout/cancel/stress 矩阵并保存 summary。
+8. 如果本次改动涉及串口 I/O、超时、取消、重连、批量发送或异步写队列，运行本地 PTY normal/reopen/timeout/cancel/stress/close/stale 矩阵并保存 summary。
 9. 运行 `python3 scripts/check-docs-artifact-consistency.py`，确认输出 `docs consistency ok`。
 10. 创建或更新 Release，上传 zip、SHA256 sidecar、package summary；Release 正文写明 run id、SHA256、主要变更、已知边界和回滚指引。
 

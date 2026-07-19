@@ -7,9 +7,9 @@
 | 证据 | 执行位置 | 是否替代真机验收 | 用途 |
 |------|----------|------------------|------|
 | Windows native package workflow | GitHub Actions `windows-2022` | 否 | 阻断构建、CTest、自检、UI 性能、package 审计、docs consistency 和证据文件缺失 |
-| `serial-pty-matrix.txt` | GitHub Actions artifact | 否 | 记录 PTY 矩阵仍是 local-only，不代表 CI 已执行 PTY normal/reopen/timeout/cancel/stress |
-| `serial-pty-matrix-summary.txt` | GitHub Actions artifact | 否 | 机器可读记录 `GateStatus=documented-local-only`、`ExpectedScenarios=normal,reopen,timeout,cancel,stress` 和本地命令 |
-| PTY loopback 矩阵 | 本地 Linux/Wine | 否 | 发布候选前补充验证串口 normal、reopen、timeout、cancel、stress 路径 |
+| `serial-pty-matrix.txt` | GitHub Actions artifact | 否 | 记录 PTY 矩阵仍是 local-only，不代表 CI 已执行 PTY normal/reopen/timeout/cancel/stress/close/stale |
+| `serial-pty-matrix-summary.txt` | GitHub Actions artifact | 否 | 机器可读记录 `GateStatus=documented-local-only`、`ExpectedScenarios=normal,reopen,timeout,cancel,stress,close,stale` 和本地命令 |
+| PTY loopback 矩阵 | 本地 Linux/Wine | 否 | 发布候选前补充验证串口 normal、reopen、timeout、cancel、stress、close、stale 路径 |
 | 真实 USB 转串口设备 | 真实 Windows 10/11 | 是 | 验证端口枚举、驱动、控制线、硬件流控、热插拔和现场长时间运行 |
 
 只要本地 PTY 或真机发现串口收发、超时、取消、热插拔或日志问题，即使 GitHub Actions 通过，也应视为发布风险并先修复。
@@ -17,7 +17,7 @@
 本地 PTY 矩阵建议同时输出 summary 文件：
 
 ```bash
-SVM_SERIAL_LOOPBACK_SCENARIOS=normal,reopen,timeout,cancel,stress \
+SVM_SERIAL_LOOPBACK_SCENARIOS=normal,reopen,timeout,cancel,stress,close,stale \
 SVM_SERIAL_LOOPBACK_SUMMARY=artifacts/local/serial-pty-matrix-summary.txt \
 python3 scripts/run-windows-native-serial-pty-loopback.py
 ```

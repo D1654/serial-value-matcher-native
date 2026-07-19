@@ -104,7 +104,7 @@ scripts/package-windows-native-mingw.sh
 
 - package summary 为 `Gate status: passed`，且 `Unexpected DLL files: none`、`Required package files: passed`、`Package documentation file set: passed`。
 - UI capture artifact `windows-native-ui-screenshots` 中 `ui-evidence-summary.txt` 为 `GateStatus=passed`。
-- 串口 PTY 在 GitHub Actions 中保持 local-only 说明；涉及串口 I/O 改动时，本地运行 normal/reopen/timeout/cancel/stress 矩阵并保存 summary。
+- 串口 PTY 在 GitHub Actions 中保持 local-only 说明；涉及串口 I/O 改动时，本地运行 normal/reopen/timeout/cancel/stress/close/stale 矩阵并保存 summary。
 - 文档一致性检查通过：`python3 scripts/check-docs-artifact-consistency.py`。
 
 ## 文档

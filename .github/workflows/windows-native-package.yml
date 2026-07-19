@@ -42,7 +42,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path $env:PACKAGE_ARTIFACT_DIR -Force | Out-Null
           $ctestLog = Join-Path $env:PACKAGE_ARTIFACT_DIR "native-ctest.log"
-          $ctestOutput = & ctest --test-dir $env:BUILD_DIR --output-on-failure -C Release 2>&1
+          $ctestOutput = & ctest --test-dir $env:BUILD_DIR --output-on-failure -C Release --no-tests=error 2>&1
           $ctestExit = $LASTEXITCODE
           $ctestOutput | Tee-Object -FilePath $ctestLog
           if ($ctestExit -ne 0) {
@@ -62,8 +62,13 @@ jobs:
             "- serial RTU adapter plus Modbus core/executor/request/UI state tests",
             "- native storage replacement rollback and orphan-tail recovery tests",
             "- native package self-test and UI performance gates later in this workflow",
+            "TransportV2Coverage=queue,exactly-once,typed-errors,generation,pty-faults",
+            "- count/byte queue budgets include active work and reject at fixed limits",
+            "- exactly-once terminal completion covers timeout, cancel, close, and reopen",
+            "- typed deadline/native/communication-mask/driver-queue evidence remains structured",
+            "- generation isolation rejects stale completion and never replays old requests",
             "Local-only release-candidate evidence remains separate:",
-            "- PTY normal/reopen/timeout/cancel/stress matrix is documented in serial-pty-matrix.txt"
+            "- PTY normal/reopen/timeout/cancel/stress/close/stale matrix is documented in serial-pty-matrix.txt"
           )
           $backendLines | Set-Content -Path $backendLog -Encoding UTF8
           "## Phase 2 backend regression closure" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
@@ -89,8 +94,8 @@ jobs:
             "- svm-native-win32.exe --ui-perf-test",
             "- package audit and docs consistency",
             "Local release-candidate command:",
-            "SVM_SERIAL_LOOPBACK_SCENARIOS=normal,reopen,timeout,cancel,stress python3 scripts/run-windows-native-serial-pty-loopback.py",
-            "Expected local scenarios: normal, reopen, timeout, cancel, stress."
+            "SVM_SERIAL_LOOPBACK_SCENARIOS=normal,reopen,timeout,cancel,stress,close,stale python3 scripts/run-windows-native-serial-pty-loopback.py",
+            "Expected local scenarios: normal, reopen, timeout, cancel, stress, close, stale."
           )
           $ptyLines | Set-Content -Path $ptyLog -Encoding UTF8
           $ptySummaryLines = @(
@@ -99,24 +104,24 @@ jobs:
             "Classification=local-only-release-candidate-evidence",
             "CiExecutesPtyMatrix=no",
             "CiBlockingEvidenceFile=yes",
-            "ExpectedScenarios=normal,reopen,timeout,cancel,stress",
-            "LocalCommand=SVM_SERIAL_LOOPBACK_SCENARIOS=normal,reopen,timeout,cancel,stress python3 scripts/run-windows-native-serial-pty-loopback.py"
+            "ExpectedScenarios=normal,reopen,timeout,cancel,stress,close,stale",
+            "LocalCommand=SVM_SERIAL_LOOPBACK_SCENARIOS=normal,reopen,timeout,cancel,stress,close,stale python3 scripts/run-windows-native-serial-pty-loopback.py"
           )
           $ptySummaryLines | Set-Content -Path $ptySummary -Encoding UTF8
           "## Native serial gate boundaries" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "| Gate | CI blocking? | Evidence |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "| --- | --- | --- |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          "| Native CTest serial/unit gates | Yes | ctest --test-dir build-windows-native --output-on-failure -C Release |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "| Native CTest serial/unit gates | Yes | ctest --test-dir build-windows-native --output-on-failure -C Release --no-tests=error |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "| App self-test and UI performance | Yes | native-self-test.log, native-ui-perf-test.log |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "| Package audit and docs consistency | Yes | package summary, docs consistency step |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          "| PTY normal/reopen/timeout/cancel/stress matrix | No, local-only RC evidence | serial-pty-matrix.txt records why CI does not execute it |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "| PTY normal/reopen/timeout/cancel/stress/close/stale matrix | No, local-only RC evidence | serial-pty-matrix.txt records why CI does not execute it |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "PTY note file: $ptyLog" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "PTY summary file: $ptySummary" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "Run locally from a Linux/Wine environment before release candidates that touch serial I/O:" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "````bash" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          $ptyLines[11] | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          $ptyLines[12] | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
 
       - name: Run native app self-test
@@ -193,6 +198,10 @@ jobs:
 
           $summaryRequiredTerms = @(
             "Gate status: passed",
+            "Zip sha256 file matches: yes",
+            "Native exe present: yes",
+            "Max zip bytes: 5242880",
+            "Max extracted bytes: 8388608",
             "Version metadata:",
             "Expected version:",
             "Expected release tag:",
@@ -211,12 +220,28 @@ jobs:
           }
           Assert-FileContains $hashPath "$(Split-Path -Leaf $zipPath)" "package SHA256 sidecar"
           Assert-FileContains $ctestLog "100% tests passed" "native CTest log"
+          $transportTestTerms = @(
+            "serial_write_queue_tests",
+            "serial_session_contract_tests",
+            "native_modbus_transport_adapter_tests",
+            "native_serial_io_state_tests",
+            "native_reconnect_state_tests",
+            "native_win32_serial_tests",
+            "native_win32_serial_loopback_tests"
+          )
+          foreach ($term in $transportTestTerms) {
+            Assert-FileContains $ctestLog $term "native CTest log"
+          }
           Assert-FileContains $selfTestLog "ok" "native self-test log"
           Assert-FileContains $uiPerfLog "ui-perf ok" "native UI performance log"
           Assert-FileContains $backendLog "Status: CI-blocking native CTest passed before packaging." "Phase 2 backend regression closure"
+          Assert-FileContains $backendLog "TransportV2Coverage=queue,exactly-once,typed-errors,generation,pty-faults" "Phase 2 backend regression closure"
           Assert-FileContains $serialMatrixLog "CI blocking in this workflow: no PTY scenario is executed" "serial PTY matrix boundary note"
           Assert-FileContains $serialMatrixSummary "GateStatus=documented-local-only" "serial PTY matrix summary"
-          Assert-FileContains $serialMatrixSummary "ExpectedScenarios=normal,reopen,timeout,cancel,stress" "serial PTY matrix summary"
+          Assert-FileContains $serialMatrixSummary "Classification=local-only-release-candidate-evidence" "serial PTY matrix summary"
+          Assert-FileContains $serialMatrixSummary "CiExecutesPtyMatrix=no" "serial PTY matrix summary"
+          Assert-FileContains $serialMatrixSummary "ExpectedScenarios=normal,reopen,timeout,cancel,stress,close,stale" "serial PTY matrix summary"
+          Assert-FileContains $serialMatrixSummary "LocalCommand=SVM_SERIAL_LOOPBACK_SCENARIOS=normal,reopen,timeout,cancel,stress,close,stale" "serial PTY matrix summary"
 
       - name: Check docs artifact consistency
         shell: pwsh
