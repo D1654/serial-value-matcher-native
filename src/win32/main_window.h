@@ -170,12 +170,12 @@ private:
     bool enqueueFileSerialWrite(std::vector<std::uint8_t> payload);
     void updateSerialWriteQueueStatus();
     void drainSerialWriteResults();
-    void clearPendingSerialWrites();
+    void clearPendingSerialWrites(bool emitUiEvidence);
     void sendQuickPayload(std::size_t index);
     void updateTimedSendTimer();
     void browseFileSend();
     void startFileSend();
-    void stopFileSend(const std::wstring& statusText = {});
+    void stopFileSend(const std::wstring& statusText, bool updateUi);
     void pumpFileSend();
     void updateFileSendProgress();
     bool confirmDangerousOperation(const core::DangerousOperationRequest& request, const std::wstring& promptDetail);
@@ -184,7 +184,7 @@ private:
         core::DangerousOperationKind kind,
         core::DangerousOperationConfirmationState state);
     void pollSerial();
-    void handleSerialFailure(const std::string& message);
+    void handleSerialFailure(const std::string& message, bool appendLogEntry = true);
     void tryAutoReconnect();
     void runModbusScan();
     void requestCancelModbusScan();
@@ -192,10 +192,11 @@ private:
     void handleModbusScanDataBatch(NativeModbusScanDataBatch* batch);
     void handleModbusScanDone();
     NativeModbusThreadCloseResult closeModbusScanThread();
-    void discardPendingModbusScanMessages();
+    void drainPendingModbusScanDataMessages();
+    void settlePendingModbusScanMessages();
     void updateCompletedModbusScanProgress(const NativeModbusScanResult& result);
     std::wstring persistCompletedModbusScan(const NativeModbusScanResult& result);
-    bool handleCompletedModbusScanDisconnect(const NativeModbusScanResult& result, bool shouldDisconnectAfterScan);
+    bool handleCompletedModbusScanDisconnect(bool shouldDisconnectAfterScan);
     void setModbusScanRunningUi(bool running);
     void updateModbusScanProgress(
         std::size_t completedBlocks,
@@ -216,7 +217,15 @@ private:
     bool runRuleVerification(const native_storage::ScanSessionRecord& session);
     void appendLog(const std::wstring& line);
     void appendLog(NativeLogKind kind, const std::wstring& line);
+    void appendSerialOperationLog(
+        NativeLogKind kind,
+        const std::wstring& line,
+        const svm::transport::SerialOperationResult& result);
     void appendPayloadLog(NativeLogKind kind, const std::vector<std::uint8_t>& payload);
+    void appendPayloadLog(
+        NativeLogKind kind,
+        const std::vector<std::uint8_t>& payload,
+        const svm::transport::SerialOperationResult& result);
     void clearLog();
     std::size_t rebuildLogView();
     void queueVisibleLogEntry(const NativeLogEntry& entry);
@@ -263,9 +272,11 @@ private:
     void setWorkbenchTabControlsVisible(int tabIndex, bool visible);
     void updateSideHelp(int tabIndex);
     std::filesystem::path defaultStoreDirectory() const;
+    native_storage::RawIoEvent makeRawSerialEvent(
+        const svm::transport::SerialOperationResult& result,
+        const std::vector<std::uint8_t>& payload) const;
     void saveRawEvent(
-        std::string direction,
-        std::string endpoint,
+        const svm::transport::SerialOperationResult& result,
         const std::vector<std::uint8_t>& payload);
     bool saveRawEvents(std::vector<native_storage::RawIoEvent> events);
 

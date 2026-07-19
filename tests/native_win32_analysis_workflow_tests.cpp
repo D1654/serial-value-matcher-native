@@ -1,5 +1,9 @@
 #include "win32/native_analysis_workflow.h"
 
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+
 #include <cassert>
 #include <cstdint>
 #include <cmath>
@@ -242,6 +246,17 @@ void evidenceBundleInputRendersNativeStorageContext() {
     raw.timestampUtc = "2026-07-09T06:00:00Z";
     raw.endpoint = "COM7";
     raw.payload = {0x01, 0x03};
+    raw.operation = "read";
+    raw.requestId = 19;
+    raw.generation = 4;
+    raw.status = "failed";
+    raw.deadlineStatus = "expired";
+    raw.byteCount = 2;
+    raw.errorCategory = "io_failure";
+    raw.nativeCode = 5;
+    raw.commErrorMask = 10;
+    raw.inputQueueBytes = 12;
+    raw.outputQueueBytes = 4;
 
     storage::RuleVerificationRunRecord run;
     run.verificationRunId = "verify-1";
@@ -282,6 +297,17 @@ void evidenceBundleInputRendersNativeStorageContext() {
     assert(input.rawEvents.size() == 1);
     assert(input.rawEvents.front().endpoint == "COM7");
     assert(input.rawEvents.front().payload == std::vector<std::uint8_t>({0x01, 0x03}));
+    assert(input.rawEvents.front().operation == "read");
+    assert(input.rawEvents.front().requestId == 19);
+    assert(input.rawEvents.front().generation == 4);
+    assert(input.rawEvents.front().status == "failed");
+    assert(input.rawEvents.front().deadlineStatus == "expired");
+    assert(input.rawEvents.front().byteCount == 2);
+    assert(input.rawEvents.front().errorCategory == "io_failure");
+    assert(input.rawEvents.front().nativeCode == 5);
+    assert(input.rawEvents.front().commErrorMask == 10);
+    assert(input.rawEvents.front().inputQueueBytes == 12);
+    assert(input.rawEvents.front().outputQueueBytes == 4);
     assert(input.ruleVerificationReportMarkdown.find("verify-1") != std::string::npos);
     assert(input.ruleVerificationReportMarkdown.find("temperature") != std::string::npos);
 }

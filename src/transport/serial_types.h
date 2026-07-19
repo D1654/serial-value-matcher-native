@@ -68,6 +68,12 @@ enum class SerialOperationKind {
     SetRequestToSend,
 };
 
+enum class SerialDataDirection {
+    None,
+    Transmit,
+    Receive,
+};
+
 enum class SerialOperationStatus {
     Accepted,
     Succeeded,
@@ -111,6 +117,9 @@ struct SerialErrorEvidence {
     SerialErrorCategory category = SerialErrorCategory::None;
     std::uint32_t nativeCode = 0;
     std::size_t byteCount = 0;
+    std::uint32_t commErrorMask = 0;
+    std::optional<std::size_t> inputQueueBytes;
+    std::optional<std::size_t> outputQueueBytes;
 
     [[nodiscard]] bool ok() const noexcept {
         return category == SerialErrorCategory::None;
@@ -194,6 +203,113 @@ constexpr const char* serialSessionStateName(SerialSessionState state) noexcept 
         return "closing";
     case SerialSessionState::Faulted:
         return "faulted";
+    }
+    return "unknown";
+}
+
+constexpr SerialDataDirection serialOperationDirection(SerialOperationKind kind) noexcept {
+    switch (kind) {
+    case SerialOperationKind::Write:
+        return SerialDataDirection::Transmit;
+    case SerialOperationKind::Read:
+        return SerialDataDirection::Receive;
+    case SerialOperationKind::Open:
+    case SerialOperationKind::Close:
+    case SerialOperationKind::SetDataTerminalReady:
+    case SerialOperationKind::SetRequestToSend:
+        return SerialDataDirection::None;
+    }
+    return SerialDataDirection::None;
+}
+
+constexpr const char* serialDataDirectionName(SerialDataDirection direction) noexcept {
+    switch (direction) {
+    case SerialDataDirection::None:
+        return "none";
+    case SerialDataDirection::Transmit:
+        return "tx";
+    case SerialDataDirection::Receive:
+        return "rx";
+    }
+    return "unknown";
+}
+
+constexpr const char* serialOperationKindName(SerialOperationKind kind) noexcept {
+    switch (kind) {
+    case SerialOperationKind::Open:
+        return "open";
+    case SerialOperationKind::Close:
+        return "close";
+    case SerialOperationKind::Read:
+        return "read";
+    case SerialOperationKind::Write:
+        return "write";
+    case SerialOperationKind::SetDataTerminalReady:
+        return "set_dtr";
+    case SerialOperationKind::SetRequestToSend:
+        return "set_rts";
+    }
+    return "unknown";
+}
+
+constexpr const char* serialOperationStatusName(SerialOperationStatus status) noexcept {
+    switch (status) {
+    case SerialOperationStatus::Accepted:
+        return "accepted";
+    case SerialOperationStatus::Succeeded:
+        return "succeeded";
+    case SerialOperationStatus::RejectedInvalid:
+        return "rejected_invalid";
+    case SerialOperationStatus::RejectedFull:
+        return "rejected_full";
+    case SerialOperationStatus::RejectedClosed:
+        return "rejected_closed";
+    case SerialOperationStatus::Failed:
+        return "failed";
+    case SerialOperationStatus::Timeout:
+        return "timeout";
+    case SerialOperationStatus::Cancelled:
+        return "cancelled";
+    case SerialOperationStatus::Disconnected:
+        return "disconnected";
+    }
+    return "unknown";
+}
+
+constexpr const char* serialDeadlineStatusName(SerialDeadlineStatus status) noexcept {
+    switch (status) {
+    case SerialDeadlineStatus::NotSet:
+        return "not_set";
+    case SerialDeadlineStatus::Pending:
+        return "pending";
+    case SerialDeadlineStatus::Met:
+        return "met";
+    case SerialDeadlineStatus::Expired:
+        return "expired";
+    }
+    return "unknown";
+}
+
+constexpr const char* serialErrorCategoryName(SerialErrorCategory category) noexcept {
+    switch (category) {
+    case SerialErrorCategory::None:
+        return "none";
+    case SerialErrorCategory::InvalidInput:
+        return "invalid_input";
+    case SerialErrorCategory::SessionClosed:
+        return "session_closed";
+    case SerialErrorCategory::QueueFull:
+        return "queue_full";
+    case SerialErrorCategory::Timeout:
+        return "timeout";
+    case SerialErrorCategory::Cancelled:
+        return "cancelled";
+    case SerialErrorCategory::Disconnected:
+        return "disconnected";
+    case SerialErrorCategory::NativeFailure:
+        return "native_failure";
+    case SerialErrorCategory::IoFailure:
+        return "io_failure";
     }
     return "unknown";
 }

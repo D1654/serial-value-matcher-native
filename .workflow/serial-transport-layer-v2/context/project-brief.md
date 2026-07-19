@@ -84,3 +84,14 @@ vendor driver remains a physical boundary: close/reopen stays unavailable and
 destruction fails fast rather than releasing live native ownership. Host 27/27,
 MinGW/Wine 34/34, the 5005-transaction PTY matrix, application self-tests,
 strict package inspection, and documentation consistency all pass.
+
+Phase 3 Task 3 completed on 2026-07-20. Serial operation results now carry
+neutral direction, status, deadline, native error, communication-mask, and
+driver-queue evidence through Win32 UI logs, local raw records, and exported
+evidence bundles. Metadata-only events remain payload-free; explicit successful
+TX/RX paths keep their existing payload evidence. The unused localized message
+channel was removed from the write queue, and Modbus records every underlying
+serial operation in order without classifying cancellation from Chinese text.
+Shutdown and normal scan completion both settle pending evidence before state is
+released. Host 27/27, MinGW/Wine 34/34, the 5005-transaction PTY matrix, strict
+package inspection, UI self-test/performance, and documentation checks pass.

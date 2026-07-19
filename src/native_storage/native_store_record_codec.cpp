@@ -42,6 +42,30 @@ bool toBool(const std::string& value) {
     return value == "1" || value == "true" || value == "True";
 }
 
+template <typename T>
+T toUnsigned(const std::string& value, T fallback = 0) {
+    T parsed = fallback;
+    const auto result = std::from_chars(value.data(), value.data() + value.size(), parsed);
+    return result.ec == std::errc{} && result.ptr == value.data() + value.size()
+        ? parsed
+        : fallback;
+}
+
+std::optional<std::size_t> toOptionalSize(const std::string& value) {
+    if (value.empty()) {
+        return std::nullopt;
+    }
+    std::size_t parsed = 0;
+    const auto result = std::from_chars(value.data(), value.data() + value.size(), parsed);
+    return result.ec == std::errc{} && result.ptr == value.data() + value.size()
+        ? std::optional<std::size_t>(parsed)
+        : std::nullopt;
+}
+
+std::string optionalSizeText(const std::optional<std::size_t>& value) {
+    return value.has_value() ? std::to_string(*value) : std::string();
+}
+
 std::string bytesToString(const std::vector<std::uint8_t>& bytes) {
     return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
 }
@@ -119,6 +143,19 @@ RawIoEvent rawEventFromRecord(const NativeSessionStore::Record& record) {
     event.timestampUtc = record[3];
     event.endpoint = record[4];
     event.payload = stringToBytes(record[5]);
+    if (record.size() >= 17) {
+        event.operation = record[6];
+        event.requestId = toUnsigned<std::uint64_t>(record[7]);
+        event.generation = toUnsigned<std::uint64_t>(record[8]);
+        event.status = record[9];
+        event.deadlineStatus = record[10];
+        event.byteCount = toUnsigned<std::uint64_t>(record[11]);
+        event.errorCategory = record[12];
+        event.nativeCode = toUnsigned<std::uint32_t>(record[13]);
+        event.commErrorMask = toUnsigned<std::uint32_t>(record[14]);
+        event.inputQueueBytes = toOptionalSize(record[15]);
+        event.outputQueueBytes = toOptionalSize(record[16]);
+    }
     return event;
 }
 
@@ -130,6 +167,17 @@ NativeSessionStore::Record recordFromRawEvent(const RawIoEvent& event) {
         event.timestampUtc,
         event.endpoint,
         bytesToString(event.payload),
+        event.operation,
+        std::to_string(event.requestId),
+        std::to_string(event.generation),
+        event.status,
+        event.deadlineStatus,
+        std::to_string(event.byteCount),
+        event.errorCategory,
+        std::to_string(event.nativeCode),
+        std::to_string(event.commErrorMask),
+        optionalSizeText(event.inputQueueBytes),
+        optionalSizeText(event.outputQueueBytes),
     };
 }
 

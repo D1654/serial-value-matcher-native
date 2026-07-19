@@ -261,7 +261,7 @@ std::optional<LRESULT> NativeMainWindow::handleFileControlCommand(WORD commandId
         startFileSend();
         return 0;
     case IDC_FILE_STOP_BUTTON:
-        stopFileSend();
+        stopFileSend({}, true);
         return 0;
     case IDC_FILE_DELAY_COMBO:
         if (notificationCode == CBN_SELCHANGE) {

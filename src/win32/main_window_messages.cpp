@@ -7,6 +7,7 @@
 #include "win32/utf8_win32.h"
 
 #include <commctrl.h>
+#include <memory>
 #include <optional>
 
 namespace svm::win32 {
@@ -128,14 +129,18 @@ LRESULT NativeMainWindow::handleDestroyMessage() {
     for (const UINT_PTR timerId : kNativeMainWindowShellTimerIds) {
         KillTimer(context.window, timerId);
     }
-    stopFileSend({});
+    stopFileSend({}, false);
     requestCancelModbusScan();
     const NativeModbusThreadCloseResult closeResult = closeModbusScanThread();
     if (closeResult == NativeModbusThreadCloseResult::NotJoined) {
         ExitProcess(1);
     }
-    discardPendingModbusScanMessages();
-    delete modbusScanTerminalResult_.exchange(nullptr, std::memory_order_acq_rel);
+    settlePendingModbusScanMessages();
+    std::unique_ptr<NativeModbusScanResult> terminalResult(
+        modbusScanTerminalResult_.exchange(nullptr, std::memory_order_acq_rel));
+    if (terminalResult && store_.isOpen()) {
+        store_.saveScanExecution(terminalResult->execution);
+    }
     releaseModbusScanOwnership();
     shutdownSerialPort();
     if (ownsUiFont_ && uiFont_ != nullptr) {

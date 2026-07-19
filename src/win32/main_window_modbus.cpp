@@ -239,6 +239,7 @@ void NativeMainWindow::handleModbusScanDone() {
         modbusScanTerminalResult_.store(result.release(), std::memory_order_release);
         return;
     }
+    drainPendingModbusScanDataMessages();
     const bool shouldDisconnectAfterScan = disconnectAfterModbusScan_;
     disconnectAfterModbusScan_ = false;
     const bool resultMatchesSession = result
@@ -257,11 +258,11 @@ void NativeMainWindow::handleModbusScanDone() {
     if (!summary.empty()) {
         appendLog(std::wstring(L"[\u7CFB\u7EDF] ") + summary);
     }
-    if (handleCompletedModbusScanDisconnect(*result, shouldDisconnectAfterScan)) {
+    if (handleCompletedModbusScanDisconnect(shouldDisconnectAfterScan)) {
         return;
     }
     if (result->serialFailed && !result->errorMessage.empty()) {
-        handleSerialFailure(result->errorMessage);
+        handleSerialFailure(result->errorMessage, false);
         return;
     }
     setStatus(summary);
@@ -291,13 +292,24 @@ NativeMainWindow::NativeModbusThreadCloseResult NativeMainWindow::closeModbusSca
     return NativeModbusThreadCloseResult::Settled;
 }
 
-void NativeMainWindow::discardPendingModbusScanMessages() {
+void NativeMainWindow::drainPendingModbusScanDataMessages() {
+    MSG message = {};
+    while (PeekMessageW(&message, window_, kNativeModbusScanDataMessage, kNativeModbusScanDataMessage, PM_REMOVE)) {
+        handleModbusScanDataBatch(reinterpret_cast<NativeModbusScanDataBatch*>(message.lParam));
+    }
+}
+
+void NativeMainWindow::settlePendingModbusScanMessages() {
     MSG message = {};
     while (PeekMessageW(&message, window_, kNativeModbusScanProgressMessage, kNativeModbusScanProgressMessage, PM_REMOVE)) {
         delete reinterpret_cast<NativeModbusScanProgress*>(message.lParam);
     }
     while (PeekMessageW(&message, window_, kNativeModbusScanDataMessage, kNativeModbusScanDataMessage, PM_REMOVE)) {
-        delete reinterpret_cast<NativeModbusScanDataBatch*>(message.lParam);
+        std::unique_ptr<NativeModbusScanDataBatch> batch(
+            reinterpret_cast<NativeModbusScanDataBatch*>(message.lParam));
+        if (batch && !batch->rawEvents.empty()) {
+            saveRawEvents(std::move(batch->rawEvents));
+        }
     }
     while (PeekMessageW(&message, window_, kNativeModbusScanDoneMessage, kNativeModbusScanDoneMessage, PM_REMOVE)) {
     }
@@ -328,12 +340,9 @@ std::wstring NativeMainWindow::persistCompletedModbusScan(const NativeModbusScan
         + uiString(T::ChinesePeriod);
 }
 
-bool NativeMainWindow::handleCompletedModbusScanDisconnect(const NativeModbusScanResult& result, bool shouldDisconnectAfterScan) {
+bool NativeMainWindow::handleCompletedModbusScanDisconnect(bool shouldDisconnectAfterScan) {
     if (!shouldDisconnectAfterScan) {
         return false;
-    }
-    if (result.serialFailed && !result.errorMessage.empty()) {
-        appendLog(NativeLogKind::Error, uiString(T::SystemSerialFailedPrefix) + utf8ToWide(result.errorMessage));
     }
     closeSerialPort(tx(T::ModbusDisconnectedAfterCancelStatus));
     return true;

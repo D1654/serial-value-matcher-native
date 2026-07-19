@@ -9,7 +9,6 @@
 #include <chrono>
 #include <cstdint>
 #include <iostream>
-#include <string>
 #include <vector>
 
 namespace {
@@ -17,10 +16,6 @@ namespace {
 using svm::transport::SerialWriteQueue;
 using svm::transport::SerialWriteQueueLimits;
 using svm::transport::SerialWriteResultStatus;
-
-bool contains(const std::string& haystack, const std::string& needle) {
-    return haystack.find(needle) != std::string::npos;
-}
 
 void enqueueAssignsIdsAndPreservesFifoMetadata() {
     SerialWriteQueue queue(4);
@@ -76,7 +71,6 @@ void defaultCountBudgetRejectsTheSixtyFifthRequest() {
     const auto afterRejection = queue.snapshot();
     assert(rejected.status == SerialWriteResultStatus::RejectedFull);
     assert(rejected.rejected());
-    assert(contains(rejected.message, "队列已满"));
     assert(afterRejection.countedCount() == svm::transport::kDefaultSerialWriteQueueCapacity);
     assert(afterRejection.nextRequestId == beforeRejection.nextRequestId);
     assert(afterRejection.highWaterCount == beforeRejection.highWaterCount);
@@ -162,8 +156,7 @@ void activeWorkRemainsInsideBothBudgets() {
         active->id,
         active->generation,
         SerialWriteResultStatus::Failed,
-        1,
-        "write failed");
+        1);
     assert(failed.status == SerialWriteResultStatus::Failed);
     assert(failed.byteCount == 1);
     const auto afterTerminal = queue.snapshot();
@@ -246,8 +239,7 @@ void everyActiveTerminalPathReleasesExactlyOnce() {
             active->id,
             active->generation,
             status,
-            transferred,
-            status == SerialWriteResultStatus::Failed ? "write failed" : "");
+            transferred);
         assert(result.status == status);
         assert(result.requestId == accepted.requestId);
         assert(result.generation == 12);
@@ -322,7 +314,6 @@ void partialSentCompletionBecomesFailedAndReleasesReservation() {
     assert(result.terminal());
     assert(result.requestId == request.requestId);
     assert(result.byteCount == 2);
-    assert(contains(result.message, "字节数不完整"));
     assert(queue.empty());
 }
 

@@ -20,6 +20,7 @@ namespace {
 
 using svm::transport::SerialDeadline;
 using svm::transport::SerialDeadlineStatus;
+using svm::transport::SerialDataDirection;
 using svm::transport::SerialErrorCategory;
 using svm::transport::SerialOperationKind;
 using svm::transport::SerialOperationResult;
@@ -34,6 +35,20 @@ using svm::transport::SerialWriteQueueLimits;
 using svm::transport::SerialWriteRequest;
 using svm::transport::SerialWriteResult;
 using svm::transport::SerialWriteResultStatus;
+
+template <typename Result>
+concept ContainsPayload = requires(const Result& result) {
+    result.payload;
+};
+
+template <typename Result>
+concept ContainsLocalizedMessage = requires(const Result& result) {
+    result.message;
+};
+
+static_assert(!ContainsPayload<SerialOperationResult>);
+static_assert(!ContainsLocalizedMessage<SerialOperationResult>);
+static_assert(!ContainsLocalizedMessage<SerialWriteResult>);
 
 SerialDeadline deadlineAt(std::int64_t milliseconds) {
     return {
@@ -837,6 +852,40 @@ void typedByteResultsPreserveDeadlinesAndNativeEvidence() {
     assert(timedOut.error.category == SerialErrorCategory::Timeout);
 }
 
+void operationEvidenceUsesNeutralTypedMetadata() {
+    SerialOperationResult result{
+        .operation = {
+            .requestId = 91,
+            .generation = 12,
+            .kind = SerialOperationKind::Read,
+        },
+        .status = SerialOperationStatus::Failed,
+        .deadlineStatus = SerialDeadlineStatus::Expired,
+        .byteCount = 4,
+        .endpoint = "COM91",
+        .error = {
+            .category = SerialErrorCategory::IoFailure,
+            .nativeCode = 0,
+            .byteCount = 4,
+            .commErrorMask = 0x0C,
+            .inputQueueBytes = 32,
+            .outputQueueBytes = 2,
+        },
+    };
+
+    assert(svm::transport::serialOperationDirection(result.operation.kind)
+        == SerialDataDirection::Receive);
+    assert(std::string(svm::transport::serialDataDirectionName(SerialDataDirection::Receive)) == "rx");
+    assert(std::string(svm::transport::serialOperationKindName(result.operation.kind)) == "read");
+    assert(std::string(svm::transport::serialOperationStatusName(result.status)) == "failed");
+    assert(std::string(svm::transport::serialDeadlineStatusName(result.deadlineStatus)) == "expired");
+    assert(std::string(svm::transport::serialErrorCategoryName(result.error.category)) == "io_failure");
+    assert(result.error.nativeCode == 0);
+    assert(result.error.commErrorMask == 0x0C);
+    assert(result.error.inputQueueBytes == 32);
+    assert(result.error.outputQueueBytes == 2);
+}
+
 void schedulerUsesDualBudgetsAndKeepsActiveWorkCounted() {
     FakeSerialSession session(SerialWriteQueueLimits{
         .requestCapacity = 2,
@@ -1069,6 +1118,7 @@ int main() {
     lifecycleTransitionsInvalidateBeforePublishingTheNextGeneration();
     nonOpenStatesRejectEveryCapabilityWithoutMutation();
     typedByteResultsPreserveDeadlinesAndNativeEvidence();
+    operationEvidenceUsesNeutralTypedMetadata();
     schedulerUsesDualBudgetsAndKeepsActiveWorkCounted();
     queuedDeadlineExpiryProducesOneTimeoutCompletion();
     cancellationAndCloseSettleEachAcceptedWriteExactlyOnce();

@@ -181,6 +181,17 @@ svm::report::EvidenceBundleRawEvent nativeEvidenceRawEventFromRecord(const nativ
     event.timestampUtc = record.timestampUtc;
     event.endpoint = record.endpoint;
     event.payload = record.payload;
+    event.operation = record.operation;
+    event.requestId = record.requestId;
+    event.generation = record.generation;
+    event.status = record.status;
+    event.deadlineStatus = record.deadlineStatus;
+    event.byteCount = record.byteCount;
+    event.errorCategory = record.errorCategory;
+    event.nativeCode = record.nativeCode;
+    event.commErrorMask = record.commErrorMask;
+    event.inputQueueBytes = record.inputQueueBytes;
+    event.outputQueueBytes = record.outputQueueBytes;
     return event;
 }
 

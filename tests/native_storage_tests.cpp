@@ -1,5 +1,6 @@
 #include "native_storage/native_session_store.h"
 #include "native_storage/native_store_files.h"
+#include "native_storage/native_store_record_codec.h"
 #include "native_storage/native_store_record_io.h"
 #include "native_storage/session_store_port.h"
 
@@ -102,10 +103,25 @@ void rawEventsAreBatchedAndReopened() {
     tx.timestampUtc = "2026-06-12T10:00:00Z";
     tx.endpoint = "COM3";
     tx.payload = {0x01, 0x03, 0x00, 0x00};
+    tx.operation = "write";
+    tx.requestId = 41;
+    tx.generation = 6;
+    tx.status = "succeeded";
+    tx.deadlineStatus = "met";
+    tx.byteCount = tx.payload.size();
+    tx.errorCategory = "none";
+    tx.inputQueueBytes = 0;
+    tx.outputQueueBytes = 2;
 
     svm::native_storage::RawIoEvent rx = tx;
     rx.direction = "Rx";
     rx.payload = {0x01, 0x03, 0x02, 0x12, 0x34};
+    rx.operation = "read";
+    rx.requestId = 42;
+    rx.byteCount = rx.payload.size();
+    rx.commErrorMask = 0x08;
+    rx.inputQueueBytes = 5;
+    rx.outputQueueBytes = 0;
 
     assert(store.appendRawEvents({tx, rx}));
     assert(store.rawEventCount() == 2);
@@ -113,11 +129,58 @@ void rawEventsAreBatchedAndReopened() {
     assert(recent.size() == 1);
     assert(recent[0].direction == "Rx");
     assert((recent[0].payload == std::vector<std::uint8_t>{0x01, 0x03, 0x02, 0x12, 0x34}));
+    assert(recent[0].operation == "read");
+    assert(recent[0].requestId == 42);
+    assert(recent[0].generation == 6);
+    assert(recent[0].status == "succeeded");
+    assert(recent[0].deadlineStatus == "met");
+    assert(recent[0].byteCount == 5);
+    assert(recent[0].errorCategory == "none");
+    assert(recent[0].nativeCode == 0);
+    assert(recent[0].commErrorMask == 0x08);
+    assert(recent[0].inputQueueBytes == 5);
+    assert(recent[0].outputQueueBytes == 0);
+
+    svm::native_storage::RawIoEvent metadataOnly = tx;
+    metadataOnly.direction = "None";
+    metadataOnly.payload.clear();
+    metadataOnly.operation = "close";
+    metadataOnly.requestId = 43;
+    metadataOnly.status = "cancelled";
+    metadataOnly.byteCount = 0;
+    metadataOnly.errorCategory = "session_closed";
+    assert(store.appendRawEvent(metadataOnly));
+    const auto latest = store.recentRawEvents(1);
+    assert(latest.size() == 1);
+    assert(latest[0].payload.empty());
+    assert(latest[0].operation == "close");
+    assert(latest[0].requestId == 43);
 
     auto reopened = openStore(path);
-    assert(reopened.rawEventCount() == 2);
+    assert(reopened.rawEventCount() == 3);
 
     std::filesystem::remove_all(path);
+}
+
+void legacyRawEventsLoadWithEmptyOperationMetadata() {
+    const svm::native_storage::NativeSessionStore::Record legacy{
+        "7",
+        "legacy-session",
+        "Tx",
+        "2026-06-12T10:00:00Z",
+        "COM3",
+        std::string("\x01\x02", 2),
+    };
+    const auto event = svm::native_storage::store_records::rawEventFromRecord(legacy);
+    assert(event.id == 7);
+    assert(event.direction == "Tx");
+    assert(event.payload.size() == 2);
+    assert(event.operation.empty());
+    assert(event.requestId == 0);
+    assert(event.generation == 0);
+    assert(event.status.empty());
+    assert(!event.inputQueueBytes.has_value());
+    assert(!event.outputQueueBytes.has_value());
 }
 
 void replacementArtifactsAreRecoveredOnOpen() {
@@ -1459,6 +1522,7 @@ void protocolRulesAndVerificationRoundTrip() {
 
 int main() {
     runStorageTest("rawEventsAreBatchedAndReopened", rawEventsAreBatchedAndReopened);
+    runStorageTest("legacyRawEventsLoadWithEmptyOperationMetadata", legacyRawEventsLoadWithEmptyOperationMetadata);
     runStorageTest("recentRawEventsChronologicalKeepsRecentEventsInOriginalOrder", recentRawEventsChronologicalKeepsRecentEventsInOriginalOrder);
     runStorageTest("auditRawEventsPreserveDirectionAndPayload", auditRawEventsPreserveDirectionAndPayload);
     runStorageTest("replacementArtifactsAreRecoveredOnOpen", replacementArtifactsAreRecoveredOnOpen);

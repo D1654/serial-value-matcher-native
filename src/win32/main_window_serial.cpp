@@ -160,13 +160,21 @@ void NativeMainWindow::connectSerial() {
 
     const svm::transport::SerialOperationResult openResult = serialLifecycle_.open(options);
     if (!openResult.succeeded()) {
-        setStatus(serialOperationErrorMessage(openResult, "打开串口"));
+        const std::wstring message = serialOperationErrorMessage(openResult, "打开串口");
+        appendSerialOperationLog(NativeLogKind::Error, message, openResult);
+        setStatus(message);
         return;
     }
 
     const svm::transport::SerialSessionSnapshot openedSession = serialLifecycle_.snapshot();
     if (!openedSession.open() || openedSession.generation != openResult.operation.generation) {
-        serialLifecycle_.close();
+        const svm::transport::SerialOperationResult closeResult = serialLifecycle_.close();
+        appendSerialOperationLog(
+            closeResult.succeeded() ? NativeLogKind::System : NativeLogKind::Error,
+            closeResult.succeeded()
+                ? std::wstring(L"已关闭未稳定发布的串口会话。")
+                : serialOperationErrorMessage(closeResult, "关闭未稳定串口会话"),
+            closeResult);
         setStatus(L"串口连接状态未能稳定发布，请重试。");
         return;
     }
@@ -175,7 +183,10 @@ void NativeMainWindow::connectSerial() {
     disconnectAfterModbusScan_ = false;
     timedSendConfirmed_ = false;
     KillTimer(window_, IDT_RECONNECT);
-    appendLog(uiString(T::SystemConnectedPrefix) + utf8ToWide(openResult.endpoint));
+    appendSerialOperationLog(
+        NativeLogKind::System,
+        uiString(T::SystemConnectedPrefix) + utf8ToWide(openResult.endpoint),
+        openResult);
     updateConnectionButtonState();
     updateRtsControlState();
     saveCurrentSerialProfile();
@@ -200,13 +211,27 @@ void NativeMainWindow::closeSerialPort(const std::wstring& statusText) {
     KillTimer(window_, IDT_RECONNECT);
     reconnectState_.clearWaiting();
     timedSendConfirmed_ = false;
-    stopFileSend({});
+    stopFileSend({}, true);
+    std::optional<svm::transport::SerialOperationResult> closeResult;
     if (hadSession) {
-        serialLifecycle_.close();
+        closeResult = serialLifecycle_.close();
     }
-    clearPendingSerialWrites();
-    if (hadSession && !snapshot.endpoint.empty()) {
-        appendLog(uiString(T::SystemDisconnectedPrefix) + utf8ToWide(snapshot.endpoint));
+    clearPendingSerialWrites(true);
+    if (closeResult.has_value()) {
+        const std::wstring message = closeResult->succeeded()
+            ? uiString(T::SystemDisconnectedPrefix) + utf8ToWide(snapshot.endpoint)
+            : serialOperationErrorMessage(*closeResult, "关闭串口");
+        appendSerialOperationLog(
+            closeResult->succeeded() ? NativeLogKind::System : NativeLogKind::Error,
+            message,
+            *closeResult);
+        if (!closeResult->succeeded()) {
+            updateConnectionButtonState();
+            updateRtsControlState();
+            updateTimedSendTimer();
+            setStatus(message);
+            return;
+        }
     }
     updateConnectionButtonState();
     updateRtsControlState();
@@ -218,11 +243,15 @@ void NativeMainWindow::shutdownSerialPort() {
     KillTimer(window_, IDT_TIMED_SEND);
     KillTimer(window_, IDT_RECONNECT);
     reconnectState_.clearWaiting();
+    std::optional<svm::transport::SerialOperationResult> closeResult;
     if (serialLifecycle_.snapshot().state != svm::transport::SerialSessionState::Closed) {
-        serialLifecycle_.close();
+        closeResult = serialLifecycle_.close();
     }
     timedSendConfirmed_ = false;
-    clearPendingSerialWrites();
+    clearPendingSerialWrites(false);
+    if (closeResult.has_value()) {
+        saveRawEvent(*closeResult, {});
+    }
 }
 
 std::wstring NativeMainWindow::serialIoBusyStatus() const {
@@ -304,20 +333,43 @@ SerialOpenOptions NativeMainWindow::currentOpenOptions() const {
 std::wstring NativeMainWindow::serialOperationErrorMessage(
     const svm::transport::SerialOperationResult& result,
     std::string_view operation) const {
+    switch (result.status) {
+    case svm::transport::SerialOperationStatus::Accepted:
+        return L"串口操作已接受。";
+    case svm::transport::SerialOperationStatus::Succeeded:
+        return {};
+    case svm::transport::SerialOperationStatus::RejectedInvalid:
+        return L"串口参数或请求无效。";
+    case svm::transport::SerialOperationStatus::RejectedFull: {
+        const std::wstring pressure = serialWriteQueuePressureStatus();
+        return pressure.empty()
+            ? std::wstring(L"串口写入请求因队列达到上限被拒绝。")
+            : L"串口写入请求因队列达到上限被拒绝（当前压力：" + pressure + L"）。";
+    }
+    case svm::transport::SerialOperationStatus::RejectedClosed:
+        return L"串口会话已关闭。";
+    case svm::transport::SerialOperationStatus::Timeout:
+        return L"串口操作超时。";
+    case svm::transport::SerialOperationStatus::Cancelled:
+        return L"串口操作已取消。";
+    case svm::transport::SerialOperationStatus::Disconnected:
+        return L"串口设备已断开。";
+    case svm::transport::SerialOperationStatus::Failed:
+        break;
+    }
     if (result.error.nativeCode != 0) {
         return utf8ToWide(win32SerialErrorText(result.error.nativeCode, operation));
+    }
+    if (result.byteCount > 0) {
+        return L"串口操作在处理 " + std::to_wstring(result.byteCount) + L" 字节后失败。";
     }
     switch (result.error.category) {
     case svm::transport::SerialErrorCategory::InvalidInput:
         return L"串口参数无效。";
     case svm::transport::SerialErrorCategory::SessionClosed:
         return L"串口会话已关闭。";
-    case svm::transport::SerialErrorCategory::QueueFull: {
-        const std::wstring pressure = serialWriteQueuePressureStatus();
-        return pressure.empty()
-            ? std::wstring(L"串口写入请求因队列达到上限被拒绝。")
-            : L"串口写入请求因队列达到上限被拒绝（当前压力：" + pressure + L"）。";
-    }
+    case svm::transport::SerialErrorCategory::QueueFull:
+        return L"串口写入队列已满。";
     case svm::transport::SerialErrorCategory::Timeout:
         return L"串口操作超时。";
     case svm::transport::SerialErrorCategory::Cancelled:
@@ -376,16 +428,20 @@ void NativeMainWindow::applySerialLineControl(WORD controlId) {
                 result,
                 dataTerminalReady ? "设置 DTR 信号" : "设置 RTS 信号");
         }
+        appendSerialOperationLog(NativeLogKind::Error, message, result);
         if (result.status == svm::transport::SerialOperationStatus::Disconnected) {
-            handleSerialFailure(wideToUtf8(message));
+            handleSerialFailure(wideToUtf8(message), false);
         } else {
             setStatus(message);
         }
         return;
     }
 
-    setStatus(std::wstring(controlId == IDC_DTR_CHECK ? tx(T::DtrAppliedPrefix) : tx(T::RtsAppliedPrefix))
-        + (enabled ? tx(T::SignalEnabledSuffix) : tx(T::SignalDisabledSuffix)));
+    const std::wstring message = std::wstring(
+        controlId == IDC_DTR_CHECK ? tx(T::DtrAppliedPrefix) : tx(T::RtsAppliedPrefix))
+        + (enabled ? tx(T::SignalEnabledSuffix) : tx(T::SignalDisabledSuffix));
+    appendSerialOperationLog(NativeLogKind::System, message, result);
+    setStatus(message);
 }
 
 void NativeMainWindow::updateConnectionButtonState() {

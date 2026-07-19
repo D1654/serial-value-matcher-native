@@ -348,14 +348,33 @@ std::string renderEvidenceBundleRawEvents(
     const std::vector<EvidenceBundleRawEvent>& events,
     const EvidenceBundleRedactionOptions& redaction) {
     std::ostringstream output;
-    output << "id\tsession_id\tdirection\ttimestamp_utc\tendpoint\tpayload_hex\n";
+    output << "id\tsession_id\tdirection\ttimestamp_utc\tendpoint\tpayload_hex"
+              "\toperation\trequest_id\tgeneration\tstatus\tdeadline_status\tbyte_count"
+              "\terror_category\tnative_code\tcomm_error_mask\tinput_queue_bytes\toutput_queue_bytes\n";
     for (const EvidenceBundleRawEvent& event : events) {
         output << event.id << '\t'
                << escapeTsv(event.sessionId) << '\t'
                << escapeTsv(event.direction) << '\t'
                << escapeTsv(event.timestampUtc) << '\t'
                << escapeTsv(redactValue("endpoint", event.endpoint, redaction)) << '\t'
-               << escapeTsv(payloadText(event.payload, redaction)) << '\n';
+               << escapeTsv(payloadText(event.payload, redaction)) << '\t'
+               << escapeTsv(event.operation) << '\t'
+               << event.requestId << '\t'
+               << event.generation << '\t'
+               << escapeTsv(event.status) << '\t'
+               << escapeTsv(event.deadlineStatus) << '\t'
+               << event.byteCount << '\t'
+               << escapeTsv(event.errorCategory) << '\t'
+               << event.nativeCode << '\t'
+               << event.commErrorMask << '\t';
+        if (event.inputQueueBytes.has_value()) {
+            output << *event.inputQueueBytes;
+        }
+        output << '\t';
+        if (event.outputQueueBytes.has_value()) {
+            output << *event.outputQueueBytes;
+        }
+        output << '\n';
     }
     return output.str();
 }

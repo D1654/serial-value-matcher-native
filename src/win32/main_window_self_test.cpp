@@ -691,6 +691,67 @@ bool NativeMainWindow::runUiPerformanceTest() {
         return fail("ui-workbench-splitter-live-target");
     }
 
+    window.clearLog();
+    const svm::transport::SerialOperationResult serialEvidence{
+        .operation = {
+            .requestId = 42,
+            .generation = 7,
+            .kind = svm::transport::SerialOperationKind::Read,
+        },
+        .status = svm::transport::SerialOperationStatus::Failed,
+        .deadlineStatus = svm::transport::SerialDeadlineStatus::Expired,
+        .byteCount = 3,
+        .endpoint = "COM7",
+        .error = {
+            .category = svm::transport::SerialErrorCategory::IoFailure,
+            .nativeCode = 5,
+            .byteCount = 3,
+            .commErrorMask = 0x0A,
+            .inputQueueBytes = 12,
+            .outputQueueBytes = 4,
+        },
+    };
+    const std::filesystem::path serialEvidenceStorePath = std::filesystem::temp_directory_path()
+        / (L"svm-native-ui-serial-evidence-" + std::to_wstring(GetCurrentProcessId()));
+    std::filesystem::remove_all(serialEvidenceStorePath);
+    if (!window.store_.open(serialEvidenceStorePath)) {
+        return fail("ui-serial-evidence-store-open");
+    }
+    window.sessionId_ = "ui-serial-evidence";
+    window.appendSerialOperationLog(
+        NativeLogKind::Error,
+        L"串口读取失败。",
+        serialEvidence);
+    window.flushPendingLogEntries();
+    const std::wstring renderedSerialEvidence = window.visibleLogText();
+    const std::vector<native_storage::RawIoEvent> storedSerialEvidence = window.store_.recentRawEvents(2);
+    if (renderedSerialEvidence.find(L"原生码=5") == std::wstring::npos
+        || renderedSerialEvidence.find(L"通信掩码=0xA") == std::wstring::npos
+        || renderedSerialEvidence.find(L"驱动入队=12") == std::wstring::npos
+        || renderedSerialEvidence.find(L"[RX]") != std::wstring::npos
+        || wideToUtf8(renderedSerialEvidence).find("io_failure") == std::string::npos
+        || storedSerialEvidence.size() != 1
+        || !storedSerialEvidence.front().payload.empty()
+        || storedSerialEvidence.front().operation != "read"
+        || storedSerialEvidence.front().requestId != 42
+        || storedSerialEvidence.front().commErrorMask != 0x0A) {
+        return fail("ui-serial-evidence-render");
+    }
+    window.setControlText(window.logFilterEdit_, L"通信掩码=0xA");
+    window.updateLogFilter();
+    if (window.visibleLogLineCount_ != 1
+        || window.visibleLogText().find(L"通信掩码=0xA") == std::wstring::npos) {
+        return fail("ui-serial-evidence-filter-match");
+    }
+    window.setControlText(window.logFilterEdit_, L"通信掩码=0xB");
+    window.updateLogFilter();
+    if (window.visibleLogLineCount_ != 0 || !window.visibleLogText().empty()) {
+        return fail("ui-serial-evidence-filter-miss");
+    }
+    window.setControlText(window.logFilterEdit_, L"");
+    window.updateLogFilter();
+    window.clearLog();
+
     constexpr int kIterations = 300;
     constexpr auto kMaxElapsed = std::chrono::milliseconds(12000);
     const std::uint64_t baselineLayoutPasses = window.layoutPassCount_;
@@ -788,6 +849,7 @@ bool NativeMainWindow::runUiPerformanceTest() {
     writeSelfTestTrace(message);
 
     DestroyWindow(window.window_);
+    std::filesystem::remove_all(serialEvidenceStorePath);
     return ok;
 }
 

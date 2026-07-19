@@ -21,6 +21,17 @@ struct RawIoEvent {
     std::string timestampUtc;
     std::string endpoint;
     std::vector<std::uint8_t> payload;
+    std::string operation;
+    std::uint64_t requestId = 0;
+    std::uint64_t generation = 0;
+    std::string status;
+    std::string deadlineStatus;
+    std::uint64_t byteCount = 0;
+    std::string errorCategory;
+    std::uint32_t nativeCode = 0;
+    std::uint32_t commErrorMask = 0;
+    std::optional<std::size_t> inputQueueBytes;
+    std::optional<std::size_t> outputQueueBytes;
 };
 
 struct SendHistoryEntry {

@@ -1,12 +1,18 @@
 #pragma once
 
+#include "transport/serial_types.h"
+
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace svm::win32 {
+
+inline constexpr std::size_t kNativeSerialLogEndpointMaxBytes = 256;
+inline constexpr std::size_t kNativeSerialLogTextMaxChars = 1024;
 
 enum class NativeLogKind {
     System,
@@ -17,12 +23,29 @@ enum class NativeLogKind {
     Error,
 };
 
+struct NativeSerialLogMetadata {
+    svm::transport::SerialDataDirection direction = svm::transport::SerialDataDirection::None;
+    svm::transport::SerialOperationKind operation = svm::transport::SerialOperationKind::Read;
+    svm::transport::SerialOperationStatus status = svm::transport::SerialOperationStatus::Failed;
+    svm::transport::SerialDeadlineStatus deadlineStatus = svm::transport::SerialDeadlineStatus::NotSet;
+    svm::transport::SerialErrorCategory errorCategory = svm::transport::SerialErrorCategory::None;
+    svm::transport::SerialOperationId requestId = svm::transport::kUnassignedSerialOperationId;
+    svm::transport::SerialSessionGeneration generation = svm::transport::kUnassignedSerialSessionGeneration;
+    std::size_t byteCount = 0;
+    std::string endpoint;
+    std::uint32_t nativeCode = 0;
+    std::uint32_t commErrorMask = 0;
+    std::optional<std::size_t> inputQueueBytes;
+    std::optional<std::size_t> outputQueueBytes;
+};
+
 struct NativeLogEntry {
     NativeLogKind kind = NativeLogKind::System;
     std::wstring timestamp;
     std::wstring text;
     std::wstring payloadPrefix;
     std::vector<std::uint8_t> payload;
+    std::optional<NativeSerialLogMetadata> serialMetadata;
     bool hasPayload = false;
 };
 
@@ -70,5 +93,16 @@ std::wstring clipRenderedLogLine(std::wstring text, std::size_t maxChars, std::w
 std::wstring_view nativeLogPayloadPrefix(NativeLogKind kind);
 NativeLogEntry nativeMakeTextLogEntry(NativeLogKind kind, std::wstring timestamp, std::wstring text);
 NativeLogEntry nativeMakePayloadLogEntry(NativeLogKind kind, std::wstring timestamp, std::vector<std::uint8_t> payload);
+NativeSerialLogMetadata nativeSerialLogMetadata(const svm::transport::SerialOperationResult& result);
+NativeLogEntry nativeMakeSerialTextLogEntry(
+    NativeLogKind kind,
+    std::wstring timestamp,
+    std::wstring text,
+    const svm::transport::SerialOperationResult& result);
+NativeLogEntry nativeMakeSerialPayloadLogEntry(
+    NativeLogKind kind,
+    std::wstring timestamp,
+    std::vector<std::uint8_t> payload,
+    const svm::transport::SerialOperationResult& result);
 
 } // namespace svm::win32

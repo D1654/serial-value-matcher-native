@@ -18,7 +18,6 @@ namespace {
 
 constexpr ULONGLONG kModbusProgressMinIntervalMs = 80;
 constexpr std::size_t kModbusDataBatchMinItems = 24;
-constexpr const char* kNativeModbusCancelledMessage = "扫描已取消。";
 
 std::wstring localClockText() {
     SYSTEMTIME now = {};
@@ -44,11 +43,7 @@ std::string timestampText() {
     return buffer;
 }
 
-std::string statusText(core::modbus::ScanAttemptStatus status, const std::string& errorMessage) {
-    if (errorMessage == kNativeModbusCancelledMessage) {
-        return "cancelled";
-    }
-
+std::string statusText(core::modbus::ScanAttemptStatus status) {
     switch (status) {
     case core::modbus::ScanAttemptStatus::Success:
         return "success";
@@ -84,7 +79,7 @@ void applyExecutionResult(
             record.attemptIndex = attempt.attemptIndex;
             record.startAddress = block.block.startAddress;
             record.quantity = block.block.quantity;
-            record.status = statusText(attempt.status, attempt.errorMessage);
+            record.status = statusText(attempt.status);
             record.requestFrame = attempt.requestFrame;
             record.responseFrame = attempt.responseFrame;
             record.errorMessage = attempt.errorMessage;
@@ -154,29 +149,61 @@ DWORD WINAPI nativeModbusScanThreadProc(void* parameter) {
         }
     };
 
-    const auto appendRawEvent = [&](std::string direction, const std::vector<std::uint8_t>& payload) {
+    const auto appendRawEvent = [&](
+                                    const transport::SerialOperationResult& operation,
+                                    const std::vector<std::uint8_t>& payload) {
         native_storage::RawIoEvent event;
         event.sessionId = scanSessionId;
-        event.direction = std::move(direction);
+        switch (transport::serialOperationDirection(operation.operation.kind)) {
+        case transport::SerialDataDirection::Transmit:
+            event.direction = "Tx";
+            break;
+        case transport::SerialDataDirection::Receive:
+            event.direction = "Rx";
+            break;
+        case transport::SerialDataDirection::None:
+            event.direction = "None";
+            break;
+        }
         event.timestampUtc = timestampText();
-        event.endpoint = endpoint;
+        event.endpoint = operation.endpoint.empty() ? endpoint : operation.endpoint;
         event.payload = payload;
+        event.operation = transport::serialOperationKindName(operation.operation.kind);
+        event.requestId = operation.operation.requestId;
+        event.generation = operation.operation.generation;
+        event.status = transport::serialOperationStatusName(operation.status);
+        event.deadlineStatus = transport::serialDeadlineStatusName(operation.deadlineStatus);
+        event.byteCount = operation.byteCount;
+        event.errorCategory = transport::serialErrorCategoryName(operation.error.category);
+        event.nativeCode = operation.error.nativeCode;
+        event.commErrorMask = operation.error.commErrorMask;
+        event.inputQueueBytes = operation.error.inputQueueBytes;
+        event.outputQueueBytes = operation.error.outputQueueBytes;
         dataBatch.rawEvents.push_back(std::move(event));
         postDataBatch();
     };
-    const auto appendPayloadEntry = [&](NativeLogKind kind, const wchar_t* prefix, const std::vector<std::uint8_t>& payload) {
-        NativeLogEntry entry;
-        entry.kind = kind;
-        entry.timestamp = localClockText();
-        entry.payloadPrefix = prefix;
-        entry.payload = payload;
-        entry.hasPayload = true;
-        dataBatch.logEntries.push_back(std::move(entry));
+    const auto appendIoEvidence = [&](const std::vector<std::uint8_t>& payload,
+                                      const transport::SerialOperationResult& operation) {
+        appendRawEvent(operation, payload);
+        const NativeLogKind kind = operation.succeeded()
+            ? (operation.operation.kind == transport::SerialOperationKind::Write
+                ? NativeLogKind::ModbusTx
+                : NativeLogKind::ModbusRx)
+            : NativeLogKind::Error;
+        if (payload.empty()) {
+            dataBatch.logEntries.push_back(nativeMakeSerialTextLogEntry(
+                kind,
+                localClockText(),
+                {},
+                operation));
+        } else {
+            dataBatch.logEntries.push_back(nativeMakeSerialPayloadLogEntry(
+                kind,
+                localClockText(),
+                payload,
+                operation));
+        }
         postDataBatch();
-    };
-    const auto appendFrame = [&](bool tx, const std::vector<std::uint8_t>& payload) {
-        appendRawEvent(tx ? "Tx" : "Rx", payload);
-        appendPayloadEntry(tx ? NativeLogKind::ModbusTx : NativeLogKind::ModbusRx, tx ? L"[Modbus TX]" : L"[Modbus RX]", payload);
     };
 
     ULONGLONG lastProgressPostTick = 0;
@@ -224,7 +251,7 @@ DWORD WINAPI nativeModbusScanThreadProc(void* parameter) {
                     return context->cancelRequested->load(std::memory_order_relaxed);
                 },
                 .nowUtc = timestampText,
-                .onFrame = appendFrame,
+                .onIoEvidence = appendIoEvidence,
                 .timeoutErrorMessage = context->timeoutErrorMessage,
             });
         core::modbus::ScanExecutor executor(serialTransport);
@@ -249,10 +276,9 @@ DWORD WINAPI nativeModbusScanThreadProc(void* parameter) {
         };
 
         const core::modbus::ScanExecutionResult executionResult = executor.execute(context->plan, options);
-        applyExecutionResult(scanSessionId, endpoint, executionResult, result->execution);
-
         result->cancelled = serialTransport.cancelObserved() || context->cancelRequested->load(std::memory_order_relaxed);
         result->serialFailed = serialTransport.serialFailed();
+        applyExecutionResult(scanSessionId, endpoint, executionResult, result->execution);
         if (result->serialFailed) {
             result->errorMessage = serialTransport.lastErrorMessage().empty()
                 ? executionResult.errorMessage

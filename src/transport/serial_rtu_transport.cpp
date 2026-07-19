@@ -75,15 +75,24 @@ core::modbus::RtuTransportExchange SerialRtuTransport::exchange(core::ByteSpan r
         return exchange;
     }
     if (writeResult.status == SerialOperationStatus::Cancelled) {
+        if (options_.onIoEvidence) {
+            options_.onIoEvidence({}, writeResult);
+        }
         markCancelled(exchange);
         return exchange;
     }
     if (writeResult.status == SerialOperationStatus::RejectedClosed) {
+        if (options_.onIoEvidence) {
+            options_.onIoEvidence({}, writeResult);
+        }
         markGenerationChanged(exchange);
         return exchange;
     }
     if (!writeResult.succeeded()) {
-        markTransportFailure(exchange, operationFailureMessage(writeResult, true));
+        if (options_.onIoEvidence) {
+            options_.onIoEvidence({}, writeResult);
+        }
+        markTransportFailure(exchange, writeResult, operationFailureMessage(writeResult, true));
         return exchange;
     }
     if (!generationCurrent()) {
@@ -91,11 +100,21 @@ core::modbus::RtuTransportExchange SerialRtuTransport::exchange(core::ByteSpan r
         return exchange;
     }
     if (writeResult.byteCount != request.size()) {
-        markTransportFailure(exchange, kPartialWriteMessage);
+        SerialOperationResult partialWrite = writeResult;
+        partialWrite.status = SerialOperationStatus::Failed;
+        partialWrite.error.category = SerialErrorCategory::IoFailure;
+        partialWrite.error.byteCount = partialWrite.byteCount;
+        if (options_.onIoEvidence) {
+            const std::size_t transmittedBytes = std::min(partialWrite.byteCount, request.size());
+            options_.onIoEvidence(
+                core::ByteBuffer(request.begin(), request.begin() + transmittedBytes),
+                partialWrite);
+        }
+        markTransportFailure(exchange, std::move(partialWrite), kPartialWriteMessage);
         return exchange;
     }
-    if (options_.onFrame) {
-        options_.onFrame(true, request);
+    if (options_.onIoEvidence) {
+        options_.onIoEvidence(request, writeResult);
     }
 
     const std::size_t expectedNormalBytes = expectedNormalResponseLength(requestFrame);
@@ -128,19 +147,31 @@ core::modbus::RtuTransportExchange SerialRtuTransport::exchange(core::ByteSpan r
             break;
         }
         if (read.operation.status == SerialOperationStatus::Cancelled) {
+            if (options_.onIoEvidence) {
+                options_.onIoEvidence({}, read.operation);
+            }
             markCancelled(exchange);
             break;
         }
         if (read.operation.status == SerialOperationStatus::RejectedClosed) {
+            if (options_.onIoEvidence) {
+                options_.onIoEvidence({}, read.operation);
+            }
             discardResponse = true;
             markGenerationChanged(exchange);
             break;
         }
         if (read.operation.status == SerialOperationStatus::Timeout) {
+            if (options_.onIoEvidence) {
+                options_.onIoEvidence({}, read.operation);
+            }
             break;
         }
         if (!read.operation.succeeded()) {
-            markTransportFailure(exchange, operationFailureMessage(read.operation, false));
+            if (options_.onIoEvidence) {
+                options_.onIoEvidence({}, read.operation);
+            }
+            markTransportFailure(exchange, read.operation, operationFailureMessage(read.operation, false));
             break;
         }
         if (!generationCurrent()) {
@@ -153,6 +184,9 @@ core::modbus::RtuTransportExchange SerialRtuTransport::exchange(core::ByteSpan r
             continue;
         }
 
+        if (options_.onIoEvidence) {
+            options_.onIoEvidence(read.bytes, read.operation);
+        }
         response.insert(response.end(), read.bytes.begin(), read.bytes.end());
         if (responseLooksComplete(response, expectedNormalBytes)) {
             exchange.status = core::modbus::RtuTransportExchangeStatus::Success;
@@ -176,8 +210,6 @@ core::modbus::RtuTransportExchange SerialRtuTransport::exchange(core::ByteSpan r
         if (exchange.status != core::modbus::RtuTransportExchangeStatus::TransportError) {
             markGenerationChanged(exchange);
         }
-    } else if (!exchange.responseFrame.empty() && options_.onFrame) {
-        options_.onFrame(false, exchange.responseFrame);
     }
     if (exchange.status == core::modbus::RtuTransportExchangeStatus::Success
         || exchange.status == core::modbus::RtuTransportExchangeStatus::TransportError) {
@@ -190,11 +222,15 @@ core::modbus::RtuTransportExchange SerialRtuTransport::exchange(core::ByteSpan r
 }
 
 bool SerialRtuTransport::serialFailed() const noexcept {
-    return serialFailed_;
+    return serialFailure_.has_value();
 }
 
 bool SerialRtuTransport::cancelObserved() const noexcept {
     return cancelObserved_;
+}
+
+const SerialOperationResult* SerialRtuTransport::serialFailure() const noexcept {
+    return serialFailure_ ? &*serialFailure_ : nullptr;
 }
 
 const core::Text& SerialRtuTransport::lastErrorMessage() const noexcept {
@@ -235,8 +271,11 @@ void SerialRtuTransport::markGenerationChanged(core::modbus::RtuTransportExchang
     exchange.receivedAtUtc = timestamp();
 }
 
-void SerialRtuTransport::markTransportFailure(core::modbus::RtuTransportExchange& exchange, core::Text message) {
-    serialFailed_ = true;
+void SerialRtuTransport::markTransportFailure(
+    core::modbus::RtuTransportExchange& exchange,
+    SerialOperationResult result,
+    core::Text message) {
+    serialFailure_ = std::move(result);
     lastErrorMessage_ = std::move(message);
     exchange.status = core::modbus::RtuTransportExchangeStatus::TransportError;
     exchange.errorMessage = lastErrorMessage_;

@@ -4,6 +4,7 @@
 #include "transport/serial_session.h"
 
 #include <functional>
+#include <optional>
 #include <string>
 
 namespace svm::transport {
@@ -14,7 +15,9 @@ struct SerialRtuTransportOptions {
     std::function<bool(SerialSessionGeneration)> generationIsCurrent;
     std::function<bool()> shouldCancel;
     std::function<core::Text()> nowUtc;
-    std::function<void(bool tx, const core::ByteBuffer& frame)> onFrame;
+    std::function<void(
+        const core::ByteBuffer& frame,
+        const SerialOperationResult& result)> onIoEvidence;
     core::Text timeoutErrorMessage;
 };
 
@@ -26,6 +29,7 @@ public:
 
     bool serialFailed() const noexcept;
     bool cancelObserved() const noexcept;
+    const SerialOperationResult* serialFailure() const noexcept;
     const core::Text& lastErrorMessage() const noexcept;
 
 private:
@@ -37,15 +41,18 @@ private:
     core::Text timestamp() const;
     void markCancelled(core::modbus::RtuTransportExchange& exchange);
     void markGenerationChanged(core::modbus::RtuTransportExchange& exchange);
-    void markTransportFailure(core::modbus::RtuTransportExchange& exchange, core::Text message);
+    void markTransportFailure(
+        core::modbus::RtuTransportExchange& exchange,
+        SerialOperationResult result,
+        core::Text message);
     core::Text operationFailureMessage(
         const SerialOperationResult& result,
         bool write) const;
 
     SerialByteStream& byteStream_;
     SerialRtuTransportOptions options_;
-    bool serialFailed_ = false;
     bool cancelObserved_ = false;
+    std::optional<SerialOperationResult> serialFailure_;
     core::Text lastErrorMessage_;
 };
 

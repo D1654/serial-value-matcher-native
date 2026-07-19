@@ -1345,6 +1345,7 @@ svm::transport::SerialReadResult Win32SerialSession::readAvailable(
     std::vector<std::uint8_t> buffer;
     DWORD bytesRead = 0;
     bool leased = false;
+    bool commStatusAvailable = false;
     bool completedCurrent = false;
     {
         WriteLock ioLock(ioLock_);
@@ -1352,9 +1353,10 @@ svm::transport::SerialReadResult Win32SerialSession::readAvailable(
         leased = isValidHandle(handle);
         if (leased && !ClearCommError(handle, &errors, &status)) {
             nativeCode = GetLastError();
-        } else if (leased && errors != 0) {
-            nativeCode = errors;
-        } else if (leased && status.cbInQue > 0) {
+        } else if (leased) {
+            commStatusAvailable = true;
+        }
+        if (commStatusAvailable && errors == 0 && status.cbInQue > 0) {
             const DWORD bytesToRead = static_cast<DWORD>(std::min<std::size_t>(
                 maxBytes,
                 std::min<std::size_t>(snapshot.options.readBufferSize, status.cbInQue)));
@@ -1387,9 +1389,10 @@ svm::transport::SerialReadResult Win32SerialSession::readAvailable(
     svm::transport::SerialOperationStatus operationStatus = svm::transport::SerialOperationStatus::Succeeded;
     svm::transport::SerialErrorCategory category = svm::transport::SerialErrorCategory::None;
     if (nativeCode != 0) {
-        category = errors != 0
-            ? svm::transport::SerialErrorCategory::IoFailure
-            : nativeErrorCategory(nativeCode, false);
+        category = nativeErrorCategory(nativeCode, false);
+        operationStatus = failureOperationStatus(category);
+    } else if (errors != 0) {
+        category = svm::transport::SerialErrorCategory::IoFailure;
         operationStatus = failureOperationStatus(category);
     } else if (deadlineExpired(deadline)) {
         operationStatus = svm::transport::SerialOperationStatus::Timeout;
@@ -1398,17 +1401,23 @@ svm::transport::SerialReadResult Win32SerialSession::readAvailable(
     if (category == svm::transport::SerialErrorCategory::Disconnected) {
         markGenerationDisconnected(snapshot.generation);
     }
+    svm::transport::SerialOperationResult operation = operationResult(
+        svm::transport::SerialOperationKind::Read,
+        operationStatus,
+        snapshot.generation,
+        snapshot.endpoint,
+        deadline,
+        buffer.size(),
+        category,
+        nativeCode,
+        operationId);
+    operation.error.commErrorMask = errors;
+    if (commStatusAvailable) {
+        operation.error.inputQueueBytes = status.cbInQue;
+        operation.error.outputQueueBytes = status.cbOutQue;
+    }
     return {
-        .operation = operationResult(
-            svm::transport::SerialOperationKind::Read,
-            operationStatus,
-            snapshot.generation,
-            snapshot.endpoint,
-            deadline,
-            buffer.size(),
-            category,
-            nativeCode,
-            operationId),
+        .operation = std::move(operation),
         .bytes = std::move(buffer),
     };
 }

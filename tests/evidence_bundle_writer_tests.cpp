@@ -55,8 +55,40 @@ svm::report::EvidenceBundleInput makeInput() {
         {"report_path", "C:\\Users\\Alice\\Desktop\\现场报告.md"},
     };
     input.rawEvents = {
-        {1, "session-1", "Tx", "2026-07-09T06:30:01Z", "COM12", {0x01, 0x03, 0x00, 0x64}},
-        {2, "session-1", "Rx", "2026-07-09T06:30:02Z", "COM12", {0x01, 0x03, 0x02, 0x12, 0x34}},
+        {
+            .id = 1,
+            .sessionId = "session-1",
+            .direction = "Tx",
+            .timestampUtc = "2026-07-09T06:30:01Z",
+            .endpoint = "COM12",
+            .payload = {0x01, 0x03, 0x00, 0x64},
+            .operation = "write",
+            .requestId = 41,
+            .generation = 7,
+            .status = "succeeded",
+            .deadlineStatus = "met",
+            .byteCount = 4,
+            .errorCategory = "none",
+        },
+        {
+            .id = 2,
+            .sessionId = "session-1",
+            .direction = "Rx",
+            .timestampUtc = "2026-07-09T06:30:02Z",
+            .endpoint = "COM12",
+            .payload = {0x01, 0x03, 0x02, 0x12, 0x34},
+            .operation = "read",
+            .requestId = 42,
+            .generation = 7,
+            .status = "failed",
+            .deadlineStatus = "expired",
+            .byteCount = 5,
+            .errorCategory = "io_failure",
+            .nativeCode = 5,
+            .commErrorMask = 10,
+            .inputQueueBytes = 12,
+            .outputQueueBytes = 4,
+        },
     };
     input.ruleVerificationReportMarkdown =
         "# 协议规则验证报告\n\n"
@@ -88,6 +120,8 @@ void fullBundleWritesAllExpectedFiles() {
     assert(rawEvents.find("COM12") != std::string::npos);
     assert(rawEvents.find("01 03 00 64") != std::string::npos);
     assert(rawEvents.find("01 03 02 12 34") != std::string::npos);
+    assert(rawEvents.find("operation\trequest_id\tgeneration\tstatus") != std::string::npos);
+    assert(rawEvents.find("read\t42\t7\tfailed\texpired\t5\tio_failure\t5\t10\t12\t4") != std::string::npos);
 
     const std::string appVersion = readText(directory / "app_version.txt");
     assert(appVersion.find("/home/user/customer-a/svm-native-win32.exe") != std::string::npos);
@@ -172,7 +206,10 @@ void missingOptionalFieldsStillWritesRequiredFiles() {
     assert(!pathExists(directory / "rule_verification_report.md"));
 
     const std::string rawEvents = readText(directory / "raw_events.tsv");
-    assert(rawEvents == "id\tsession_id\tdirection\ttimestamp_utc\tendpoint\tpayload_hex\n");
+    assert(rawEvents ==
+        "id\tsession_id\tdirection\ttimestamp_utc\tendpoint\tpayload_hex"
+        "\toperation\trequest_id\tgeneration\tstatus\tdeadline_status\tbyte_count"
+        "\terror_category\tnative_code\tcomm_error_mask\tinput_queue_bytes\toutput_queue_bytes\n");
 
     std::filesystem::remove_all(directory);
 }

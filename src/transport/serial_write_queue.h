@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <deque>
 #include <optional>
-#include <string>
 #include <vector>
 
 namespace svm::transport {
@@ -66,7 +65,6 @@ struct SerialWriteResult {
     SerialWriteResultStatus status = SerialWriteResultStatus::RejectedInvalid;
     std::size_t byteCount = 0;
     SerialDeadline deadline;
-    std::string message;
 
     bool accepted() const noexcept;
     bool rejected() const noexcept;
@@ -136,8 +134,7 @@ public:
         SerialWriteRequestId requestId,
         SerialSessionGeneration generation,
         SerialWriteResultStatus status,
-        std::size_t byteCount = 0,
-        std::string message = {});
+        std::size_t byteCount = 0);
 
 private:
     struct ActiveReservation {
@@ -149,13 +146,11 @@ private:
 
     SerialWriteResult reject(
         SerialWriteResultStatus status,
-        std::string message,
         SerialSessionGeneration generation = kUnassignedSerialSessionGeneration,
         SerialDeadline deadline = {}) const;
     SerialWriteResult rejectCompletion(
         SerialWriteRequestId requestId,
-        SerialSessionGeneration generation,
-        std::string message) const;
+        SerialSessionGeneration generation) const;
 
     SerialWriteQueueLimits limits_;
     SerialSessionGeneration generation_ = kUnassignedSerialSessionGeneration;

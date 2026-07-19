@@ -4,6 +4,16 @@
 #include <utility>
 
 namespace svm::win32 {
+namespace {
+
+template <typename String>
+void clipField(String& value, std::size_t limit) {
+    if (value.size() > limit) {
+        value.resize(limit);
+    }
+}
+
+} // namespace
 
 const std::wstring& NativeLogFilterState::filterText() const noexcept {
     return filterText_;
@@ -118,9 +128,13 @@ std::wstring clipRenderedLogLine(std::wstring text, std::size_t maxChars, std::w
     if (text.size() <= maxChars) {
         return text;
     }
-    const std::size_t keep = maxChars > suffix.size()
-        ? maxChars - suffix.size()
-        : maxChars;
+    if (maxChars == 0) {
+        return {};
+    }
+    if (suffix.size() >= maxChars) {
+        return std::wstring(suffix.substr(0, maxChars));
+    }
+    const std::size_t keep = maxChars - suffix.size();
     text.resize(keep);
     text.append(suffix);
     return text;
@@ -159,6 +173,47 @@ NativeLogEntry nativeMakePayloadLogEntry(NativeLogKind kind, std::wstring timest
     entry.payloadPrefix = std::wstring(nativeLogPayloadPrefix(kind));
     entry.payload = std::move(payload);
     entry.hasPayload = true;
+    return entry;
+}
+
+NativeSerialLogMetadata nativeSerialLogMetadata(
+    const svm::transport::SerialOperationResult& result) {
+    NativeSerialLogMetadata metadata;
+    metadata.direction = svm::transport::serialOperationDirection(result.operation.kind);
+    metadata.operation = result.operation.kind;
+    metadata.status = result.status;
+    metadata.deadlineStatus = result.deadlineStatus;
+    metadata.errorCategory = result.error.category;
+    metadata.requestId = result.operation.requestId;
+    metadata.generation = result.operation.generation;
+    metadata.byteCount = result.byteCount;
+    metadata.endpoint = result.endpoint;
+    clipField(metadata.endpoint, kNativeSerialLogEndpointMaxBytes);
+    metadata.nativeCode = result.error.nativeCode;
+    metadata.commErrorMask = result.error.commErrorMask;
+    metadata.inputQueueBytes = result.error.inputQueueBytes;
+    metadata.outputQueueBytes = result.error.outputQueueBytes;
+    return metadata;
+}
+
+NativeLogEntry nativeMakeSerialTextLogEntry(
+    NativeLogKind kind,
+    std::wstring timestamp,
+    std::wstring text,
+    const svm::transport::SerialOperationResult& result) {
+    clipField(text, kNativeSerialLogTextMaxChars);
+    NativeLogEntry entry = nativeMakeTextLogEntry(kind, std::move(timestamp), std::move(text));
+    entry.serialMetadata = nativeSerialLogMetadata(result);
+    return entry;
+}
+
+NativeLogEntry nativeMakeSerialPayloadLogEntry(
+    NativeLogKind kind,
+    std::wstring timestamp,
+    std::vector<std::uint8_t> payload,
+    const svm::transport::SerialOperationResult& result) {
+    NativeLogEntry entry = nativeMakePayloadLogEntry(kind, std::move(timestamp), std::move(payload));
+    entry.serialMetadata = nativeSerialLogMetadata(result);
     return entry;
 }
 

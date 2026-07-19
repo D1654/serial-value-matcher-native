@@ -18,6 +18,7 @@
 #include <deque>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <utility>
 
 namespace svm::win32 {
@@ -34,6 +35,67 @@ const wchar_t* tx(T id) {
     return uiText(id);
 }
 
+const wchar_t* serialOperationStatusText(svm::transport::SerialOperationStatus status) {
+    switch (status) {
+    case svm::transport::SerialOperationStatus::Accepted:
+        return L"已接受";
+    case svm::transport::SerialOperationStatus::Succeeded:
+        return L"成功";
+    case svm::transport::SerialOperationStatus::RejectedInvalid:
+        return L"参数拒绝";
+    case svm::transport::SerialOperationStatus::RejectedFull:
+        return L"队列拒绝";
+    case svm::transport::SerialOperationStatus::RejectedClosed:
+        return L"会话关闭";
+    case svm::transport::SerialOperationStatus::Failed:
+        return L"失败";
+    case svm::transport::SerialOperationStatus::Timeout:
+        return L"超时";
+    case svm::transport::SerialOperationStatus::Cancelled:
+        return L"已取消";
+    case svm::transport::SerialOperationStatus::Disconnected:
+        return L"设备断开";
+    }
+    return L"未知";
+}
+
+std::wstring renderSerialLogMetadata(const NativeSerialLogMetadata& metadata) {
+    std::wostringstream output;
+    output << L"{操作=" << utf8ToWide(svm::transport::serialOperationKindName(metadata.operation))
+           << L" 状态=" << serialOperationStatusText(metadata.status);
+    if (metadata.direction != svm::transport::SerialDataDirection::None) {
+        output << L" 方向=" << utf8ToWide(svm::transport::serialDataDirectionName(metadata.direction));
+    }
+    if (metadata.generation != svm::transport::kUnassignedSerialSessionGeneration) {
+        output << L" 会话=" << metadata.generation;
+    }
+    if (metadata.requestId != svm::transport::kUnassignedSerialOperationId) {
+        output << L" 请求=" << metadata.requestId;
+    }
+    output << L" 字节=" << metadata.byteCount;
+    if (!metadata.endpoint.empty()) {
+        output << L" 端点=" << utf8ToWide(metadata.endpoint);
+    }
+    output << L" 截止=" << utf8ToWide(svm::transport::serialDeadlineStatusName(metadata.deadlineStatus));
+    if (metadata.errorCategory != svm::transport::SerialErrorCategory::None) {
+        output << L" 分类=" << utf8ToWide(svm::transport::serialErrorCategoryName(metadata.errorCategory));
+    }
+    if (metadata.nativeCode != 0) {
+        output << L" 原生码=" << metadata.nativeCode;
+    }
+    if (metadata.commErrorMask != 0) {
+        output << L" 通信掩码=0x" << std::hex << std::uppercase << metadata.commErrorMask << std::dec;
+    }
+    if (metadata.inputQueueBytes.has_value()) {
+        output << L" 驱动入队=" << *metadata.inputQueueBytes;
+    }
+    if (metadata.outputQueueBytes.has_value()) {
+        output << L" 驱动出队=" << *metadata.outputQueueBytes;
+    }
+    output << L"}";
+    return output.str();
+}
+
 } // namespace
 
 void NativeMainWindow::appendLog(const std::wstring& line) {
@@ -44,8 +106,23 @@ void NativeMainWindow::appendLog(NativeLogKind kind, const std::wstring& line) {
     addLogEntry(nativeMakeTextLogEntry(kind, nativeLocalClockText(), line));
 }
 
+void NativeMainWindow::appendSerialOperationLog(
+    NativeLogKind kind,
+    const std::wstring& line,
+    const svm::transport::SerialOperationResult& result) {
+    saveRawEvent(result, {});
+    addLogEntry(nativeMakeSerialTextLogEntry(kind, nativeLocalClockText(), line, result));
+}
+
 void NativeMainWindow::appendPayloadLog(NativeLogKind kind, const std::vector<std::uint8_t>& payload) {
     addLogEntry(nativeMakePayloadLogEntry(kind, nativeLocalClockText(), payload));
+}
+
+void NativeMainWindow::appendPayloadLog(
+    NativeLogKind kind,
+    const std::vector<std::uint8_t>& payload,
+    const svm::transport::SerialOperationResult& result) {
+    addLogEntry(nativeMakeSerialPayloadLogEntry(kind, nativeLocalClockText(), payload, result));
 }
 
 std::wstring NativeMainWindow::formatPayloadForLog(const std::vector<std::uint8_t>& payload) const {
@@ -283,6 +360,12 @@ std::wstring NativeMainWindow::renderLogEntry(const NativeLogEntry& entry) const
         line += formatPayloadForLog(entry.payload);
     } else {
         line += entry.text;
+    }
+    if (entry.serialMetadata.has_value()) {
+        if (!line.empty()) {
+            line += L" ";
+        }
+        line += renderSerialLogMetadata(*entry.serialMetadata);
     }
     line = clipRenderedLogLine(sanitizeLogText(line), kMaxRenderedLogLineChars, tx(T::LogEntryClippedSuffix));
     line += L"\r\n";
