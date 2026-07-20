@@ -51,6 +51,7 @@ REQUIRED_FILES = [
     UI_WORKFLOW,
     "scripts/package-windows-native.ps1",
     "scripts/package-windows-native-mingw.sh",
+    "scripts/check-transport-boundaries.py",
     "scripts/inspect-windows-package.py",
     "scripts/inspect-windows-package.ps1",
     "scripts/capture-windows-native-ui.ps1",
@@ -125,6 +126,8 @@ UI_WORKFLOW_TERMS = [
 ]
 
 CMAKE_TRANSPORT_TERMS = [
+    "find_package(Python3",
+    "COMPONENTS Interpreter",
     "src/transport/serial_write_queue.cpp",
     "src/win32/win32_serial_session.cpp",
     "add_test(NAME serial_write_queue_tests",
@@ -134,6 +137,22 @@ CMAKE_TRANSPORT_TERMS = [
     "add_test(NAME native_reconnect_state_tests",
     "add_test(NAME native_win32_serial_tests",
     "add_test(NAME native_win32_serial_loopback_tests",
+    "NAME transport_boundary_tests",
+    "NAME transport_boundary_self_tests",
+    "scripts/check-transport-boundaries.py",
+    "TIMEOUT 10",
+]
+
+TRANSPORT_BOUNDARY_GATE_TERMS = [
+    "--self-test",
+    "Boundary self-test: passed.",
+    "Transport boundary check: passed.",
+    '"win32-dependency"',
+    '"ui-dependency"',
+    '"codec-dependency"',
+    '"upper-layer-analysis"',
+    '"storage-dependency"',
+    '"old-facade"',
 ]
 
 MINGW_PACKAGE_GATE_TERMS = [
@@ -151,12 +170,19 @@ MINGW_PACKAGE_GATE_TERMS = [
 REQUIRED_DOC_TERMS = {
     "README.md": [EXE_NAME, PACKAGE_ZIP],
     "docs/用户指南.md": [EXE_NAME, PACKAGE_ZIP, "artifact"],
-    "docs/开发者指南.md": ["CMake", TARGET_NAME, EXE_NAME, "NativeFrameScheduler"],
+    "docs/开发者指南.md": [
+        "CMake",
+        TARGET_NAME,
+        EXE_NAME,
+        "NativeFrameScheduler",
+        "transport v2 未实现 Gray-code decoding",
+    ],
     "docs/Win32原生架构.md": [
         "NativeFrameScheduler",
         "NativeLayoutModel",
         "NativeLayoutTransaction",
         "NativePaintPolicy",
+        "transport v2 **未实现 Gray-code decoding**",
     ],
     "docs/测试与验证.md": [
         PACKAGE_WORKFLOW,
@@ -177,6 +203,14 @@ REQUIRED_DOC_TERMS = {
         "Package documentation file set",
         "package",
         "docs consistency",
+        "transport v2 未实现 Gray-code decoding",
+    ],
+    "docs/架构说明.md": [
+        "SerialSession",
+        "Win32SerialSession",
+        "SerialRtuTransport",
+        "scripts/check-transport-boundaries.py",
+        "scanner/matcher codec",
     ],
     "docs/发布产物.md": [
         PACKAGE_ARTIFACT,
@@ -335,6 +369,12 @@ def check_workflow_terms(root: Path, failures: list[str]) -> None:
 
 def check_transport_release_gate_terms(root: Path, failures: list[str]) -> None:
     check_terms(read_text(root / "CMakeLists.txt"), CMAKE_TRANSPORT_TERMS, "CMakeLists.txt", failures)
+    check_terms(
+        read_text(root / "scripts/check-transport-boundaries.py"),
+        TRANSPORT_BOUNDARY_GATE_TERMS,
+        "scripts/check-transport-boundaries.py",
+        failures,
+    )
     check_terms(
         read_text(root / "scripts/package-windows-native-mingw.sh"),
         MINGW_PACKAGE_GATE_TERMS,

@@ -130,3 +130,14 @@ accurately as upper-layer analysis; transport v2 does not implement general
 Gray decoding or variable bit-layout codecs, and this workflow adds no codec UI
 or persistence format. Documentation consistency, diff checks, and independent
 fact review pass.
+
+Phase 4 Task 2 completed on 2026-07-20. A standard-library repository checker
+now scans every C/C++ source under `src/transport` and rejects Win32/UI,
+analysis/codec/Gray, persistence, and removed-facade dependencies. Its lexical
+mask distinguishes comments, strings, characters, and raw strings; nested
+include/path tokens and `.inl`/`.ipp`/`.tpp` sources are covered without
+misclassifying valid RTU code or names such as `circuit_breaker`. Separate CTest
+entries protect the rule self-test and repository scan with bounded timeouts.
+Fresh host CTest passes 29/29, focused MinGW boundary CTest passes 2/2, and
+documentation consistency, fail-closed cases, adversarial fixtures, and two
+independent reviews pass.

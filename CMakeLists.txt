@@ -210,6 +210,26 @@ endif()
 
 enable_testing()
 
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+add_test(
+    NAME transport_boundary_tests
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-transport-boundaries.py"
+            --root "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+add_test(
+    NAME transport_boundary_self_tests
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-transport-boundaries.py"
+            --self-test
+)
+set_tests_properties(
+    transport_boundary_tests
+    transport_boundary_self_tests
+    PROPERTIES TIMEOUT 10
+)
+
 add_executable(native_protocol_modbus_tests
     tests/native_protocol_modbus_tests.cpp
 )
