@@ -5,6 +5,7 @@
 #include <map>
 #include <regex>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -20,7 +21,9 @@ namespace {
 
 std::string readText(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
-    assert(input && "required metadata file must exist");
+    if (!input) {
+        throw std::runtime_error("required metadata file must exist: " + path.string());
+    }
     std::ostringstream buffer;
     buffer << input.rdbuf();
     return buffer.str();
@@ -30,9 +33,8 @@ bool contains(const std::string& text, const std::string& needle) {
     return text.find(needle) != std::string::npos;
 }
 
-std::map<std::string, std::string> readVersionMetadata(const std::filesystem::path& root) {
-    const std::string text = readText(root / "cmake" / "svm_version.cmake");
-    const std::regex pattern(R"REGEX(^\s*set\(\s*([A-Za-z0-9_]+)\s+"([^"]*)"\s*\))REGEX");
+std::map<std::string, std::string> parseVersionMetadata(const std::string& text) {
+    const std::regex pattern(R"REGEX(^\s*set\(\s*([A-Za-z0-9_]+)\s+"([^"]*)"\s*\)\s*$)REGEX");
     std::map<std::string, std::string> metadata;
     std::istringstream lines(text);
     std::string line;
@@ -43,6 +45,18 @@ std::map<std::string, std::string> readVersionMetadata(const std::filesystem::pa
         }
     }
     return metadata;
+}
+
+std::map<std::string, std::string> readVersionMetadata(const std::filesystem::path& root) {
+    return parseVersionMetadata(readText(root / "cmake" / "svm_version.cmake"));
+}
+
+void windowsLineEndingsParse() {
+    const auto metadata = parseVersionMetadata(
+        "set(SVM_VERSION \"1.0.4\")\r\n"
+        "set(SVM_RELEASE_TAG \"v1.0.4\")\r\n");
+    assert(metadata.at("SVM_VERSION") == "1.0.4");
+    assert(metadata.at("SVM_RELEASE_TAG") == "v1.0.4");
 }
 
 void requiredMetadataKeysExist(const std::map<std::string, std::string>& metadata) {
@@ -137,8 +151,8 @@ void docsReferenceCurrentVersion(
     const std::filesystem::path& root,
     const std::map<std::string, std::string>& metadata) {
     const std::string readme = readText(root / "README.md");
-    const std::string releaseArtifacts = readText(root / "docs" / "发布产物.md");
-    const std::string windowsRelease = readText(root / "docs" / "Windows发布说明.md");
+    const std::string releaseArtifacts = readText(root / std::filesystem::path(u8"docs/发布产物.md"));
+    const std::string windowsRelease = readText(root / std::filesystem::path(u8"docs/Windows发布说明.md"));
     const std::string docsConsistency = readText(root / "scripts" / "check-docs-artifact-consistency.py");
 
     assert(contains(readme, "当前版本：" + metadata.at("SVM_RELEASE_TAG")));
@@ -153,18 +167,24 @@ void docsReferenceCurrentVersion(
 } // namespace
 
 int main() {
-    const std::filesystem::path root = SVM_SOURCE_ROOT;
-    const std::filesystem::path buildRoot = SVM_BINARY_DIR;
-    const auto metadata = readVersionMetadata(root);
+    try {
+        const std::filesystem::path root = SVM_SOURCE_ROOT;
+        const std::filesystem::path buildRoot = SVM_BINARY_DIR;
+        windowsLineEndingsParse();
+        const auto metadata = readVersionMetadata(root);
 
-    requiredMetadataKeysExist(metadata);
-    versionComponentsMatch(metadata);
-    cmakeConsumesVersionSource(root);
-    generatedHeaderMatchesSource(buildRoot, metadata);
-    win32ResourceUsesGeneratedHeader(root);
-    packageScriptsConsumeVersionSource(root);
-    docsReferenceCurrentVersion(root, metadata);
+        requiredMetadataKeysExist(metadata);
+        versionComponentsMatch(metadata);
+        cmakeConsumesVersionSource(root);
+        generatedHeaderMatchesSource(buildRoot, metadata);
+        win32ResourceUsesGeneratedHeader(root);
+        packageScriptsConsumeVersionSource(root);
+        docsReferenceCurrentVersion(root, metadata);
 
-    std::cout << "version_metadata_tests passed\n";
-    return 0;
+        std::cout << "version_metadata_tests passed\n";
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << "version_metadata_tests failed: " << error.what() << '\n';
+        return 1;
+    }
 }

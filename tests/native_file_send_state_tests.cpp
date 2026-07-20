@@ -80,6 +80,7 @@ void exactChunkCompletionUsesWrittenBytes() {
     state.markBytesWritten(chunk.bytes.size());
     assert(state.done());
 
+    state.close();
     std::filesystem::remove(path);
 }
 
@@ -102,6 +103,7 @@ void finalChunkIsNotDoneUntilBytesAreMarkedWritten() {
     assert(state.sentBytes() == 3);
     assert(state.done());
 
+    state.close();
     std::filesystem::remove(path);
 }
 
@@ -132,6 +134,7 @@ void queuedWriteDoesNotAdvanceProgressUntilSentResult() {
     assert(state.sentBytes() == 2);
     assert(state.progressPermille() == 500);
 
+    state.close();
     std::filesystem::remove(path);
 }
 
@@ -153,6 +156,7 @@ void writtenBytesAreClampedToFileTotal() {
     state.markBytesWritten(9999);
     assert(state.sentBytes() == 2);
 
+    state.close();
     std::filesystem::remove(path);
 }
 
@@ -171,6 +175,7 @@ void zeroByteFileCannotAccumulateProgress() {
     assert(state.progressPermille() == 0);
     assert(state.done());
 
+    state.close();
     std::filesystem::remove(path);
 }
 
@@ -183,6 +188,7 @@ void invalidReadRequestsAreRejected() {
     assert(state.open(path).ok());
     assert(state.readNextChunk(0).status == svm::win32::NativeFileSendReadStatus::InvalidChunkSize);
 
+    state.close();
     std::filesystem::remove(path);
 }
 

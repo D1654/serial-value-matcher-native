@@ -230,6 +230,12 @@ set_tests_properties(
     PROPERTIES TIMEOUT 10
 )
 
+if(MSVC)
+    add_compile_options(/UNDEBUG)
+else()
+    add_compile_options(-UNDEBUG)
+endif()
+
 add_executable(native_protocol_modbus_tests
     tests/native_protocol_modbus_tests.cpp
 )
