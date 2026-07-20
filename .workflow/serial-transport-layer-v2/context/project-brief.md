@@ -120,3 +120,13 @@ workflow, package, trigger, and all active-document PTY terms. Host 27/27,
 MinGW/Wine 34/34, the 5006-transaction PTY matrix, strict self-test/UI
 performance, package inspection, SHA256, documentation checks, and independent
 review all pass.
+
+Phase 4 Task 1 completed on 2026-07-20. Architecture, developer, and validation
+documents now describe `Win32SerialSession` as the sole serial-device HANDLE
+and session owner, with borrowed lifecycle, byte-stream, and write-scheduler
+views. RTU framing, CRC, stale receive handling, retry, and protocol errors stay
+above neutral byte contracts. The existing fixed `Gray16` candidate is recorded
+accurately as upper-layer analysis; transport v2 does not implement general
+Gray decoding or variable bit-layout codecs, and this workflow adds no codec UI
+or persistence format. Documentation consistency, diff checks, and independent
+fact review pass.

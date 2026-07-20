@@ -138,6 +138,18 @@ Win32 event
 - `NativeReconnectState`：异常断开后的自动重连状态。
 - `main_window_serial_io.cpp`：轮询读取、错误处理、保存原始事件、更新 TX/RX 计数。
 
+### 会话所有权和字节边界
+
+`NativeMainWindow` 直接持有唯一的 `Win32SerialSession` 实例。该实例是生产环境中唯一拥有 Windows 串口 `HANDLE`、写线程、会话 generation、串口参数和写队列的对象。上层只借用三个窄接口：
+
+- `SerialSession`：打开、关闭、状态快照和 DTR/RTS。
+- `SerialByteStream`：带 deadline 的原始字节读写。
+- `SerialWriteScheduler`：有界写入排队、待处理取消、终态收集和队列快照。
+
+`SerialOperationResult`、`SerialReadResult` 和 `SerialTerminalResult` 携带 operation id、generation、状态、deadline、native error、通信掩码和驱动队列证据。写队列同时限制请求数和总字节数，并把 active work 计入预算。UI、扫描器和命令序列不能直接访问或关闭 native handle，也不能绕过这些结果和队列契约。
+
+协议逻辑位于字节边界之上。`SerialRtuTransport` 借用 `SerialByteStream`，把原始字节操作接入 Modbus RTU exchange；RTU 帧边界、CRC、陈旧接收数据处理、重试策略和协议错误分类不进入 `serial_session.h`、`serial_types.h` 或 `serial_write_queue.h`。
+
 测试边界：
 
 - `native_win32_serial_tests` 覆盖串口参数和基础状态。
@@ -178,6 +190,19 @@ Modbus 和分析链路分为：
 - 扫描必须在串口连接后执行。
 - 取消是请求式取消，当前请求结束后生效。
 - 候选结果不能代替现场业务判断，报告只表达验证证据。
+
+## 设备 codec 和可变位布局边界
+
+设备返回的寄存器或字节经过 RTU/协议校验后，才进入扫描和匹配解释层。未来通用 codec 应在该上层描述：
+
+- 数据位位于哪些寄存器、字节或 bit 区间；
+- 二进制、Gray code 或设备自定义编码；
+- signedness、缩放、偏移、字节序和字序；
+- 设备型号特有的枚举、状态位和工程值解释。
+
+依赖方向只能是 `scanner/matcher codec -> RTU/protocol -> SerialByteStream`，不能让 neutral transport 反向依赖 matcher、codec、UI 或持久化类型。codec 消费已经完成的字节或寄存器结果，不拥有串口会话，也不访问 Windows `HANDLE`。
+
+当前 `src/core/analysis_core.*` 已有固定的 `Gray16` 数值候选，它是上层分析能力，不是 transport v2 解码。transport v2 **未实现 Gray-code decoding**，也未实现通用的可变位布局 codec；本轮没有新增对应 UI 控件或持久化格式。现有 `NativeSendCodec` 只负责发送文本/字节转换，不代表未来的 scanner/matcher codec。
 
 ## 存储边界
 
