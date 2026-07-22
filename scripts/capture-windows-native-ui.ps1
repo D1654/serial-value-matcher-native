@@ -175,7 +175,6 @@ public static class NativeUiCapture {
     public const uint SWP_SHOWWINDOW = 0x0040;
     public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     public const uint MOUSEEVENTF_LEFTUP = 0x0004;
-    public const uint TCM_GETITEMRECT = 0x130A;
     public const int LOGPIXELSX = 88;
     public const int LOGPIXELSY = 90;
 
@@ -185,12 +184,6 @@ public static class NativeUiCapture {
         public int Top;
         public int Right;
         public int Bottom;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct POINT {
-        public int X;
-        public int Y;
     }
 
     [DllImport("user32.dll")]
@@ -205,17 +198,8 @@ public static class NativeUiCapture {
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
-    [DllImport("user32.dll")]
-    public static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
-
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern IntPtr FindWindowEx(IntPtr hWndParent, IntPtr hWndChildAfter, string lpszClass, string lpszWindow);
-
-    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
-    public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, ref RECT lParam);
-
-    [DllImport("user32.dll")]
-    public static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
 
     [DllImport("user32.dll")]
     public static extern uint GetDpiForWindow(IntPtr hWnd);
@@ -550,25 +534,16 @@ function Select-NativeTab {
 
     [NativeUiCapture]::SetForegroundWindow($WindowHandle) | Out-Null
 
-    if ($Index -lt 0 -or $Index -ge 5) {
+    $tabCenters = @(25, 75, 125, 175, 225)
+    if ($Index -lt 0 -or $Index -ge $tabCenters.Count) {
         throw "标签页索引越界，Index=$Index"
     }
 
     $tabGeometry = Get-NativeTabControlGeometry -WindowHandle $WindowHandle
-    $tabHandle = [IntPtr]$tabGeometry.Handle
     $tabRect = $tabGeometry.Rect
 
-    $itemRect = New-Object NativeUiCapture+RECT
-    if ([NativeUiCapture]::SendMessage(
-            $tabHandle,
-            [NativeUiCapture]::TCM_GETITEMRECT,
-            [IntPtr]$Index,
-            [ref]$itemRect) -eq [IntPtr]::Zero) {
-        throw "读取标签项位置失败，Index=$Index"
-    }
-
-    $screenX = $tabRect.Left + [int](($itemRect.Left + $itemRect.Right) / 2)
-    $screenY = $tabRect.Top + [int](($itemRect.Top + $itemRect.Bottom) / 2)
+    $screenX = $tabRect.Left + $tabCenters[$Index]
+    $screenY = $tabRect.Top + 14
     Write-Host "点击标签页：Index=$Index X=$screenX Y=$screenY Tab=$($tabRect.Left),$($tabRect.Top),$($tabRect.Right),$($tabRect.Bottom)"
     [NativeUiCapture]::SetCursorPos($screenX, $screenY) | Out-Null
     Start-Sleep -Milliseconds 80
