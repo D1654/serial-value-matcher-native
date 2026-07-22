@@ -412,7 +412,7 @@ capture_tab_set() {
     local tabs_y=$((margin + log_height + splitter_height))
     local tab_y_adjust="${SVM_WINE_UI_TAB_Y_ADJUST:-0}"
     if (( compact == 1 )); then
-        tab_y_adjust="${SVM_WINE_UI_COMPACT_TAB_Y_ADJUST:--45}"
+        tab_y_adjust="${SVM_WINE_UI_COMPACT_TAB_Y_ADJUST:-0}"
     fi
     local tab_y=$((tabs_y + 14 + tab_y_adjust))
     printf "%s X=%s Y=%s WIDTH=%s HEIGHT=%s compact=%s tight=%s tabs_y=%s tab_y=%s adjust=%s\n" "$prefix" "$X" "$Y" "$WIDTH" "$HEIGHT" "$compact" "$tight" "$tabs_y" "$tab_y" "$tab_y_adjust" >> "$output_dir/tab-clicks.txt"
@@ -501,7 +501,7 @@ capture_log_splitter_movement() {
     if (( log_height < 1 )); then
         log_height=1
     fi
-    local splitter_y_adjust="${SVM_WINE_UI_SPLITTER_Y_ADJUST:--45}"
+    local splitter_y_adjust="${SVM_WINE_UI_SPLITTER_Y_ADJUST:-0}"
     local splitter_y=$((Y + margin + log_height + splitter_height / 2 + splitter_y_adjust))
     local splitter_x=$((X + WIDTH / 2))
 

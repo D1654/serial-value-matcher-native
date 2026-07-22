@@ -175,6 +175,7 @@ public static class NativeUiCapture {
     public const uint SWP_SHOWWINDOW = 0x0040;
     public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     public const uint MOUSEEVENTF_LEFTUP = 0x0004;
+    public const uint TCM_GETITEMRECT = 0x130A;
     public const int LOGPIXELSX = 88;
     public const int LOGPIXELSY = 90;
 
@@ -206,6 +207,12 @@ public static class NativeUiCapture {
 
     [DllImport("user32.dll")]
     public static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr FindWindowEx(IntPtr hWndParent, IntPtr hWndChildAfter, string lpszClass, string lpszWindow);
+
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, ref RECT lParam);
 
     [DllImport("user32.dll")]
     public static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
@@ -512,6 +519,29 @@ function Get-NativeDpiMetrics {
     }
 }
 
+function Get-NativeTabControlGeometry {
+    param([IntPtr]$WindowHandle)
+
+    $tabHandle = [NativeUiCapture]::FindWindowEx(
+        $WindowHandle,
+        [IntPtr]::Zero,
+        "SysTabControl32",
+        $null)
+    if ($tabHandle -eq [IntPtr]::Zero) {
+        throw "未找到原生标签控件。"
+    }
+
+    $tabRect = New-Object NativeUiCapture+RECT
+    if (-not [NativeUiCapture]::GetWindowRect($tabHandle, [ref]$tabRect)) {
+        throw "GetWindowRect 标签控件失败。"
+    }
+
+    [pscustomobject]@{
+        Handle = $tabHandle
+        Rect = $tabRect
+    }
+}
+
 function Select-NativeTab {
     param(
         [IntPtr]$WindowHandle,
@@ -520,45 +550,26 @@ function Select-NativeTab {
 
     [NativeUiCapture]::SetForegroundWindow($WindowHandle) | Out-Null
 
-    $tabCenters = @(25, 75, 125, 175, 225)
-    if ($Index -lt 0 -or $Index -ge $tabCenters.Count) {
+    if ($Index -lt 0 -or $Index -ge 5) {
         throw "标签页索引越界，Index=$Index"
     }
 
-    $clientRect = New-Object NativeUiCapture+RECT
-    if (-not [NativeUiCapture]::GetClientRect($WindowHandle, [ref]$clientRect)) {
-        throw "GetClientRect 主窗口失败。"
+    $tabGeometry = Get-NativeTabControlGeometry -WindowHandle $WindowHandle
+    $tabHandle = [IntPtr]$tabGeometry.Handle
+    $tabRect = $tabGeometry.Rect
+
+    $itemRect = New-Object NativeUiCapture+RECT
+    if ([NativeUiCapture]::SendMessage(
+            $tabHandle,
+            [NativeUiCapture]::TCM_GETITEMRECT,
+            [IntPtr]$Index,
+            [ref]$itemRect) -eq [IntPtr]::Zero) {
+        throw "读取标签项位置失败，Index=$Index"
     }
 
-    $clientWidth = [Math]::Max(1, $clientRect.Right - $clientRect.Left)
-    $clientHeight = [Math]::Max(1, $clientRect.Bottom - $clientRect.Top)
-    $compact = $clientWidth -lt 1040 -or $clientHeight -lt 720
-    $tight = $clientWidth -lt 860
-    $margin = if ($tight) { 3 } elseif ($compact) { 4 } else { 6 }
-    $statusHeight = if ($compact) { 20 } else { 22 }
-    $sideGap = if ($tight) { 4 } elseif ($compact) { 5 } else { 6 }
-    $desiredWorkHeight = if ($compact) { 230 } else { 236 }
-    $minimumLogHeight = if ($compact) { 150 } else { 210 }
-    $splitterHeight = 12
-
-    $statusY = [Math]::Max($margin, $clientHeight - $statusHeight - 4)
-    $contentHeight = [Math]::Max(1, $statusY - $margin)
-    $maximumWorkHeight = [Math]::Max(84, $contentHeight - $minimumLogHeight - $splitterHeight)
-    $workHeight = [Math]::Max(84, [Math]::Min($desiredWorkHeight, $maximumWorkHeight))
-    $logY = $margin
-    $logHeight = [Math]::Max(1, $statusY - $logY - $workHeight - $splitterHeight)
-    $tabsY = $logY + $logHeight + $splitterHeight
-
-    $origin = New-Object NativeUiCapture+POINT
-    $origin.X = 0
-    $origin.Y = 0
-    if (-not [NativeUiCapture]::ClientToScreen($WindowHandle, [ref]$origin)) {
-        throw "ClientToScreen 主窗口失败。"
-    }
-
-    $screenX = $origin.X + $margin + $tabCenters[$Index]
-    $screenY = $origin.Y + $tabsY + 14
-    Write-Host "点击标签页：Index=$Index X=$screenX Y=$screenY Client=${clientWidth}x${clientHeight}"
+    $screenX = $tabRect.Left + [int](($itemRect.Left + $itemRect.Right) / 2)
+    $screenY = $tabRect.Top + [int](($itemRect.Top + $itemRect.Bottom) / 2)
+    Write-Host "点击标签页：Index=$Index X=$screenX Y=$screenY Tab=$($tabRect.Left),$($tabRect.Top),$($tabRect.Right),$($tabRect.Bottom)"
     [NativeUiCapture]::SetCursorPos($screenX, $screenY) | Out-Null
     Start-Sleep -Milliseconds 80
     [NativeUiCapture]::mouse_event([NativeUiCapture]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
@@ -683,43 +694,20 @@ function Capture-LogSplitterMovement {
     Capture-WindowImage -WindowHandle $WindowHandle -Path $beforeFile
     Assert-ImageVisible -Path $beforeFile
 
-    $clientRect = New-Object NativeUiCapture+RECT
-    if (-not [NativeUiCapture]::GetClientRect($WindowHandle, [ref]$clientRect)) {
-        throw "GetClientRect 主窗口失败。"
-    }
-    $clientWidth = [Math]::Max(1, $clientRect.Right - $clientRect.Left)
-    $clientHeight = [Math]::Max(1, $clientRect.Bottom - $clientRect.Top)
-    $margin = if ($clientWidth -lt 860) { 3 } elseif ($clientWidth -lt 1040 -or $clientHeight -lt 720) { 4 } else { 6 }
-    $statusHeight = if ($clientWidth -lt 1040 -or $clientHeight -lt 720) { 20 } else { 22 }
-    $sideGap = if ($clientWidth -lt 860) { 4 } elseif ($clientWidth -lt 1040 -or $clientHeight -lt 720) { 5 } else { 6 }
-    $desiredWorkHeight = if ($clientWidth -lt 1040 -or $clientHeight -lt 720) { 230 } else { 236 }
-    $minimumLogHeight = if ($clientWidth -lt 1040 -or $clientHeight -lt 720) { 150 } else { 210 }
-    $splitterHeight = 12
-    $statusY = [Math]::Max($margin, $clientHeight - $statusHeight - 4)
-    $contentHeight = [Math]::Max(1, $statusY - $margin)
-    $maximumWorkHeight = [Math]::Max(84, $contentHeight - $minimumLogHeight - $splitterHeight)
-    $workHeight = [Math]::Max(84, [Math]::Min($desiredWorkHeight, $maximumWorkHeight))
-    $logHeight = [Math]::Max(1, $statusY - $margin - $workHeight - $splitterHeight)
-    $splitterY = $margin + $logHeight + [Math]::Max(1, [int]($splitterHeight / 2))
+    $tabGeometry = Get-NativeTabControlGeometry -WindowHandle $WindowHandle
+    $tabRect = $tabGeometry.Rect
 
-    $origin = New-Object NativeUiCapture+POINT
-    $origin.X = 0
-    $origin.Y = 0
-    if (-not [NativeUiCapture]::ClientToScreen($WindowHandle, [ref]$origin)) {
-        throw "ClientToScreen 主窗口失败。"
-    }
-
-    $screenX = $origin.X + [Math]::Max(80, [int]($clientWidth / 2))
-    $screenY = $origin.Y + $splitterY
+    $screenX = [int](($tabRect.Left + $tabRect.Right) / 2)
+    $screenY = $tabRect.Top - 6
     [NativeUiCapture]::SetCursorPos($screenX, $screenY) | Out-Null
     Start-Sleep -Milliseconds 80
     [NativeUiCapture]::mouse_event([NativeUiCapture]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 80
-    [NativeUiCapture]::SetCursorPos($screenX, [Math]::Max($origin.Y + 80, $screenY - 24)) | Out-Null
+    [NativeUiCapture]::SetCursorPos($screenX, $screenY - 24) | Out-Null
     Start-Sleep -Milliseconds 180
     Capture-WindowImage -WindowHandle $WindowHandle -Path $frame01File
     Assert-ImageVisible -Path $frame01File
-    [NativeUiCapture]::SetCursorPos($screenX, [Math]::Max($origin.Y + 80, $screenY - 48)) | Out-Null
+    [NativeUiCapture]::SetCursorPos($screenX, $screenY - 48) | Out-Null
     Start-Sleep -Milliseconds 180
     Capture-WindowImage -WindowHandle $WindowHandle -Path $frame02File
     Assert-ImageVisible -Path $frame02File
