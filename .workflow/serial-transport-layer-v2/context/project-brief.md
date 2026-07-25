@@ -96,7 +96,7 @@ Shutdown and normal scan completion both settle pending evidence before state is
 released. Host 27/27, MinGW/Wine 34/34, the 5005-transaction PTY matrix, strict
 package inspection, UI self-test/performance, and documentation checks pass.
 
-Phase 3 Task 4 completed on 2026-07-20. The Wine/PTTY harness now runs isolated
+Phase 3 Task 4 completed on 2026-07-20. The Wine/PTY harness now runs isolated
 normal, reopen, timeout, pending-cancel, close, stale-generation, and stress
 scenarios with two alternating Modbus fixtures. Timeout sends a real request;
 close interrupts an active bounded write; cancellation is explicitly limited to
@@ -141,3 +141,17 @@ entries protect the rule self-test and repository scan with bounded timeouts.
 Fresh host CTest passes 29/29, focused MinGW boundary CTest passes 2/2, and
 documentation consistency, fail-closed cases, adversarial fixtures, and two
 independent reviews pass.
+
+Phase 4 Task 3 completed on 2026-07-25. Final Release verification found and
+removed two weak-test conditions rather than adding compatibility paths:
+assert-based C++ tests now remain active under `NDEBUG`, and Windows CRLF/UTF-8
+metadata plus open-file cleanup are tested explicitly. UI evidence now derives
+click and splitter targets from the real Win32 tab-control rectangle instead of
+duplicating application layout formulas. Fresh host 29/29, MinGW/Wine 36/36,
+the seven-scenario 5006-transaction PTY matrix, strict package inspection, a
+fresh-prefix 30-PNG local UI run, and all static gates pass. Final Windows
+package run `29914919999` and UI run `29914927486` both succeed at implementation
+target `2f694804fd13370128d41752d74f5de07d702d4a`; their downloaded artifacts pass
+hash, file-set, runtime, evidence-completeness, and platform-correct reinspection
+checks. The serial-only workflow is complete; physical PLC/USB-serial smoke
+testing remains optional hardware coverage.
