@@ -23,6 +23,8 @@ UI 验收以 GitHub Actions 编译出的 Windows native artifact 为最终对象
 
 GitHub Actions UI artifact 上传使用显式文件路径、`if-no-files-found: error` 和上传前逐文件 evidence 断言。由于 wildcard 截图路径只能证明至少有截图匹配，workflow 还会检查必备 screenshot 文件、`capture-status.txt` 的 `PASS` 场景、`ui-perf ok` 和 `ui-evidence-summary.txt` 的 `GateStatus=passed`。上传成功后 job summary 会记录 `artifact-id`、`artifact-url` 和 `artifact-digest`；该 digest 是 CI 上传对象证据，不能替代截图/status/log 的人工与脚本复核。
 
+UI workflow 会为每次 `main` push 自动生成证据。`ui-evidence-summary.txt` 还必须包含 `GitHubSha`、`GitHubHeadSha` 和 `CheckedOutSha`：主分支运行时三者必须一致；PR 运行时 `GitHubSha`/`CheckedOutSha` 绑定实际测试的 merge commit，`GitHubHeadSha` 单独记录源分支提交。发布时必须核对 UI run 的 SHA 与发布提交一致。
+
 ## 自动检查
 
 Windows：

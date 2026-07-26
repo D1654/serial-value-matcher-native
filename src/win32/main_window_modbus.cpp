@@ -28,6 +28,9 @@ const wchar_t* tx(T id) {
     return uiText(id);
 }
 
+constexpr DWORD kModbusThreadJoinBudgetMs =
+    static_cast<DWORD>(svm::transport::kSerialTerminalResultTargetMs);
+
 } // namespace
 
 void NativeMainWindow::updateModbusScanProgress(
@@ -163,6 +166,16 @@ void NativeMainWindow::requestCancelModbusScan() {
         return;
     }
     modbusScanCancelRequested_ = true;
+    if (modbusScanThread_ != nullptr && !CancelSynchronousIo(modbusScanThread_)) {
+        const DWORD nativeCode = GetLastError();
+        if (nativeCode != ERROR_NOT_FOUND) {
+            appendLog(
+                NativeLogKind::Error,
+                L"中断 Modbus 串口操作失败 (native="
+                    + std::to_wstring(nativeCode)
+                    + L")");
+        }
+    }
     setStatus(tx(T::ModbusCancelRequestedStatus));
 }
 
@@ -272,9 +285,13 @@ NativeMainWindow::NativeModbusThreadCloseResult NativeMainWindow::closeModbusSca
     if (modbusScanThread_ == nullptr) {
         return NativeModbusThreadCloseResult::Settled;
     }
-    const DWORD waitResult = WaitForSingleObject(modbusScanThread_, INFINITE);
+    const DWORD waitResult = WaitForSingleObject(modbusScanThread_, kModbusThreadJoinBudgetMs);
     if (waitResult != WAIT_OBJECT_0) {
-        const DWORD nativeCode = waitResult == WAIT_FAILED ? GetLastError() : waitResult;
+        const DWORD nativeCode = waitResult == WAIT_FAILED
+            ? GetLastError()
+            : waitResult == WAIT_TIMEOUT
+                ? ERROR_TIMEOUT
+                : waitResult;
         const std::wstring message = L"等待 Modbus 扫描线程结束失败 (native="
             + std::to_wstring(nativeCode) + L")";
         appendLog(NativeLogKind::Error, message);
@@ -326,6 +343,7 @@ void NativeMainWindow::updateCompletedModbusScanProgress(const NativeModbusScanR
 
 std::wstring NativeMainWindow::persistCompletedModbusScan(const NativeModbusScanResult& result) {
     if (!store_.saveScanExecution(result.execution)) {
+        reportStorageFailure(L"保存 Modbus 扫描结果");
         return utf8ToWide(store_.lastErrorText());
     }
     if (result.cancelled) {

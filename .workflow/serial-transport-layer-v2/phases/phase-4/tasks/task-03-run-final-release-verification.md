@@ -1,7 +1,7 @@
 # Task 03: Run Final Release Verification
 
 > Phase: 4 — Boundary and Release Closure
-> Status: Pending
+> Status: Completed
 
 ---
 
@@ -47,7 +47,7 @@ Run `scripts/build-windows-native-mingw.sh`, then build the entire `build-window
 
 ### Step 4: Run the PTY Matrix
 
-Execute `normal,reopen,timeout,cancel,stress` with a recorded summary file. Require `gate-status=passed`, `GateStatus=passed`, `Classification=local-only-release-candidate-evidence`, and `Transport=serial-adapter-contract` or its consistently updated v2 replacement.
+Execute `normal,reopen,timeout,cancel,stress,close,reopen-generation-isolation` with a recorded summary file. Require `gate-status=passed`, `GateStatus=passed`, `Classification=local-only-release-candidate-evidence`, and `Transport=serial-adapter-contract` or its consistently updated v2 replacement. Keep true stale-completion rejection in the deterministic session/queue tests.
 
 ### Step 5: Run Strict Wine and Package Verification
 
@@ -75,14 +75,14 @@ Mark the workflow complete only after every mandatory verification passes and th
 
 ## Verification
 
-- [ ] Fresh host focused and full CTest runs pass.
-- [ ] Full MinGW build and cross CTest pass.
-- [ ] PTY matrix passes all required scenarios and summary assertions.
-- [ ] Wine self-test/UI performance and package audit pass.
-- [ ] Package size/import/forbidden-runtime/file-set/SHA256 checks pass.
-- [ ] Boundary, docs, forbidden-symbol, and diff checks pass.
-- [ ] Required GitHub Actions runs pass and their evidence is recorded.
-- [ ] Completion report distinguishes automated evidence from optional hardware coverage.
+- [x] Fresh host focused and full CTest runs pass.
+- [x] Full MinGW build and cross CTest pass.
+- [x] PTY matrix passes all required scenarios and summary assertions.
+- [x] Wine self-test/UI performance and package audit pass.
+- [x] Package size/import/forbidden-runtime/file-set/SHA256 checks pass.
+- [x] Boundary, docs, forbidden-symbol, and diff checks pass.
+- [x] Required GitHub Actions runs pass and their evidence is recorded.
+- [x] Completion report distinguishes automated evidence from optional hardware coverage.
 
 **Test command:**
 
@@ -93,7 +93,7 @@ ctest --test-dir /tmp/svm-transport-v2-final --output-on-failure
 scripts/build-windows-native-mingw.sh
 cmake --build build-windows-native-mingw --parallel 1
 ctest --test-dir build-windows-native-mingw --output-on-failure
-SVM_SERIAL_LOOPBACK_SCENARIOS=normal,reopen,timeout,cancel,stress SVM_SERIAL_LOOPBACK_SUMMARY=artifacts/local/serial-pty-matrix-summary.txt python3 scripts/run-windows-native-serial-pty-loopback.py
+SVM_SERIAL_LOOPBACK_SCENARIOS=normal,reopen,timeout,cancel,stress,close,reopen-generation-isolation SVM_SERIAL_LOOPBACK_SUMMARY=artifacts/local/serial-pty-matrix-summary.txt python3 scripts/run-windows-native-serial-pty-loopback.py
 bash scripts/package-windows-native-mingw.sh
 python3 scripts/check-transport-boundaries.py
 python3 scripts/check-docs-artifact-consistency.py

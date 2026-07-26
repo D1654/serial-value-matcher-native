@@ -1,7 +1,7 @@
 # Phase 2: Win32 Session and Caller Migration
 
 > Parent: [Project Plan](../../project-plan.md)
-> Status: Pending
+> Status: Completed
 
 ---
 
@@ -11,8 +11,8 @@ Create the sole Win32 HANDLE owner, migrate every in-repo caller, and remove the
 
 ## Prerequisites
 
-- [ ] Phase 1 contracts and focused tests are complete.
-- [ ] The current Win32 serial, reconnect, UI-state, command, and RTU tests pass under MinGW/Windows.
+- [x] Phase 1 contracts and focused tests are complete.
+- [x] The current Win32 serial, reconnect, UI-state, command, and RTU tests pass under MinGW/Windows.
 
 ## Libraries & Dependencies
 
@@ -33,17 +33,17 @@ Create the sole Win32 HANDLE owner, migrate every in-repo caller, and remove the
 
 ## Deliverables
 
-- [ ] `Win32SerialSession` is the only concrete owner of the active COM HANDLE.
-- [ ] Main-window, RTU, and Modbus paths use session/capability contracts and typed results.
-- [ ] Pending UI writes are matched by `(generation, requestId)`.
-- [ ] The broad facade, old concrete port files, and all forwarding aliases are absent.
+- [x] `Win32SerialSession` is the only concrete owner of the active COM HANDLE.
+- [x] Main-window, RTU, and Modbus paths use session/capability contracts and typed results.
+- [x] Pending UI writes are matched by `(generation, requestId)`.
+- [x] The broad facade, old concrete port files, and all forwarding aliases are absent.
 
 ## Verification Checklist
 
-- [ ] Build all MinGW CTest targets, not only `svm-native-win32`.
-- [ ] Run native serial, reconnect, UI-state, command, RTU adapter, and Modbus tests.
-- [ ] Run `rg` checks proving `SerialTransport`, `Win32SerialPort`, and `lastErrorText` transport decisions are gone.
-- [ ] Confirm UI ownership policy remains separate from native HANDLE ownership.
+- [x] Build all MinGW CTest targets, not only `svm-native-win32`.
+- [x] Run native serial, reconnect, UI-state, command, RTU adapter, and Modbus tests.
+- [x] Run `rg` checks proving `SerialTransport`, `Win32SerialPort`, and `lastErrorText` transport decisions are gone.
+- [x] Confirm UI ownership policy remains separate from native HANDLE ownership.
 
 ## Phase-Specific Risks
 

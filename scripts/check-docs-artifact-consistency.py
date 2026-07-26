@@ -14,15 +14,20 @@ UI_ARTIFACT = "windows-native-ui-screenshots"
 EXE_NAME = "svm-native-win32.exe"
 TARGET_NAME = "svm-native-win32"
 VERSION_SOURCE = "cmake/svm_version.cmake"
-SERIAL_PTY_SCENARIOS = "normal,reopen,timeout,cancel,stress,close,stale"
+SERIAL_PTY_SCENARIOS = "normal,reopen,timeout,cancel,stress,close,reopen-generation-isolation"
 SERIAL_PTY_SEPARATOR_PATTERN = r"\s*[,/、，]\s*"
 OBSOLETE_SERIAL_PTY_PATTERN = re.compile(
     rf"normal{SERIAL_PTY_SEPARATOR_PATTERN}reopen"
     rf"{SERIAL_PTY_SEPARATOR_PATTERN}timeout"
     rf"{SERIAL_PTY_SEPARATOR_PATTERN}cancel"
     rf"{SERIAL_PTY_SEPARATOR_PATTERN}stress"
-    rf"(?!{SERIAL_PTY_SEPARATOR_PATTERN}close{SERIAL_PTY_SEPARATOR_PATTERN}stale)",
+    rf"(?!{SERIAL_PTY_SEPARATOR_PATTERN}close"
+    rf"{SERIAL_PTY_SEPARATOR_PATTERN}reopen-generation-isolation)",
     re.IGNORECASE,
+)
+OBSOLETE_SERIAL_PTY_CONTROL_TERMS = (
+    "SVM_SERIAL_LOOPBACK_STALE_WAIT_MS",
+    "SVM_NATIVE_SERIAL_LOOPBACK_STALE_WAIT_MS",
 )
 
 PACKAGE_WORKFLOW = ".github/workflows/windows-native-package.yml"
@@ -54,6 +59,7 @@ REQUIRED_FILES = [
     "scripts/check-transport-boundaries.py",
     "scripts/inspect-windows-package.py",
     "scripts/inspect-windows-package.ps1",
+    "tests/inspect_windows_package_tests.py",
     "scripts/capture-windows-native-ui.ps1",
     "scripts/capture-windows-native-ui-wine.sh",
     *ACTIVE_DOCS,
@@ -62,6 +68,8 @@ REQUIRED_FILES = [
 
 PACKAGE_WORKFLOW_TERMS = [
     "PACKAGE_NAME: SerialValueMatcherNative-win32-native-x64",
+    "  push:\n    branches:\n      - main\n  pull_request:",
+    "timeout-minutes: 20",
     "ctest --test-dir $env:BUILD_DIR --output-on-failure -C Release --no-tests=error",
     "--self-test",
     "--ui-perf-test",
@@ -83,7 +91,7 @@ PACKAGE_WORKFLOW_TERMS = [
     "CiExecutesPtyMatrix=no",
     f"ExpectedScenarios={SERIAL_PTY_SCENARIOS}",
     f"LocalCommand=SVM_SERIAL_LOOPBACK_SCENARIOS={SERIAL_PTY_SCENARIOS}",
-    "TransportV2Coverage=queue,exactly-once,typed-errors,generation,pty-faults",
+    "TransportV2Coverage=queue,exactly-once,typed-errors,generation,synthetic-faults",
     "serial_write_queue_tests",
     "serial_session_contract_tests",
     "native_modbus_transport_adapter_tests",
@@ -102,8 +110,12 @@ PACKAGE_WORKFLOW_TERMS = [
 
 UI_WORKFLOW_TERMS = [
     "name: windows-native-ui-screenshots",
+    "  push:\n    branches:\n      - main\n  pull_request:",
+    "EVIDENCE_GITHUB_SHA: ${{ github.sha }}",
+    "EVIDENCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}",
+    "timeout-minutes: 20",
     "ctest --test-dir $env:BUILD_DIR --output-on-failure -C Release --no-tests=error",
-    "--self-test",
+    ".\\scripts\\capture-windows-native-ui.ps1",
     "--ui-perf-test",
     "capture-status.txt",
     "self-test.log",
@@ -118,6 +130,11 @@ UI_WORKFLOW_TERMS = [
     "artifact-url",
     "artifact-digest",
     "GateStatus=passed",
+    "GitHubSha=$env:EVIDENCE_GITHUB_SHA",
+    "GitHubHeadSha=$env:EVIDENCE_HEAD_SHA",
+    "CheckedOutSha=$checkedOutSha",
+    "Assert-FileHasExactLine",
+    'Assert-FileHasExactLine $uiSummary "CheckedOutSha=$env:EVIDENCE_GITHUB_SHA"',
     '"scripts/run-windows-native-serial-pty-loopback.py"',
     '"src/win32/**"',
     '"src/transport/**"',
@@ -137,6 +154,12 @@ CMAKE_TRANSPORT_TERMS = [
     "add_test(NAME native_reconnect_state_tests",
     "add_test(NAME native_win32_serial_tests",
     "add_test(NAME native_win32_serial_loopback_tests",
+    "NAME inspect_windows_package_tests",
+    "SKIP_RETURN_CODE 77",
+    "get_property(svm_all_tests DIRECTORY PROPERTY TESTS)",
+    "PROPERTIES TIMEOUT 30",
+    "PROPERTIES TIMEOUT 60",
+    "TIMEOUT 120",
     "NAME transport_boundary_tests",
     "NAME transport_boundary_self_tests",
     "scripts/check-transport-boundaries.py",
@@ -193,6 +216,10 @@ REQUIRED_DOC_TERMS = {
         "native-ctest.log",
         "phase-2-backend-regression.txt",
         "ui-evidence-summary.txt",
+        "GitHubSha",
+        "GitHubHeadSha",
+        "CheckedOutSha",
+        "timeout-minutes: 20",
         "serial-pty-matrix-summary.txt",
         "if-no-files-found: error",
         "artifact-digest",
@@ -204,6 +231,8 @@ REQUIRED_DOC_TERMS = {
         "package",
         "docs consistency",
         "transport v2 未实现 Gray-code decoding",
+        "inspect_windows_package_tests",
+        "CRLF/LF",
     ],
     "docs/架构说明.md": [
         "SerialSession",
@@ -221,6 +250,9 @@ REQUIRED_DOC_TERMS = {
         "phase-2-backend-regression.txt",
         "serial-pty-matrix-summary.txt",
         "ui-evidence-summary.txt",
+        "GitHubSha",
+        "GitHubHeadSha",
+        "CheckedOutSha",
         "if-no-files-found: error",
         "artifact-digest",
         "Unexpected DLL files",
@@ -229,6 +261,19 @@ REQUIRED_DOC_TERMS = {
         "回滚",
         "重新发布",
         "Gate status: passed",
+    ],
+    "docs/Windows原生UI验证.md": [
+        "GitHubSha",
+        "GitHubHeadSha",
+        "CheckedOutSha",
+        "main",
+    ],
+    "docs/Windows发布说明.md": [
+        UI_WORKFLOW,
+        "GitHubSha",
+        "GitHubHeadSha",
+        "CheckedOutSha",
+        "三个 SHA 都与待发布提交完全一致",
     ],
     "docs/故障排查.md": [
         PACKAGE_ARTIFACT,
@@ -367,6 +412,151 @@ def check_workflow_terms(root: Path, failures: list[str]) -> None:
     check_terms(ui_text, UI_WORKFLOW_TERMS, UI_WORKFLOW, failures)
 
 
+def check_release_paths_fail_closed(root: Path, failures: list[str]) -> None:
+    mingw_packager = read_text(root / "scripts/package-windows-native-mingw.sh")
+    windows_packager = read_text(root / "scripts/package-windows-native.ps1")
+    package_inspector = read_text(root / "scripts/inspect-windows-package.py")
+    package_inspector_tests = read_text(root / "tests/inspect_windows_package_tests.py")
+    ui_capture = read_text(root / "scripts/capture-windows-native-ui.ps1")
+    wine_ui_capture = read_text(root / "scripts/capture-windows-native-ui-wine.sh")
+    package_workflow = read_text(root / PACKAGE_WORKFLOW)
+    ui_workflow = read_text(root / UI_WORKFLOW)
+
+    check_terms(
+        mingw_packager,
+        [
+            'require_package_name "$package_name"',
+            '^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$',
+            'package_root="$(cd "$package_root" && pwd -P)"',
+            'rm -rf -- "$stage_dir"',
+        ],
+        "scripts/package-windows-native-mingw.sh",
+        failures,
+    )
+    check_terms(
+        windows_packager,
+        [
+            '$cmakePath = Require-Command "cmake"',
+            "$buildExitCode = $LASTEXITCODE",
+            "if ($buildExitCode -ne 0)",
+            "Test-Path -LiteralPath $exePath -PathType Leaf",
+        ],
+        "scripts/package-windows-native.ps1",
+        failures,
+    )
+    if '(Join-Path $buildPath "svm-native-win32.exe")' in windows_packager:
+        add_failure(
+            failures,
+            "scripts/package-windows-native.ps1",
+            "standalone packager retains the stale build-root executable fallback",
+        )
+
+    check_terms(
+        package_inspector,
+        [
+            "NORMALIZED_DOCUMENT_SUFFIXES",
+            "normalized_document_text",
+            'errors="backslashreplace"',
+            "write_summary(summary_path, summary)",
+        ],
+        "scripts/inspect-windows-package.py",
+        failures,
+    )
+    check_terms(
+        package_inspector_tests,
+        [
+            "zipfile.ZipFile",
+            "docs/设备说明.md",
+            "utf8_safe_text",
+            "Package documentation file set:\\n  passed",
+        ],
+        "tests/inspect_windows_package_tests.py",
+        failures,
+    )
+
+    check_terms(
+        ui_capture,
+        [
+            "$preservedLogNames = @()",
+            'Test-LogHasExactLine -Path $selfTestLog -Expected "ok"',
+            'source=current-run log=self-test.log',
+        ],
+        "scripts/capture-windows-native-ui.ps1",
+        failures,
+    )
+    if "preexisting-log=self-test.log" in ui_capture:
+        add_failure(
+            failures,
+            "scripts/capture-windows-native-ui.ps1",
+            "UI capture still accepts a self-test log from an earlier executable",
+        )
+    check_terms(
+        wine_ui_capture,
+        [
+            "trap finalize_ui_evidence EXIT",
+            "local exit_code=$?",
+            'add_capture_status "capture" "FAIL" "exit-code=$exit_code"',
+            'grep -Fxq "GateStatus=passed"',
+            'exit "$exit_code"',
+        ],
+        "scripts/capture-windows-native-ui-wine.sh",
+        failures,
+    )
+    cleanup_index = wine_ui_capture.find("rm -f --")
+    status_init_index = wine_ui_capture.find('\n: >"$output_dir/capture-status.txt"\n')
+    cleanup_block = (
+        wine_ui_capture[cleanup_index:status_init_index]
+        if 0 <= cleanup_index < status_init_index
+        else ""
+    )
+    if '"$output_dir"/ui-evidence-summary.txt' not in cleanup_block:
+        add_failure(
+            failures,
+            "scripts/capture-windows-native-ui-wine.sh",
+            "startup cleanup does not remove the previous UI evidence summary",
+        )
+    trap_index = wine_ui_capture.find("trap finalize_ui_evidence EXIT")
+    prerequisite_index = wine_ui_capture.find("\nrequire_command wine\n")
+    if trap_index < 0 or prerequisite_index < 0 or trap_index > prerequisite_index:
+        add_failure(
+            failures,
+            "scripts/capture-windows-native-ui-wine.sh",
+            "failure-summary trap is not installed before prerequisite checks",
+        )
+    if wine_ui_capture.count("write_ui_evidence_summary") != 2:
+        add_failure(
+            failures,
+            "scripts/capture-windows-native-ui-wine.sh",
+            "UI evidence summary must be written only by the EXIT finalizer",
+        )
+
+    main_push_block = "  push:\n    branches:\n      - main\n  pull_request:"
+    if main_push_block not in ui_workflow:
+        add_failure(
+            failures,
+            UI_WORKFLOW,
+            "UI evidence is not generated for every main-branch push",
+        )
+    check_terms(
+        ui_workflow,
+        [
+            "$checkedOutSha = (& git rev-parse HEAD).Trim()",
+            "if ($checkedOutSha -cne $env:EVIDENCE_GITHUB_SHA)",
+            'Assert-FileHasExactLine $uiSummary "GitHubSha=$env:EVIDENCE_GITHUB_SHA"',
+            'Assert-FileHasExactLine $uiSummary "GitHubHeadSha=$env:EVIDENCE_HEAD_SHA"',
+            'Assert-FileHasExactLine $uiSummary "CheckedOutSha=$env:EVIDENCE_GITHUB_SHA"',
+        ],
+        UI_WORKFLOW,
+        failures,
+    )
+    if "pty-faults" in package_workflow:
+        add_failure(
+            failures,
+            PACKAGE_WORKFLOW,
+            "hosted coverage still claims PTY faults that are not executed in CI",
+        )
+
+
 def check_transport_release_gate_terms(root: Path, failures: list[str]) -> None:
     check_terms(read_text(root / "CMakeLists.txt"), CMAKE_TRANSPORT_TERMS, "CMakeLists.txt", failures)
     check_terms(
@@ -389,11 +579,34 @@ def check_doc_required_terms(root: Path, failures: list[str]) -> None:
 
 
 def check_pty_matrix_docs(root: Path, failures: list[str]) -> None:
-    for relative in ACTIVE_DOCS:
+    implementation_requirements = {
+        "scripts/run-windows-native-serial-pty-loopback.py": [
+            '"reopen-generation-isolation"',
+            "SVM_SERIAL_LOOPBACK_GENERATION_ISOLATION_WAIT_MS",
+            "SVM_NATIVE_SERIAL_LOOPBACK_GENERATION_ISOLATION_WAIT_MS",
+        ],
+        "tests/native_win32_serial_loopback_tests.cpp": [
+            'scenario != "reopen-generation-isolation"',
+            'scenario == "reopen-generation-isolation"',
+            "SVM_NATIVE_SERIAL_LOOPBACK_GENERATION_ISOLATION_WAIT_MS",
+        ],
+    }
+    sources = [
+        PACKAGE_WORKFLOW,
+        *implementation_requirements,
+        *ACTIVE_DOCS,
+    ]
+    for relative in sources:
         text = read_text(root / relative)
+        check_terms(text, implementation_requirements.get(relative, []), relative, failures)
+        if relative in implementation_requirements and '"stale"' in text:
+            add_failure(failures, relative, "retains the obsolete stale PTY scenario alias")
         for line_no, line in enumerate(text.splitlines(), start=1):
             if OBSOLETE_SERIAL_PTY_PATTERN.search(line):
-                add_failure(failures, relative, "references the obsolete five-scenario PTY matrix", line_no)
+                add_failure(failures, relative, "references an obsolete PTY scenario matrix", line_no)
+        for term in OBSOLETE_SERIAL_PTY_CONTROL_TERMS:
+            if term in text:
+                add_failure(failures, relative, f"references obsolete PTY control: {term}")
 
 
 def load_docs(root: Path, negative_smoke: bool) -> list[DocText]:
@@ -559,6 +772,7 @@ def main() -> int:
 
     docs = load_docs(root, args.negative_smoke)
     check_workflow_terms(root, failures)
+    check_release_paths_fail_closed(root, failures)
     check_transport_release_gate_terms(root, failures)
     check_doc_required_terms(root, failures)
     check_pty_matrix_docs(root, failures)

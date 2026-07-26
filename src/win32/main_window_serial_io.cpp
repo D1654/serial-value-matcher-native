@@ -31,70 +31,56 @@ void NativeMainWindow::updateSerialWriteQueueStatus() {
     serialIoState_.updateWriteQueueSnapshot(serialWriteScheduler_.writeQueueSnapshot());
 }
 
-void NativeMainWindow::clearPendingSerialWrites(bool emitUiEvidence) {
-    std::uint64_t completedTxBytes = 0;
-    for (const auto& result : serialWriteScheduler_.takeCompletedWrites()) {
-        if (!result.terminal()
-            || !result.operation.assigned()
-            || result.operation.kind != svm::transport::SerialOperationKind::Write) {
-            continue;
-        }
-
+void NativeMainWindow::settleClosingSerialWrites(
+    svm::transport::SerialSessionGeneration closingGeneration,
+    bool emitUiEvidence) {
+    for (const svm::transport::SerialTerminalResult& result : serialWriteScheduler_.takeCompletedWrites()) {
         const auto found = std::find_if(
             pendingSerialWrites_.begin(),
             pendingSerialWrites_.end(),
             [&result](const NativePendingSerialWrite& pending) {
                 return pending.key.matches(result.operation);
             });
-        if (result.succeeded() && found != pendingSerialWrites_.end()) {
-            NativePendingSerialWrite pending = std::move(*found);
-            pendingSerialWrites_.erase(found);
-            saveRawEvent(result, pending.payload);
-            if (pending.source == NativePendingSerialWriteSource::Manual
-                && pending.saveHistory
-                && store_.isOpen()) {
-                store_.saveSendHistory(nativeMakeSendHistoryEntry(
-                    wideToUtf8(pending.manualText),
-                    pending.payloadMode,
-                    pending.lineEnding,
-                    pending.textCodePage,
-                    nativeUtcTimestampText()));
-                if (emitUiEvidence) {
-                    refreshSendHistory();
-                }
-            }
-            if (emitUiEvidence) {
-                appendPayloadLog(NativeLogKind::Tx, pending.payload, result);
-            }
-            completedTxBytes += static_cast<std::uint64_t>(result.byteCount);
+        if (found == pendingSerialWrites_.end()) {
             continue;
         }
-        if (found != pendingSerialWrites_.end()) {
-            pendingSerialWrites_.erase(found);
-        }
-
-        const std::wstring message = result.succeeded()
-            ? std::wstring(L"串口写入完成。")
-            : serialOperationErrorMessage(result, "结算串口写入");
-        if (emitUiEvidence) {
-            appendSerialOperationLog(
-                result.succeeded() || result.status == svm::transport::SerialOperationStatus::Cancelled
-                    ? NativeLogKind::System
-                    : NativeLogKind::Error,
-                message,
-                result);
-        } else {
-            saveRawEvent(result, {});
+        NativePendingSerialWrite pending = std::move(*found);
+        pendingSerialWrites_.erase(found);
+        if (nativeSerialWriteShouldPublishOnClose(pending.key, result, closingGeneration)) {
+            publishSuccessfulSerialWrite(result, pending, emitUiEvidence);
         }
     }
     pendingSerialWrites_.clear();
-    if (completedTxBytes != 0) {
-        statusCountersState_.addTxBytes(completedTxBytes);
-        if (emitUiEvidence) {
-            updateStatusSegments();
-        }
-    }
     updateSerialWriteQueueStatus();
+}
+
+void NativeMainWindow::publishSuccessfulSerialWrite(
+    const svm::transport::SerialTerminalResult& result,
+    const NativePendingSerialWrite& pending,
+    bool emitUiEvidence) {
+    saveRawEvent(result, pending.payload);
+    if (emitUiEvidence) {
+        appendPayloadLog(NativeLogKind::Tx, pending.payload, result);
+    }
+    statusCountersState_.addTxBytes(static_cast<std::uint64_t>(result.byteCount));
+    if (emitUiEvidence) {
+        updateStatusSegments();
+    }
+
+    if (pending.source != NativePendingSerialWriteSource::Manual || !pending.saveHistory) {
+        return;
+    }
+    native_storage::SendHistoryEntry history = nativeMakeSendHistoryEntry(
+        wideToUtf8(pending.manualText),
+        pending.payloadMode,
+        pending.lineEnding,
+        pending.textCodePage,
+        nativeUtcTimestampText());
+    if (!store_.isOpen() || !store_.saveSendHistory(history)) {
+        reportStorageFailure(L"保存发送历史");
+    } else if (emitUiEvidence) {
+        refreshSendHistory();
+    }
 }
 
 void NativeMainWindow::drainSerialWriteResults() {
@@ -105,6 +91,7 @@ void NativeMainWindow::drainSerialWriteResults() {
         return;
     }
 
+    std::optional<std::wstring> deferredFailureMessage;
     for (const auto& result : results) {
         if (!result.terminal()
             || !result.operation.assigned()
@@ -118,7 +105,6 @@ void NativeMainWindow::drainSerialWriteResults() {
                 return pending.key.matches(result.operation);
             });
         if (found == pendingSerialWrites_.end()) {
-            saveRawEvent(result, {});
             continue;
         }
 
@@ -136,7 +122,6 @@ void NativeMainWindow::drainSerialWriteResults() {
                     ? queueSnapshot->generation
                     : svm::transport::kUnassignedSerialSessionGeneration);
         if (decision == NativeSerialWriteCompletionDecision::Ignore) {
-            saveRawEvent(result, {});
             continue;
         }
 
@@ -150,31 +135,16 @@ void NativeMainWindow::drainSerialWriteResults() {
         if (decision == NativeSerialWriteCompletionDecision::Failed) {
             const std::wstring message = serialOperationErrorMessage(result, "写入串口");
             appendSerialOperationLog(NativeLogKind::Error, message, result);
-            if (pending.source == NativePendingSerialWriteSource::File && fileSend_.active()) {
-                stopFileSend(message, true);
-            } else {
-                setStatus(message);
+            setStatus(message);
+            if (!deferredFailureMessage.has_value()) {
+                deferredFailureMessage = message;
             }
-            handleSerialFailure(wideToUtf8(message), false);
             continue;
         }
 
-        saveRawEvent(result, pending.payload);
-        appendPayloadLog(NativeLogKind::Tx, pending.payload, result);
-        statusCountersState_.addTxBytes(static_cast<std::uint64_t>(result.byteCount));
-        updateStatusSegments();
+        publishSuccessfulSerialWrite(result, pending, true);
 
         if (pending.source == NativePendingSerialWriteSource::Manual) {
-            if (pending.saveHistory && store_.isOpen()) {
-                native_storage::SendHistoryEntry history = nativeMakeSendHistoryEntry(
-                    wideToUtf8(pending.manualText),
-                    pending.payloadMode,
-                    pending.lineEnding,
-                    pending.textCodePage,
-                    nativeUtcTimestampText());
-                store_.saveSendHistory(history);
-                refreshSendHistory();
-            }
             setStatus(uiString(T::SentPrefix) + std::to_wstring(result.byteCount) + uiString(T::BytesSuffix));
             continue;
         }
@@ -203,6 +173,9 @@ void NativeMainWindow::drainSerialWriteResults() {
     }
 
     updateSerialWriteQueueStatus();
+    if (deferredFailureMessage.has_value()) {
+        handleSerialFailure(wideToUtf8(*deferredFailureMessage), false);
+    }
 }
 
 void NativeMainWindow::pollSerial() {
@@ -276,7 +249,7 @@ void NativeMainWindow::handleSerialFailure(const std::string& message, bool appe
     timedSendConfirmed_ = false;
     stopFileSend({}, true);
     const svm::transport::SerialOperationResult closeResult = serialLifecycle_.close();
-    clearPendingSerialWrites(true);
+    settleClosingSerialWrites(snapshot.generation, true);
     appendSerialOperationLog(
         closeResult.succeeded() ? NativeLogKind::System : NativeLogKind::Error,
         closeResult.succeeded()

@@ -18,31 +18,8 @@ capture_fast_frames="${SVM_WINE_UI_CAPTURE_FAST_FRAMES:-1}"
 fast_frame_delay="${SVM_WINE_UI_FAST_FRAME_DELAY:-0.15}"
 capture_resize_sweep="${SVM_WINE_UI_CAPTURE_RESIZE_SWEEP:-1}"
 
-require_command() {
-    local name="$1"
-    if ! command -v "$name" >/dev/null 2>&1; then
-        echo "缺少命令：$name" >&2
-        exit 2
-    fi
-}
-
-require_command wine
-require_command winepath
-require_command wineserver
-require_command xvfb-run
-require_command xdotool
-require_command xwd
-require_command convert
-require_command compare
-
-if [[ ! -f "$exe_path" ]]; then
-    echo "未找到 svm-native-win32.exe：$exe_path" >&2
-    exit 3
-fi
-
-mkdir -p "$output_dir" "$wine_prefix" "$xdg_runtime_dir"
-chmod 700 "$xdg_runtime_dir"
-rm -f \
+mkdir -p "$output_dir"
+rm -f -- \
     "$output_dir"/root.png \
     "$output_dir"/tab-*.png \
     "$output_dir"/compact-tab-*.png \
@@ -51,16 +28,13 @@ rm -f \
     "$output_dir"/self-test.log \
     "$output_dir"/ui-perf-test.log \
     "$output_dir"/capture-status.txt \
+    "$output_dir"/ui-evidence-summary.txt \
     "$output_dir"/app.stdout \
     "$output_dir"/app.stderr \
     "$output_dir"/window-info.txt \
     "$output_dir"/window.ids \
     "$output_dir"/tab-clicks.txt \
     "$output_dir"/xdotool.err
-
-export XDG_RUNTIME_DIR="$xdg_runtime_dir"
-export WINEPREFIX="$wine_prefix"
-export WINEARCH=win64
 
 : >"$output_dir/capture-status.txt"
 
@@ -142,6 +116,57 @@ write_ui_evidence_summary() {
         echo "GateStatus=$gate_status"
     } >"$summary_file"
 }
+
+finalize_ui_evidence() {
+    local exit_code=$?
+    trap - EXIT
+    set +e
+
+    if [[ "$exit_code" -ne 0 ]]; then
+        add_capture_status "capture" "FAIL" "exit-code=$exit_code"
+    fi
+
+    write_ui_evidence_summary
+    local summary_exit_code=$?
+    if [[ "$exit_code" -eq 0 && "$summary_exit_code" -ne 0 ]]; then
+        exit_code="$summary_exit_code"
+    fi
+    if [[ "$exit_code" -eq 0 ]] && ! grep -Fxq "GateStatus=passed" "$output_dir/ui-evidence-summary.txt" 2>/dev/null; then
+        exit_code=1
+    fi
+
+    exit "$exit_code"
+}
+trap finalize_ui_evidence EXIT
+
+require_command() {
+    local name="$1"
+    if ! command -v "$name" >/dev/null 2>&1; then
+        echo "缺少命令：$name" >&2
+        exit 2
+    fi
+}
+
+require_command wine
+require_command winepath
+require_command wineserver
+require_command xvfb-run
+require_command xdotool
+require_command xwd
+require_command convert
+require_command compare
+
+if [[ ! -f "$exe_path" ]]; then
+    echo "未找到 svm-native-win32.exe：$exe_path" >&2
+    exit 3
+fi
+
+mkdir -p "$wine_prefix" "$xdg_runtime_dir"
+chmod 700 "$xdg_runtime_dir"
+
+export XDG_RUNTIME_DIR="$xdg_runtime_dir"
+export WINEPREFIX="$wine_prefix"
+export WINEARCH=win64
 
 wineboot -u >"$output_dir/wineboot.log" 2>&1
 {
@@ -544,7 +569,6 @@ printf "%s\n" "PASS capture-complete" >> "$output_dir/capture-status.txt"
 ' bash "$exe_path" "$output_dir" "$window_name" "$stabilize_seconds" "$capture_tabs" "$capture_compact" "$capture_fast_frames" "$fast_frame_delay" "$ui_perf_log_windows" "$capture_resize_sweep"
 
 echo "Wine UI 截图完成：$output_dir/root.png"
-write_ui_evidence_summary
 echo "捕获状态：$output_dir/capture-status.txt"
 echo "窗口信息：$output_dir/window-info.txt"
 echo "self-test 日志：$output_dir/self-test.log"

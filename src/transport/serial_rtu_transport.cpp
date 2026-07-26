@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <optional>
 #include <thread>
 #include <utility>
 
@@ -13,23 +14,32 @@ constexpr const char* kEmptyRequestMessage = "Modbus 请求为空。";
 constexpr const char* kPartialWriteMessage = "Modbus 请求发送不完整。";
 constexpr const char* kTimeoutMessage = "等待 Modbus 响应超时。";
 constexpr const char* kSessionChangedMessage = "串口会话已变化，Modbus 扫描已停止。";
+constexpr std::size_t kMinimumRtuFrameBytes = 4;
+constexpr std::size_t kMaxRtuFrameBytes = 260;
 
-std::size_t expectedNormalResponseLength(core::ByteSpan requestFrame) {
-    if (requestFrame.size() >= 6) {
-        const std::size_t quantity = (static_cast<std::size_t>(requestFrame[4]) << 8U)
-            | static_cast<std::size_t>(requestFrame[5]);
-        if (quantity > 0 && quantity <= 125) {
-            return 5 + quantity * 2;
+std::optional<std::size_t> responseFrameLength(
+    const core::ByteBuffer& response,
+    std::size_t& nextCandidateBytes) {
+    if (response.size() < 2) {
+        return std::nullopt;
+    }
+    if ((response[1] & 0x80U) != 0) {
+        return 5;
+    }
+    if (response[1] == 0x03 || response[1] == 0x04) {
+        if (response.size() < 3) {
+            return std::nullopt;
         }
+        return 5 + static_cast<std::size_t>(response[2]);
     }
-    return 5;
-}
-
-bool responseLooksComplete(const core::ByteBuffer& response, std::size_t expectedNormalBytes) {
-    if (response.size() >= 5 && (response[1] & 0x80U) != 0) {
-        return true;
+    while (nextCandidateBytes <= response.size()) {
+        const core::ByteSpan candidate(response.data(), nextCandidateBytes);
+        if (core::modbus::validateRtuFrame(candidate).ok) {
+            return nextCandidateBytes;
+        }
+        ++nextCandidateBytes;
     }
-    return response.size() >= expectedNormalBytes;
+    return std::nullopt;
 }
 
 } // namespace
@@ -66,6 +76,18 @@ core::modbus::RtuTransportExchange SerialRtuTransport::exchange(core::ByteSpan r
     const SerialTerminalResult writeResult = byteStream_.writeBytes(request, deadline);
     if (!resultMatchesGeneration(writeResult, SerialOperationKind::Write)) {
         markGenerationChanged(exchange);
+        return exchange;
+    }
+    if (cancellationRequested()) {
+        if (options_.onIoEvidence) {
+            const std::size_t transmittedBytes = std::min(writeResult.byteCount, request.size());
+            options_.onIoEvidence(
+                writeResult.succeeded()
+                    ? core::ByteBuffer(request.begin(), request.begin() + transmittedBytes)
+                    : core::ByteBuffer{},
+                writeResult);
+        }
+        markCancelled(exchange);
         return exchange;
     }
     if (!generationCurrent()
@@ -117,8 +139,9 @@ core::modbus::RtuTransportExchange SerialRtuTransport::exchange(core::ByteSpan r
         options_.onIoEvidence(request, writeResult);
     }
 
-    const std::size_t expectedNormalBytes = expectedNormalResponseLength(requestFrame);
     core::ByteBuffer response;
+    std::optional<std::size_t> completeFrameBytes;
+    std::size_t nextCandidateBytes = kMinimumRtuFrameBytes;
     bool discardResponse = false;
     exchange.status = core::modbus::RtuTransportExchangeStatus::Timeout;
 
@@ -133,10 +156,20 @@ core::modbus::RtuTransportExchange SerialRtuTransport::exchange(core::ByteSpan r
             break;
         }
 
-        SerialReadResult read = byteStream_.readAvailable(260, deadline);
+        const std::size_t remainingFrameBytes = kMaxRtuFrameBytes - response.size();
+        SerialReadResult read = byteStream_.readAvailable(remainingFrameBytes, deadline);
         if (!resultMatchesGeneration(read.operation, SerialOperationKind::Read)) {
             discardResponse = true;
             markGenerationChanged(exchange);
+            break;
+        }
+        if (cancellationRequested()) {
+            if (options_.onIoEvidence) {
+                options_.onIoEvidence(
+                    read.operation.succeeded() ? read.bytes : core::ByteBuffer{},
+                    read.operation);
+            }
+            markCancelled(exchange);
             break;
         }
         if (!generationCurrent()
@@ -187,8 +220,16 @@ core::modbus::RtuTransportExchange SerialRtuTransport::exchange(core::ByteSpan r
         if (options_.onIoEvidence) {
             options_.onIoEvidence(read.bytes, read.operation);
         }
-        response.insert(response.end(), read.bytes.begin(), read.bytes.end());
-        if (responseLooksComplete(response, expectedNormalBytes)) {
+        const std::size_t acceptedBytes = std::min(read.bytes.size(), remainingFrameBytes);
+        response.insert(response.end(), read.bytes.begin(), read.bytes.begin() + acceptedBytes);
+        const std::optional<std::size_t> frameBytes = responseFrameLength(response, nextCandidateBytes);
+        if (frameBytes.has_value() && response.size() >= *frameBytes) {
+            completeFrameBytes = frameBytes;
+            exchange.status = core::modbus::RtuTransportExchangeStatus::Success;
+            break;
+        }
+        if (response.size() == kMaxRtuFrameBytes) {
+            completeFrameBytes = response.size();
             exchange.status = core::modbus::RtuTransportExchangeStatus::Success;
             break;
         }
@@ -203,6 +244,9 @@ core::modbus::RtuTransportExchange SerialRtuTransport::exchange(core::ByteSpan r
     }
     if (discardResponse) {
         response.clear();
+    }
+    if (completeFrameBytes.has_value() && response.size() > *completeFrameBytes) {
+        response.resize(*completeFrameBytes);
     }
     exchange.responseFrame = std::move(response);
     if (!generationCurrent()) {

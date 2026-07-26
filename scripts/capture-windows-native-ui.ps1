@@ -41,7 +41,7 @@ if (-not $ExePath -or -not (Test-Path $ExePath)) {
 
 New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
 if (Test-Path $outputPath) {
-    $preservedLogNames = @("self-test.log")
+    $preservedLogNames = @()
     if ($SkipUiPerfTest) {
         $preservedLogNames += "ui-perf-test.log"
     }
@@ -66,6 +66,18 @@ function Add-CaptureStatus {
     Add-Content -Path $captureStatusPath -Value $line -Encoding UTF8
 }
 
+function Test-LogHasExactLine {
+    param(
+        [string]$Path,
+        [string]$Expected
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $false
+    }
+    return @(Get-Content -LiteralPath $Path -Encoding UTF8) -contains $Expected
+}
+
 function Write-UiEvidenceSummary {
     $statusLines = if (Test-Path $captureStatusPath) {
         @(Get-Content -Path $captureStatusPath -Encoding UTF8)
@@ -81,6 +93,7 @@ function Write-UiEvidenceSummary {
         "PASS dpi-smoke-125",
         "PASS splitter-drag-frames",
         "PASS phase-1-ui-regression-closure",
+        "PASS self-test source=current-run",
         "PASS capture-complete"
     )
     $missingStatusTerms = @()
@@ -91,10 +104,9 @@ function Write-UiEvidenceSummary {
         }
     }
     $pngFiles = @(Get-ChildItem -Path $outputPath -Filter "*.png" -File -ErrorAction SilentlyContinue)
-    $selfTestText = if (Test-Path $selfTestLog) { Get-Content -Path $selfTestLog -Raw -Encoding UTF8 } else { "" }
     $uiPerfText = if (Test-Path $uiPerfLog) { Get-Content -Path $uiPerfLog -Raw -Encoding UTF8 } else { "" }
     $hasFailStatus = $statusLines | Where-Object { $_.StartsWith("FAIL ") } | Select-Object -First 1
-    $selfTestStatus = if ($selfTestText.Contains("ok")) { "passed" } else { "missing-or-failed" }
+    $selfTestStatus = if (Test-LogHasExactLine -Path $selfTestLog -Expected "ok") { "passed" } else { "missing-or-failed" }
     $uiPerfStatus = if ($uiPerfText.Contains("ui-perf ok")) { "passed" } else { "missing-or-failed" }
     $gatePassed = $missingStatusTerms.Count -eq 0 -and
         $null -eq $hasFailStatus -and
@@ -115,27 +127,26 @@ function Write-UiEvidenceSummary {
         "SelfTestStatus=$selfTestStatus",
         "UiPerfStatus=$uiPerfStatus",
         "WindowInfoPresent=$(if (Test-Path (Join-Path $outputPath "window-info.txt")) { 'yes' } else { 'no' })",
-        "RequiredScenarios=default-window,tab-set,compact-tab-set,resize-sweep,dpi-smoke-100,dpi-smoke-125,splitter-drag-frames,phase-1-ui-regression-closure,capture-complete",
+        "RequiredScenarios=self-test,default-window,tab-set,compact-tab-set,resize-sweep,dpi-smoke-100,dpi-smoke-125,splitter-drag-frames,phase-1-ui-regression-closure,capture-complete",
         "GateStatus=$(if ($gatePassed) { 'passed' } else { 'failed' })"
     )
     $summaryLines | Set-Content -Path $uiEvidenceSummaryPath -Encoding UTF8
 }
 
-if (-not (Test-Path $selfTestLog) -or (Get-Item $selfTestLog).Length -le 0) {
-    $previousSelfTestLog = [Environment]::GetEnvironmentVariable("SVM_NATIVE_SELF_TEST_LOG", "Process")
-    [Environment]::SetEnvironmentVariable("SVM_NATIVE_SELF_TEST_LOG", $selfTestLog, "Process")
-    try {
-        Write-Host "运行 native self-test..."
-        $selfTest = Start-Process -FilePath $ExePath -ArgumentList "--self-test" -Wait -PassThru
-        if ($selfTest.ExitCode -ne 0) {
-            throw "native self-test 失败，退出码：$($selfTest.ExitCode)"
-        }
-        Add-CaptureStatus -Scenario "self-test" -Detail "log=self-test.log"
-    } finally {
-        [Environment]::SetEnvironmentVariable("SVM_NATIVE_SELF_TEST_LOG", $previousSelfTestLog, "Process")
+$previousSelfTestLog = [Environment]::GetEnvironmentVariable("SVM_NATIVE_SELF_TEST_LOG", "Process")
+[Environment]::SetEnvironmentVariable("SVM_NATIVE_SELF_TEST_LOG", $selfTestLog, "Process")
+try {
+    Write-Host "运行 native self-test..."
+    $selfTest = Start-Process -FilePath $ExePath -ArgumentList "--self-test" -Wait -PassThru
+    if ($selfTest.ExitCode -ne 0) {
+        throw "native self-test 失败，退出码：$($selfTest.ExitCode)"
     }
-} else {
-    Add-CaptureStatus -Scenario "self-test" -Detail "preexisting-log=self-test.log"
+    if (-not (Test-LogHasExactLine -Path $selfTestLog -Expected "ok")) {
+        throw "native self-test 未生成当前运行的有效 ok 日志。"
+    }
+    Add-CaptureStatus -Scenario "self-test" -Detail "source=current-run log=self-test.log"
+} finally {
+    [Environment]::SetEnvironmentVariable("SVM_NATIVE_SELF_TEST_LOG", $previousSelfTestLog, "Process")
 }
 
 if (-not $SkipUiPerfTest) {

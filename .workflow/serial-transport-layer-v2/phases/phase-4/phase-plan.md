@@ -1,7 +1,7 @@
 # Phase 4: Boundary and Release Closure
 
 > Parent: [Project Plan](../../project-plan.md)
-> Status: Pending
+> Status: Completed
 
 ---
 
@@ -11,8 +11,8 @@ Close the architecture with enforceable documentation and a complete release-evi
 
 ## Prerequisites
 
-- [ ] Phase 3 production hardening and PTY/CI gates pass.
-- [ ] No old facade symbols or files remain.
+- [x] Phase 3 production hardening and PTY/CI gates pass.
+- [x] No old facade symbols or files remain.
 
 ## Libraries & Dependencies
 
@@ -32,16 +32,16 @@ Close the architecture with enforceable documentation and a complete release-evi
 
 ## Deliverables
 
-- [ ] User/developer/architecture documentation states the future codec boundary accurately.
-- [ ] Automated architecture checks protect the neutral transport layer.
-- [ ] Completion report records every required command, result, artifact, and known hardware limitation.
+- [x] User/developer/architecture documentation states the future codec boundary accurately.
+- [x] Automated architecture checks protect the neutral transport layer.
+- [x] Completion report records every required command, result, artifact, and known hardware limitation.
 
 ## Verification Checklist
 
-- [ ] Run the new transport-boundary check through CTest.
-- [ ] Run fresh host CTest and full MinGW CTest builds.
-- [ ] Run PTY, Wine self-test/UI performance, package audit/hash, docs consistency, and diff checks.
-- [ ] Verify documentation never claims Gray code is implemented.
+- [x] Run the new transport-boundary check through CTest.
+- [x] Run fresh host CTest and full MinGW CTest builds.
+- [x] Run PTY, Wine self-test/UI performance, package audit/hash, docs consistency, and diff checks.
+- [x] Verify documentation never claims Gray code is implemented.
 
 ## Phase-Specific Risks
 

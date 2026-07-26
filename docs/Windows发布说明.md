@@ -56,7 +56,7 @@ UI capture workflow：
 .github/workflows/windows-native-ui-capture.yml
 ```
 
-该 workflow 生成 `windows-native-ui-screenshots`，必须包含 screenshot、`capture-status.txt`、`self-test.log`、`ui-perf-test.log`、`window-info.txt` 和 `ui-evidence-summary.txt`。
+该 workflow 会在每次 `main` push 自动运行并生成 `windows-native-ui-screenshots`，必须包含 screenshot、`capture-status.txt`、`self-test.log`、`ui-perf-test.log`、`window-info.txt` 和 `ui-evidence-summary.txt`。发布前必须确认摘要中的 `GitHubSha`、`GitHubHeadSha` 和 `CheckedOutSha` 都等于待发布提交。
 
 ## 包门禁
 
@@ -122,8 +122,8 @@ cmake --build build-windows-native --config Release --parallel 1
 4. 运行或等待 `windows-native-ui-capture.yml` 成功，记录 run id。
 5. 下载 package artifact，核对 zip SHA256 sidecar。
 6. 阅读 package summary，确认 `Gate status: passed`、`Unexpected DLL files: none`、`Required package files: passed`、`Package documentation file set: passed`。
-7. 阅读 UI artifact，确认 `ui-evidence-summary.txt` 为 `GateStatus=passed`，并人工查看默认窗口、标签页、紧凑标签页、resize、DPI 和分割条截图。
-8. 如果本次改动涉及串口 I/O、超时、取消、重连、批量发送或异步写队列，运行本地 PTY normal/reopen/timeout/cancel/stress/close/stale 矩阵并保存 summary。
+7. 阅读 UI artifact，确认 `ui-evidence-summary.txt` 为 `GateStatus=passed`，且 `GitHubSha`、`GitHubHeadSha`、`CheckedOutSha` 三个 SHA 都与待发布提交完全一致，再人工查看默认窗口、标签页、紧凑标签页、resize、DPI 和分割条截图。
+8. 如果本次改动涉及串口 I/O、超时、取消、重连、批量发送或异步写队列，运行本地 PTY normal/reopen/timeout/cancel/stress/close/reopen-generation-isolation 矩阵并保存 summary。
 9. 运行 `python3 scripts/check-docs-artifact-consistency.py`，确认输出 `docs consistency ok`。
 10. 创建或更新 Release，上传 zip、SHA256 sidecar、package summary；Release 正文写明 run id、SHA256、主要变更、已知边界和回滚指引。
 

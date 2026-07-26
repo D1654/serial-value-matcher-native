@@ -1,7 +1,7 @@
 # Task 01: Integrate Queue Backpressure
 
 > Phase: 3 — Production Hardening
-> Status: pending
+> Status: Completed
 
 ---
 
@@ -86,11 +86,11 @@ Confirm manual, timed, and file-send callers still receive immediate typed backp
 
 ## Verification
 
-- [ ] Focused host tests cover count/byte admission, active accounting, queue snapshots, and terminal release.
-- [ ] MinGW tests cover the same contract through the Windows session target.
-- [ ] PTY matrix remains green for normal, reopen, timeout, cancel, and stress.
-- [ ] Wine self-test and UI performance logs remain successful.
-- [ ] Package audit, size/security gates, docs consistency, and diff checks remain successful.
+- [x] Focused host tests cover count/byte admission, active accounting, queue snapshots, and terminal release.
+- [x] MinGW tests cover the same contract through the Windows session target.
+- [x] PTY matrix remains green for normal, reopen, timeout, cancel, and stress.
+- [x] Wine self-test and UI performance logs remain successful.
+- [x] Package audit, size/security gates, docs consistency, and diff checks remain successful.
 
 **Focused command:**
 ```bash

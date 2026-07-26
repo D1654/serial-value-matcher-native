@@ -1,7 +1,7 @@
 # Task 02: Guarantee Exactly-Once Completion
 
 > Phase: 3 — Production Hardening
-> Status: pending
+> Status: Completed
 
 ---
 
@@ -89,11 +89,11 @@ Assert that only the session worker performs open, close, read, write, DTR, RTS,
 
 ## Verification
 
-- [ ] Every accepted request produces one and only one terminal result.
-- [ ] Close/reconnect invalidates the old generation before the new session publishes results.
-- [ ] No old request is automatically replayed.
-- [ ] Cancellation/disconnect tests meet the deterministic target in the fake/session path.
-- [ ] Existing Windows serial and reconnect behavior remains available.
+- [x] Every accepted request produces one and only one terminal result.
+- [x] Close/reconnect invalidates the old generation before the new session publishes results.
+- [x] No old request is automatically replayed.
+- [x] Cancellation/disconnect tests meet the deterministic target in the fake/session path.
+- [x] Existing Windows serial and reconnect behavior remains available.
 
 **Focused command:**
 ```bash

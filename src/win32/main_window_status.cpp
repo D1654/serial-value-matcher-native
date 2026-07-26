@@ -9,9 +9,12 @@
 namespace svm::win32 {
 
 void NativeMainWindow::setStatus(const std::wstring& text) {
-    if (statusText_ != nullptr && cachedStatusText_ != text) {
-        SetWindowTextW(statusText_, text.c_str());
-        cachedStatusText_ = text;
+    const std::wstring displayText = storageFailureReported_
+        ? std::wstring(L"[存储异常] ") + text
+        : text;
+    if (statusText_ != nullptr && cachedStatusText_ != displayText) {
+        SetWindowTextW(statusText_, displayText.c_str());
+        cachedStatusText_ = displayText;
     }
     updateStatusSegments();
 }

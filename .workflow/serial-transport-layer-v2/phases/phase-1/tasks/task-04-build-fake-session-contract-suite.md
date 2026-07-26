@@ -1,7 +1,7 @@
 # Task 04: Build Fake Session Contract Suite
 
 > Phase: 1 — Contract Foundation
-> Status: Planned
+> Status: Completed
 
 ---
 
@@ -65,10 +65,10 @@ Rename the CMake test target and CTest registration from the broad transport-con
 
 ## Verification
 
-- [ ] Fake lifecycle and generation assertions cover every approved state and reconnect rule.
-- [ ] Typed results carry native evidence without requiring localized message parsing.
-- [ ] Close, cancel, and stale-generation cases prove exactly-once terminal settlement.
-- [ ] The test target links only neutral core code and has no Win32/UI include dependency.
+- [x] Fake lifecycle and generation assertions cover every approved state and reconnect rule.
+- [x] Typed results carry native evidence without requiring localized message parsing.
+- [x] Close, cancel, and stale-generation cases prove exactly-once terminal settlement.
+- [x] The test target links only neutral core code and has no Win32/UI include dependency.
 
 **Test command:**
 ```bash

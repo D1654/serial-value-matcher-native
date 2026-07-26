@@ -1,7 +1,7 @@
 # Task 3: Migrate Main-Window Lifecycle
 
 > Phase: 2 — Win32 Session and Caller Migration
-> Status: pending
+> Status: Completed
 
 ---
 
@@ -81,10 +81,10 @@ Build the application and run the existing native self-test plus reconnect and c
 
 ## Verification
 
-- [ ] `rg -n "CreateFile|CloseHandle|EscapeCommFunction|SetCommState|SetCommTimeouts" src/win32/main_window*.cpp` finds no direct native handle lifecycle call.
-- [ ] `rg -n "serialTransport_|Win32SerialPort" src/win32/main_window_serial.cpp src/win32/main_window_commands.cpp src/win32/main_window_storage.cpp` shows no concrete backend dependency for lifecycle decisions.
-- [ ] Connect, disconnect, DTR/RTS, hardware-flow-control, and auto-reconnect self-test paths pass.
-- [ ] The temporary facade reference, if still present, points to the same `Win32SerialSession` object and is not a second owner.
+- [x] `rg -n "CreateFile|CloseHandle|EscapeCommFunction|SetCommState|SetCommTimeouts" src/win32/main_window*.cpp` finds no direct native handle lifecycle call.
+- [x] `rg -n "serialTransport_|Win32SerialPort" src/win32/main_window_serial.cpp src/win32/main_window_commands.cpp src/win32/main_window_storage.cpp` shows no concrete backend dependency for lifecycle decisions.
+- [x] Connect, disconnect, DTR/RTS, hardware-flow-control, and auto-reconnect self-test paths pass.
+- [x] The temporary facade reference, if still present, points to the same `Win32SerialSession` object and is not a second owner.
 
 **Test command:**
 

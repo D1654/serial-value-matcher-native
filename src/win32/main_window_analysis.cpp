@@ -11,11 +11,14 @@
 #include "svm_version_resource.h"
 
 #include <algorithm>
+#include <atomic>
 #include <commdlg.h>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <optional>
 #include <shlobj.h>
+#include <sstream>
 #include <string>
 
 namespace svm::win32 {
@@ -46,6 +49,30 @@ std::optional<std::filesystem::path> chooseEvidenceBundleDirectory(HWND owner) {
         return std::nullopt;
     }
     return std::filesystem::path(selectedPath);
+}
+
+std::filesystem::path uniqueEvidenceBundleDirectory(const std::filesystem::path& parentDirectory) {
+    static std::atomic<std::uint64_t> sequence{0};
+    SYSTEMTIME utc = {};
+    GetSystemTime(&utc);
+
+    std::wostringstream name;
+    name << L"SerialValueMatcher-evidence-"
+         << std::setfill(L'0')
+         << std::setw(4) << utc.wYear
+         << std::setw(2) << utc.wMonth
+         << std::setw(2) << utc.wDay
+         << L'-'
+         << std::setw(2) << utc.wHour
+         << std::setw(2) << utc.wMinute
+         << std::setw(2) << utc.wSecond
+         << L'-'
+         << std::setw(3) << utc.wMilliseconds
+         << L'-'
+         << GetCurrentProcessId()
+         << L'-'
+         << sequence.fetch_add(1, std::memory_order_relaxed);
+    return parentDirectory / name.str();
 }
 
 std::optional<svm::report::EvidenceBundleRedactionOptions> chooseEvidenceBundleRedaction(HWND owner) {
@@ -227,8 +254,8 @@ void NativeMainWindow::exportEvidenceBundle() {
         return;
     }
 
-    const auto directory = chooseEvidenceBundleDirectory(window_);
-    if (!directory.has_value()) {
+    const auto parentDirectory = chooseEvidenceBundleDirectory(window_);
+    if (!parentDirectory.has_value()) {
         return;
     }
     const auto redaction = chooseEvidenceBundleRedaction(window_);
@@ -252,8 +279,10 @@ void NativeMainWindow::exportEvidenceBundle() {
         context.latestVerificationResults = store_.ruleVerificationResults(context.latestVerificationRun->verificationRunId);
     }
 
+    const std::filesystem::path directory = uniqueEvidenceBundleDirectory(*parentDirectory);
+
     svm::report::EvidenceBundleWriteOptions options;
-    options.outputDirectory = *directory;
+    options.outputDirectory = directory;
     options.redaction = *redaction;
     options.includeRawEvents = true;
 
@@ -266,7 +295,7 @@ void NativeMainWindow::exportEvidenceBundle() {
     }
 
     setStatus(uiString(T::EvidenceBundleOkPrefix)
-        + directory->wstring()
+        + directory.wstring()
         + L" ("
         + std::to_wstring(result.writtenFiles.size())
         + L" \u4E2A\u6587\u4EF6)"

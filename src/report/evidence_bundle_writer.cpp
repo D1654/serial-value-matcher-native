@@ -1,8 +1,9 @@
 #include "report/evidence_bundle_writer.h"
 
 #include <algorithm>
-#include <array>
+#include <atomic>
 #include <cctype>
+#include <chrono>
 #include <fstream>
 #include <iomanip>
 #include <initializer_list>
@@ -14,14 +15,6 @@ namespace svm::report {
 namespace {
 
 constexpr std::string_view kRedacted = "[redacted]";
-constexpr std::array<std::string_view, 6> kBundleFileNames = {
-    "summary.md",
-    "app_version.txt",
-    "raw_events.tsv",
-    "scan_settings.txt",
-    "report_metadata.txt",
-    "rule_verification_report.md",
-};
 
 std::string toLower(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
@@ -260,6 +253,8 @@ bool writeTextFile(const std::filesystem::path& path, std::string_view text, std
         return false;
     }
     output.write(text.data(), static_cast<std::streamsize>(text.size()));
+    output.flush();
+    output.close();
     if (!output) {
         *errorMessage = "无法完整写入文件：" + path.string();
         return false;
@@ -271,27 +266,88 @@ bool writeBundleFile(
     const std::filesystem::path& directory,
     std::string_view fileName,
     std::string_view text,
-    EvidenceBundleWriteResult* result) {
+    std::vector<std::filesystem::path>* writtenFileNames,
+    std::string* errorMessage) {
     const std::filesystem::path path = directory / fileName;
-    if (!writeTextFile(path, text, &result->errorMessage)) {
+    if (!writeTextFile(path, text, errorMessage)) {
         return false;
     }
-    result->writtenFiles.push_back(path);
+    writtenFileNames->emplace_back(std::string(fileName));
     return true;
 }
 
-bool removeStaleBundleFiles(const std::filesystem::path& directory, EvidenceBundleWriteResult* result) {
-    for (std::string_view fileName : kBundleFileNames) {
-        std::error_code error;
-        const std::filesystem::path path = directory / fileName;
-        std::filesystem::remove(path, error);
-        if (error) {
-            result->errorMessage = "无法清理旧证据包文件：" + path.string() + "；" + error.message();
-            return false;
+bool pathEntryExists(
+    const std::filesystem::path& path,
+    bool* exists,
+    std::string* errorMessage) {
+    std::error_code error;
+    const std::filesystem::file_status status = std::filesystem::symlink_status(path, error);
+    if (error) {
+        if (error == std::errc::no_such_file_or_directory) {
+            *exists = false;
+            return true;
         }
+        *errorMessage = "无法检查证据包目录：" + path.string() + "；" + error.message();
+        return false;
     }
+    *exists = status.type() != std::filesystem::file_type::not_found;
     return true;
 }
+
+std::optional<std::filesystem::path> createTemporaryBundleDirectory(
+    const std::filesystem::path& targetDirectory,
+    std::string* errorMessage) {
+    static std::atomic<std::uint64_t> sequence{0};
+    const std::filesystem::path parentDirectory = targetDirectory.parent_path().empty()
+        ? std::filesystem::path(".")
+        : targetDirectory.parent_path();
+
+    for (std::size_t attempt = 0; attempt < 128; ++attempt) {
+        const std::uint64_t nonce = static_cast<std::uint64_t>(
+            std::chrono::steady_clock::now().time_since_epoch().count())
+            ^ sequence.fetch_add(1, std::memory_order_relaxed);
+        std::filesystem::path temporaryName = targetDirectory.filename();
+        temporaryName += ".tmp-";
+        temporaryName += std::to_string(nonce);
+        const std::filesystem::path temporaryDirectory = parentDirectory / temporaryName;
+
+        std::error_code error;
+        if (std::filesystem::create_directory(temporaryDirectory, error)) {
+            return temporaryDirectory;
+        }
+        if (!error || error == std::errc::file_exists) {
+            continue;
+        }
+        *errorMessage = "无法创建证据包临时目录：" + temporaryDirectory.string() + "；" + error.message();
+        return std::nullopt;
+    }
+
+    *errorMessage = "无法创建唯一的证据包临时目录。";
+    return std::nullopt;
+}
+
+class TemporaryBundleDirectoryGuard {
+public:
+    explicit TemporaryBundleDirectoryGuard(std::filesystem::path directory)
+        : directory_(std::move(directory)) {
+    }
+
+    ~TemporaryBundleDirectoryGuard() {
+        if (!active_) {
+            return;
+        }
+        std::error_code error;
+        std::filesystem::remove_all(directory_, error);
+    }
+
+    void release() noexcept {
+        active_ = false;
+    }
+
+private:
+    std::filesystem::path directory_;
+    bool active_ = true;
+};
 
 } // namespace
 
@@ -388,43 +444,118 @@ EvidenceBundleWriteResult writeEvidenceBundle(
         return result;
     }
 
-    std::error_code error;
-    std::filesystem::create_directories(options.outputDirectory, error);
-    if (error) {
-        result.errorMessage = "无法创建证据包目录：" + options.outputDirectory.string() + "；" + error.message();
-        return result;
-    }
-    if (!removeStaleBundleFiles(options.outputDirectory, &result)) {
+    const std::filesystem::path targetDirectory = options.outputDirectory.lexically_normal();
+    if (targetDirectory.filename().empty()
+        || targetDirectory.filename() == "."
+        || targetDirectory.filename() == "..") {
+        result.errorMessage = "证据包输出目录必须是父目录下的新建专用目录。";
         return result;
     }
 
-    if (!writeBundleFile(options.outputDirectory, "summary.md", renderEvidenceBundleSummary(input, options.redaction, options.includeRawEvents), &result)) {
+    const std::filesystem::path parentDirectory = targetDirectory.parent_path().empty()
+        ? std::filesystem::path(".")
+        : targetDirectory.parent_path();
+    std::error_code error;
+    const std::filesystem::file_status parentStatus = std::filesystem::status(parentDirectory, error);
+    if (error) {
+        result.errorMessage = "无法检查证据包父目录：" + parentDirectory.string() + "；" + error.message();
         return result;
     }
-    if (!writeBundleFile(options.outputDirectory, "app_version.txt", renderEvidenceBundleKeyValues(input.appVersion, options.redaction), &result)) {
+    if (!std::filesystem::is_directory(parentStatus)) {
+        result.errorMessage = "证据包父路径不是目录：" + parentDirectory.string();
+        return result;
+    }
+
+    bool targetExists = false;
+    if (!pathEntryExists(targetDirectory, &targetExists, &result.errorMessage)) {
+        return result;
+    }
+    if (targetExists) {
+        result.errorMessage = "证据包目标目录已存在，拒绝覆盖：" + targetDirectory.string();
+        return result;
+    }
+
+    const std::optional<std::filesystem::path> temporaryDirectory = createTemporaryBundleDirectory(
+        targetDirectory,
+        &result.errorMessage);
+    if (!temporaryDirectory.has_value()) {
+        return result;
+    }
+    TemporaryBundleDirectoryGuard temporaryDirectoryGuard(*temporaryDirectory);
+    std::vector<std::filesystem::path> writtenFileNames;
+
+    if (!writeBundleFile(
+            *temporaryDirectory,
+            "summary.md",
+            renderEvidenceBundleSummary(input, options.redaction, options.includeRawEvents),
+            &writtenFileNames,
+            &result.errorMessage)) {
+        return result;
+    }
+    if (!writeBundleFile(
+            *temporaryDirectory,
+            "app_version.txt",
+            renderEvidenceBundleKeyValues(input.appVersion, options.redaction),
+            &writtenFileNames,
+            &result.errorMessage)) {
         return result;
     }
     if (options.includeRawEvents
-        && !writeBundleFile(options.outputDirectory, "raw_events.tsv", renderEvidenceBundleRawEvents(input.rawEvents, options.redaction), &result)) {
+        && !writeBundleFile(
+            *temporaryDirectory,
+            "raw_events.tsv",
+            renderEvidenceBundleRawEvents(input.rawEvents, options.redaction),
+            &writtenFileNames,
+            &result.errorMessage)) {
         return result;
     }
     if (!input.scanSettings.empty()
-        && !writeBundleFile(options.outputDirectory, "scan_settings.txt", renderEvidenceBundleKeyValues(input.scanSettings, options.redaction), &result)) {
+        && !writeBundleFile(
+            *temporaryDirectory,
+            "scan_settings.txt",
+            renderEvidenceBundleKeyValues(input.scanSettings, options.redaction),
+            &writtenFileNames,
+            &result.errorMessage)) {
         return result;
     }
     if (!input.reportMetadata.empty()
-        && !writeBundleFile(options.outputDirectory, "report_metadata.txt", renderEvidenceBundleKeyValues(input.reportMetadata, options.redaction), &result)) {
+        && !writeBundleFile(
+            *temporaryDirectory,
+            "report_metadata.txt",
+            renderEvidenceBundleKeyValues(input.reportMetadata, options.redaction),
+            &writtenFileNames,
+            &result.errorMessage)) {
         return result;
     }
     if (!input.ruleVerificationReportMarkdown.empty()
         && !writeBundleFile(
-            options.outputDirectory,
+            *temporaryDirectory,
             "rule_verification_report.md",
             renderRuleVerificationReportFile(input.ruleVerificationReportMarkdown, options.redaction),
-            &result)) {
+            &writtenFileNames,
+            &result.errorMessage)) {
         return result;
     }
 
+    if (!pathEntryExists(targetDirectory, &targetExists, &result.errorMessage)) {
+        return result;
+    }
+    if (targetExists) {
+        result.errorMessage = "证据包目标目录在发布前已存在，拒绝覆盖：" + targetDirectory.string();
+        return result;
+    }
+
+    std::filesystem::rename(*temporaryDirectory, targetDirectory, error);
+    if (error) {
+        result.errorMessage = "无法原子发布证据包目录：" + targetDirectory.string() + "；" + error.message();
+        return result;
+    }
+    temporaryDirectoryGuard.release();
+
+    result.writtenFiles.reserve(writtenFileNames.size());
+    for (const std::filesystem::path& fileName : writtenFileNames) {
+        result.writtenFiles.push_back(targetDirectory / fileName);
+    }
     result.success = true;
     return result;
 }

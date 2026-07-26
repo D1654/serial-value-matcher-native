@@ -27,7 +27,7 @@ LRESULT NativeMainWindow::handleCreateMessage() {
     createMenus();
     createControls();
     if (!store_.open(defaultStoreDirectory())) {
-        setStatus(utf8ToWide(store_.lastErrorText()));
+        reportStorageFailure(L"打开本地存储");
     }
     applyUiPreferences();
     refreshPorts();
@@ -124,6 +124,7 @@ std::optional<LRESULT> NativeMainWindow::handleTimerMessage(WPARAM wParam) {
 }
 
 LRESULT NativeMainWindow::handleDestroyMessage() {
+    shuttingDown_ = true;
     const auto context = shellContext();
     saveUiPreferences();
     for (const UINT_PTR timerId : kNativeMainWindowShellTimerIds) {
@@ -138,8 +139,10 @@ LRESULT NativeMainWindow::handleDestroyMessage() {
     settlePendingModbusScanMessages();
     std::unique_ptr<NativeModbusScanResult> terminalResult(
         modbusScanTerminalResult_.exchange(nullptr, std::memory_order_acq_rel));
-    if (terminalResult && store_.isOpen()) {
-        store_.saveScanExecution(terminalResult->execution);
+    if (terminalResult) {
+        if (!store_.isOpen() || !store_.saveScanExecution(terminalResult->execution)) {
+            reportStorageFailure(L"保存最终 Modbus 扫描结果");
+        }
     }
     releaseModbusScanOwnership();
     shutdownSerialPort();

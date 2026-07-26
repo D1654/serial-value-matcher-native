@@ -105,6 +105,7 @@ REQUIRED_PACKAGE_FILES = [
 MARKDOWN_LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 PACKAGED_PATH_REFERENCE_PATTERN = re.compile(r"`((?:docs/|README\.md)[^`]+)`")
 EXTERNAL_LINK_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+NORMALIZED_DOCUMENT_SUFFIXES = {".md", ".txt"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -131,6 +132,25 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest().upper()
+
+
+def normalized_document_text(path: Path) -> str:
+    with path.open("r", encoding="utf-8", errors="strict", newline=None) as handle:
+        return handle.read()
+
+
+def utf8_safe_text(value: object) -> str:
+    return str(value).encode("utf-8", errors="backslashreplace").decode("utf-8")
+
+
+def write_summary(path: Path, lines: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = utf8_safe_text("\n".join(lines) + "\n")
+    path.write_text(content, encoding="utf-8")
+
+
+def print_failure(message: str) -> None:
+    print(utf8_safe_text(message), file=sys.stderr)
 
 
 def read_cmake_version_metadata(root: Path) -> dict[str, str]:
@@ -280,7 +300,15 @@ def package_documentation_file_set_failures(repo_root: Path, stage_dir: Path) ->
     for relative in sorted(repo_files & package_files):
         repo_path = repo_docs_dir / relative
         package_path = package_docs_dir / relative
-        if file_sha256(repo_path) != file_sha256(package_path):
+        try:
+            if repo_path.suffix.lower() in NORMALIZED_DOCUMENT_SUFFIXES:
+                matches = normalized_document_text(repo_path) == normalized_document_text(package_path)
+            else:
+                matches = file_sha256(repo_path) == file_sha256(package_path)
+        except (OSError, UnicodeError) as error:
+            failures.append(f"unable to compare package docs content: docs/{relative}: {error}")
+            continue
+        if not matches:
             failures.append(f"package docs content mismatch: docs/{relative}")
     return failures
 
@@ -304,7 +332,7 @@ def main() -> int:
     if not hash_path.is_file():
         failures.append(f"包检查失败：SHA256 文件不存在：{hash_path}")
     if failures:
-        print(" ".join(failures), file=sys.stderr)
+        print_failure(" ".join(failures))
         return 2
 
     package_files = sorted([path for path in stage_dir.rglob("*") if path.is_file()])
@@ -526,11 +554,10 @@ def main() -> int:
     else:
         summary.append("Gate status: passed")
 
-    summary_path.parent.mkdir(parents=True, exist_ok=True)
-    summary_path.write_text("\n".join(summary) + "\n", encoding="utf-8")
+    write_summary(summary_path, summary)
 
     if failures:
-        print(" ".join(failures), file=sys.stderr)
+        print_failure(" ".join(failures))
         return 1
 
     print(f"Native 包检查通过：zip={zip_bytes} extracted={package_bytes} files={len(package_files)}")

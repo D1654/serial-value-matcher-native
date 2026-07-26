@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 
 namespace {
@@ -30,11 +31,29 @@ std::string readText(const std::filesystem::path& path) {
     return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
 }
 
+void writeText(const std::filesystem::path& path, const std::string& text) {
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    assert(output);
+    output.write(text.data(), static_cast<std::streamsize>(text.size()));
+    assert(output);
+}
+
 bool pathExists(const std::filesystem::path& path) {
     std::error_code error;
     const bool exists = std::filesystem::exists(path, error);
     assert(!error);
     return exists;
+}
+
+bool hasTemporarySibling(const std::filesystem::path& targetDirectory) {
+    const std::string prefix = targetDirectory.filename().string() + ".tmp-";
+    for (const std::filesystem::directory_entry& entry
+         : std::filesystem::directory_iterator(targetDirectory.parent_path())) {
+        if (entry.path().filename().string().starts_with(prefix)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 svm::report::EvidenceBundleInput makeInput() {
@@ -102,6 +121,10 @@ void fullBundleWritesAllExpectedFiles() {
     assert(result.success);
     assert(result.errorMessage.empty());
     assert(result.writtenFiles.size() == 6);
+    assert(!hasTemporarySibling(directory));
+    for (const std::filesystem::path& writtenFile : result.writtenFiles) {
+        assert(writtenFile.parent_path() == directory);
+    }
 
     assert(pathExists(directory / "summary.md"));
     assert(pathExists(directory / "app_version.txt"));
@@ -229,36 +252,59 @@ void rawEventsCanBeExcludedAndSummaryMatchesFiles() {
     std::filesystem::remove_all(directory);
 }
 
-void reusedDirectoryDoesNotKeepStaleFilesFromPreviousBundle() {
+void existingNonEmptyDirectoryIsRejectedWithoutChanges() {
     const auto directory = temporaryBundlePath();
-    auto fullInput = makeInput();
-    const auto fullResult = svm::report::writeEvidenceBundle(fullInput, {directory, {}, true});
-    assert(fullResult.success);
-    assert(pathExists(directory / "raw_events.tsv"));
-    assert(pathExists(directory / "scan_settings.txt"));
-    assert(pathExists(directory / "report_metadata.txt"));
-    assert(pathExists(directory / "rule_verification_report.md"));
+    std::filesystem::create_directory(directory);
+    writeText(directory / "summary.md", "user-owned summary\n");
+    writeText(directory / "unrelated.txt", "must remain\n");
 
-    auto minimalInput = makeInput();
-    minimalInput.scanSettings.clear();
-    minimalInput.reportMetadata.clear();
-    minimalInput.ruleVerificationReportMarkdown.clear();
-
-    const auto redactedResult = svm::report::writeEvidenceBundle(
-        minimalInput,
-        {directory, {true, true, true}, false});
-    assert(redactedResult.success);
-    assert(pathExists(directory / "summary.md"));
-    assert(pathExists(directory / "app_version.txt"));
-    assert(!pathExists(directory / "raw_events.tsv"));
-    assert(!pathExists(directory / "scan_settings.txt"));
-    assert(!pathExists(directory / "report_metadata.txt"));
-    assert(!pathExists(directory / "rule_verification_report.md"));
-
-    const std::string summary = readText(directory / "summary.md");
-    assert(summary.find("Raw events included: no") != std::string::npos);
+    const auto result = svm::report::writeEvidenceBundle(makeInput(), {directory, {}, true});
+    assert(!result.success);
+    assert(result.errorMessage.find("已存在") != std::string::npos);
+    assert(result.writtenFiles.empty());
+    assert(readText(directory / "summary.md") == "user-owned summary\n");
+    assert(readText(directory / "unrelated.txt") == "must remain\n");
+    assert(std::distance(
+        std::filesystem::directory_iterator(directory),
+        std::filesystem::directory_iterator()) == 2);
 
     std::filesystem::remove_all(directory);
+}
+
+void existingEmptyDirectoryIsRejected() {
+    const auto directory = temporaryBundlePath();
+    std::filesystem::create_directory(directory);
+
+    const auto result = svm::report::writeEvidenceBundle(makeInput(), {directory, {}, true});
+    assert(!result.success);
+    assert(result.errorMessage.find("已存在") != std::string::npos);
+    assert(result.writtenFiles.empty());
+    assert(std::filesystem::is_empty(directory));
+
+    std::filesystem::remove_all(directory);
+}
+
+void failedWriteDoesNotPublishTargetOrDamageExistingBundle() {
+    const auto originalDirectory = temporaryBundlePath();
+    const auto originalResult = svm::report::writeEvidenceBundle(
+        makeInput(),
+        {originalDirectory, {}, true});
+    assert(originalResult.success);
+    const std::string originalSummary = readText(originalDirectory / "summary.md");
+
+    const auto missingParent = temporaryBundlePath();
+    const auto failedTarget = missingParent / "bundle";
+    const auto failedResult = svm::report::writeEvidenceBundle(
+        makeInput(),
+        {failedTarget, {}, true});
+    assert(!failedResult.success);
+    assert(failedResult.writtenFiles.empty());
+    assert(!pathExists(failedTarget));
+    assert(!pathExists(missingParent));
+    assert(readText(originalDirectory / "summary.md") == originalSummary);
+    assert(pathExists(originalDirectory / "raw_events.tsv"));
+
+    std::filesystem::remove_all(originalDirectory);
 }
 
 void pathPrivacyCoversUnixWindowsAndUncPaths() {
@@ -293,7 +339,9 @@ int main() {
     runEvidenceBundleTest("reportRedactionCoversPathsAndDeviceTokensWithoutDroppingReport", reportRedactionCoversPathsAndDeviceTokensWithoutDroppingReport);
     runEvidenceBundleTest("missingOptionalFieldsStillWritesRequiredFiles", missingOptionalFieldsStillWritesRequiredFiles);
     runEvidenceBundleTest("rawEventsCanBeExcludedAndSummaryMatchesFiles", rawEventsCanBeExcludedAndSummaryMatchesFiles);
-    runEvidenceBundleTest("reusedDirectoryDoesNotKeepStaleFilesFromPreviousBundle", reusedDirectoryDoesNotKeepStaleFilesFromPreviousBundle);
+    runEvidenceBundleTest("existingNonEmptyDirectoryIsRejectedWithoutChanges", existingNonEmptyDirectoryIsRejectedWithoutChanges);
+    runEvidenceBundleTest("existingEmptyDirectoryIsRejected", existingEmptyDirectoryIsRejected);
+    runEvidenceBundleTest("failedWriteDoesNotPublishTargetOrDamageExistingBundle", failedWriteDoesNotPublishTargetOrDamageExistingBundle);
     runEvidenceBundleTest("pathPrivacyCoversUnixWindowsAndUncPaths", pathPrivacyCoversUnixWindowsAndUncPaths);
     runEvidenceBundleTest("emptyOutputDirectoryFailsClearly", emptyOutputDirectoryFailsClearly);
 

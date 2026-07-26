@@ -1,7 +1,7 @@
 # Task 03: Wire Typed Errors And Evidence
 
 > Phase: 3 — Production Hardening
-> Status: pending
+> Status: Completed
 
 ---
 
@@ -87,10 +87,10 @@ Exercise long endpoint/error text and repeated events to confirm metadata remain
 
 ## Verification
 
-- [ ] Transport callers branch on typed status/category, not localized strings.
-- [ ] Operation evidence includes request ID, generation, endpoint, deadline/result, byte count, and native code when available.
-- [ ] Default transport evidence does not include payload bytes.
-- [ ] Existing raw TX/RX, visible log, filtering, export, self-test, and UI perf behavior remains intact.
+- [x] Transport callers branch on typed status/category, not localized strings.
+- [x] Operation evidence includes request ID, generation, endpoint, deadline/result, byte count, and native code when available.
+- [x] Default transport evidence does not include payload bytes.
+- [x] Existing raw TX/RX, visible log, filtering, export, self-test, and UI perf behavior remains intact.
 
 **Focused command:**
 ```bash

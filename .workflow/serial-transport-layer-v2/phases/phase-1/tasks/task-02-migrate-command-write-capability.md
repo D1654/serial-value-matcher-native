@@ -1,7 +1,7 @@
 # Task 02: Migrate Command Write Capability
 
 > Phase: 1 — Contract Foundation
-> Status: Planned
+> Status: Completed
 
 ---
 
@@ -63,10 +63,10 @@ Run a focused source search and test suite to confirm command-sequence headers, 
 
 ## Verification
 
-- [ ] Command sequence compilation depends only on the narrow write capability.
-- [ ] Accepted, missing-backend, unsafe, and assertion paths retain their existing statuses.
-- [ ] Evidence metadata contains request identity, generation, typed status/category, and byte count.
-- [ ] No `SerialWritePort` reference remains in the three task files.
+- [x] Command sequence compilation depends only on the narrow write capability.
+- [x] Accepted, missing-backend, unsafe, and assertion paths retain their existing statuses.
+- [x] Evidence metadata contains request identity, generation, typed status/category, and byte count.
+- [x] No `SerialWritePort` reference remains in the three task files.
 
 **Test command:**
 ```bash

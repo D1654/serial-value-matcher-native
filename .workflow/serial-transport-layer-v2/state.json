@@ -2,7 +2,7 @@
   "version": "1.0",
   "project_name": "Serial Transport Layer v2",
   "created_at": "2026-07-11T03:50:05+08:00",
-  "updated_at": "2026-07-25T18:38:40+08:00",
+  "updated_at": "2026-07-26T16:55:09+08:00",
   "current_phase": "completed",
   "phase_history": [
     {
@@ -214,7 +214,87 @@
     "error_log": []
   },
   "bug_fixer": {
-    "reviews": []
+    "reviews": [
+      {
+        "id": "review-1",
+        "trigger": "user-request-post-completion",
+        "target": "Serial Transport Layer v2 implementation and release path",
+        "baseline_commit": "767310b27686314ba58f41a055c29954e6e7e945",
+        "implementation_commit": "2f694804fd13370128d41752d74f5de07d702d4a",
+        "reviewed_commit": "f2f5377bcf47273964295ac16c1dc4b02317aad9",
+        "started_at": "2026-07-25T19:25:00+08:00",
+        "completed_at": "2026-07-25T20:29:13+08:00",
+        "fix_completed_at": "2026-07-26T16:55:09+08:00",
+        "findings": {
+          "critical": 0,
+          "high": 2,
+          "medium": 13,
+          "low": 6,
+          "info": 0
+        },
+        "fixed": {
+          "critical": 0,
+          "high": 2,
+          "medium": 13,
+          "low": 6,
+          "info": 0
+        },
+        "remaining": {
+          "critical": 0,
+          "high": 0,
+          "medium": 0,
+          "low": 0,
+          "info": 0
+        },
+        "fixes_applied": 21,
+        "status": "all-approved-findings-fixed",
+        "verification": {
+          "focused_host_tests": "passed",
+          "ctest_build_windows_native_mingw": "35 passed, 1 skipped, 0 failed / 36 total",
+          "post_fix_host_ctest": "29/29 passed",
+          "post_fix_mingw_build": "passed",
+          "post_fix_wine_ctest": "35 passed, 1 skipped, 0 failed / 36 total",
+          "post_fix_wine_targeted_ctest": "2/2 passed",
+          "post_final_audit_wine_targeted_ctest": "1/1 passed",
+          "post_fix_native_self_test": "passed",
+          "post_fix_native_ui_perf_test": "passed",
+          "independent_fix_re_reviews": "passed",
+          "transport_boundary_checks": "passed",
+          "docs_consistency_checks": "passed",
+          "package_name_negative_smoke": "7/7 invalid names rejected; external sentinel preserved",
+          "mingw_positive_package": "passed and archive reinspection passed",
+          "powershell_package_runtime": "not run locally because PowerShell is unavailable; static fail-closed checks passed",
+          "release_fix_independent_re_reviews": "M-8 through M-11 passed with no remaining medium-or-higher finding",
+          "command_sequence_targeted_host_ctest": "2/2 passed",
+          "command_sequence_targeted_wine_ctest": "2/2 passed",
+          "command_sequence_contract_re_reviews": "M-12 and M-13 passed three independent final reviews with no remaining medium-or-higher finding",
+          "command_sequence_native_self_test": "passed with exact standalone ok log line",
+          "l1_l3_timeout_metadata": "29/29 host and 36/36 MinGW/Win32 tests have the expected 10/30/60/120 second timeout classes; loopback skip code 77 preserved",
+          "l1_l3_host_ctest": "29/29 passed",
+          "l1_l3_wine_ctest": "35 passed, 1 skipped, 0 failed / 36 total",
+          "l2_wine_summary_negative": "pre-seeded GateStatus=passed replaced by GateStatus=failed; missing-executable exit code 3 preserved with FAIL status",
+          "l2_wine_ui_positive": "clean-prefix full capture passed with exactly one GateStatus=passed and no FAIL status",
+          "l1_l3_independent_re_reviews": "three focused reviews passed with no medium-or-higher finding",
+          "l4_package_inspector_tests": "real Chinese-path ZIP extraction, CRLF/LF normalization, semantic mismatch, invalid UTF-8, and POSIX bad-byte filename checks passed",
+          "l4_positive_package": "15-file MinGW package built and re-inspected with documentation links, documentation file set, and overall gate passed",
+          "l4_l6_host_ctest": "30/30 passed",
+          "l4_l6_wine_ctest": "36 passed, 1 skipped, 0 failed / 37 total",
+          "l5_full_pty_matrix": "7/7 scenarios passed with 5006 exchanges; reopen-generation-isolation replaced the rejected stale alias",
+          "l6_workflow_records": "23/23 project/phase/task statuses completed; 137/137 acceptance items checked; no pending status or unchecked item remains",
+          "l4_l6_independent_re_reviews": "final focused reviews found no remaining issue after historical evidence and checker consistency corrections",
+          "github_workflow_dynamic_validation": "pending first changed main/PR run because actionlint and PowerShell are unavailable locally; static fail-closed checks passed",
+          "source_changes": "all approved findings H-1, H-2, M-1 through M-13, and L-1 through L-6 only"
+        },
+        "requirements_alignment": {
+          "status": "no-direction-drift",
+          "product_scope": "serial-only Win32/C++20 transport foundation; no Qt, TCP, UDP, broad compatibility facade, or new runtime dependency",
+          "next_original_contract_gaps": [],
+          "original_contract_closure": "M-12 and M-13 fixed the remaining typed-error, cancellation, and delay semantics",
+          "future_upper_layer_scope": ["variable-bit layouts", "pluggable codecs including Gray code"]
+        },
+        "report": ".workflow/serial-transport-layer-v2/bug-fixer/review-1.md"
+      }
+    ]
   },
   "change_requests": []
 }

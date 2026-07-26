@@ -206,17 +206,20 @@ void NativeMainWindow::disconnectSerial() {
 
 void NativeMainWindow::closeSerialPort(const std::wstring& statusText) {
     const svm::transport::SerialSessionSnapshot snapshot = serialLifecycle_.snapshot();
-    const bool hadSession = snapshot.state != svm::transport::SerialSessionState::Closed;
     KillTimer(window_, IDT_TIMED_SEND);
     KillTimer(window_, IDT_RECONNECT);
     reconnectState_.clearWaiting();
     timedSendConfirmed_ = false;
     stopFileSend({}, true);
+    drainSerialWriteResults();
+    KillTimer(window_, IDT_RECONNECT);
+    reconnectState_.clearWaiting();
+    const svm::transport::SerialSessionSnapshot closingSession = serialLifecycle_.snapshot();
     std::optional<svm::transport::SerialOperationResult> closeResult;
-    if (hadSession) {
+    if (closingSession.state != svm::transport::SerialSessionState::Closed) {
         closeResult = serialLifecycle_.close();
     }
-    clearPendingSerialWrites(true);
+    settleClosingSerialWrites(closingSession.generation, true);
     if (closeResult.has_value()) {
         const std::wstring message = closeResult->succeeded()
             ? uiString(T::SystemDisconnectedPrefix) + utf8ToWide(snapshot.endpoint)
@@ -243,12 +246,16 @@ void NativeMainWindow::shutdownSerialPort() {
     KillTimer(window_, IDT_TIMED_SEND);
     KillTimer(window_, IDT_RECONNECT);
     reconnectState_.clearWaiting();
+    drainSerialWriteResults();
+    KillTimer(window_, IDT_RECONNECT);
+    reconnectState_.clearWaiting();
+    const svm::transport::SerialSessionSnapshot closingSession = serialLifecycle_.snapshot();
     std::optional<svm::transport::SerialOperationResult> closeResult;
-    if (serialLifecycle_.snapshot().state != svm::transport::SerialSessionState::Closed) {
+    if (closingSession.state != svm::transport::SerialSessionState::Closed) {
         closeResult = serialLifecycle_.close();
     }
     timedSendConfirmed_ = false;
-    clearPendingSerialWrites(false);
+    settleClosingSerialWrites(closingSession.generation, false);
     if (closeResult.has_value()) {
         saveRawEvent(*closeResult, {});
     }

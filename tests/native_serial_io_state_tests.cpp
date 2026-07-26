@@ -304,6 +304,27 @@ void directCancellationMatchesOnlyReturnedCurrentKey() {
     assert(!svm::win32::nativeSerialWriteCancellationMatches(key, succeeded, 47));
 }
 
+void closeSettlementPublishesOnlyExactSuccessfulClosingWrites() {
+    const NativeSerialWriteKey key{.generation = 49, .requestId = 15};
+    const auto succeeded = terminalWrite(49, 15, svm::transport::SerialOperationStatus::Succeeded);
+    const auto cancelled = terminalWrite(
+        49,
+        15,
+        svm::transport::SerialOperationStatus::Cancelled,
+        svm::transport::SerialErrorCategory::Cancelled);
+    auto wrongRequest = succeeded;
+    wrongRequest.operation.requestId = 16;
+
+    assert(svm::win32::nativeSerialWriteShouldPublishOnClose(key, succeeded, 49));
+    assert(!svm::win32::nativeSerialWriteShouldPublishOnClose(key, succeeded, 50));
+    assert(!svm::win32::nativeSerialWriteShouldPublishOnClose(key, cancelled, 49));
+    assert(!svm::win32::nativeSerialWriteShouldPublishOnClose(key, wrongRequest, 49));
+    assert(!svm::win32::nativeSerialWriteShouldPublishOnClose(
+        key,
+        succeeded,
+        svm::transport::kUnassignedSerialSessionGeneration));
+}
+
 void completionDecisionsConsumeExactPairsOnce() {
     const NativeSerialWriteKey oldKey{.generation = 51, .requestId = 4};
     const NativeSerialWriteKey currentKey{.generation = 52, .requestId = 4};
@@ -365,11 +386,19 @@ void completionDecisionsPreserveOnlyCurrentFaultEvidence() {
 
     svm::transport::SerialSessionSnapshot faulted;
     faulted.state = svm::transport::SerialSessionState::Faulted;
+    const auto succeeded = terminalWrite(
+        61,
+        7,
+        svm::transport::SerialOperationStatus::Succeeded);
     const auto disconnected = terminalWrite(
         61,
         7,
         svm::transport::SerialOperationStatus::Disconnected,
         svm::transport::SerialErrorCategory::Disconnected);
+    assert(svm::win32::nativeSerialWriteCompletionDecision(key, succeeded, faulted, 61)
+        == NativeSerialWriteCompletionDecision::Succeeded);
+    assert(svm::win32::nativeSerialWriteCompletionDecision(key, succeeded, faulted, 62)
+        == NativeSerialWriteCompletionDecision::Ignore);
     assert(svm::win32::nativeSerialWriteCompletionDecision(key, disconnected, faulted, 61)
         == NativeSerialWriteCompletionDecision::Failed);
     assert(svm::win32::nativeSerialWriteCompletionDecision(key, disconnected, faulted, 62)
@@ -424,6 +453,7 @@ int main() {
     writeKeysRequireGenerationAndRequestIdentity();
     admissionCreatesKeysOnlyForAcceptedCurrentGeneration();
     directCancellationMatchesOnlyReturnedCurrentKey();
+    closeSettlementPublishesOnlyExactSuccessfulClosingWrites();
     completionDecisionsConsumeExactPairsOnce();
     completionDecisionsPreserveOnlyCurrentFaultEvidence();
     readDecisionsCoverEmptyFailureAndStaleResults();

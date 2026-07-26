@@ -32,6 +32,11 @@ bool nativeSerialWriteCancellationMatches(
     const svm::transport::SerialTerminalResult& result,
     svm::transport::SerialSessionGeneration expectedGeneration) noexcept;
 
+bool nativeSerialWriteShouldPublishOnClose(
+    const NativeSerialWriteKey& pending,
+    const svm::transport::SerialTerminalResult& result,
+    svm::transport::SerialSessionGeneration closingGeneration) noexcept;
+
 enum class NativeSerialWriteCompletionDecision {
     Ignore,
     Succeeded,

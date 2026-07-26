@@ -12,6 +12,8 @@ namespace {
 using core::ByteBuffer;
 using core::Text;
 
+constexpr int kDelayCancellationSliceMs = 100;
+
 Text stepPath(std::size_t index) {
     return "step" + std::to_string(index + 1);
 }
@@ -290,11 +292,36 @@ CommandStepExecutionResult runDelay(
     std::size_t stepIndex,
     const DelayCommand& command,
     CommandSequenceExecutionContext& context) {
-    auto result = makeStepResult(sequence, step, stepIndex, CommandExecutionStatus::Completed, {});
+    auto result = makeStepResult(sequence, step, stepIndex, CommandExecutionStatus::Failed, {});
     result.metadata["duration_ms"] = toText(command.durationMs);
-    if (context.sleepForMs && command.durationMs > 0) {
-        context.sleepForMs(command.durationMs);
+    if (command.durationMs == 0) {
+        result.status = CommandExecutionStatus::Completed;
+        return result;
     }
+    if (!context.sleepForMs) {
+        result.message = "Delay backend is not available.";
+        return result;
+    }
+
+    int remainingMs = command.durationMs;
+    while (remainingMs > 0) {
+        if (cancelled(context)) {
+            result.status = CommandExecutionStatus::Cancelled;
+            result.message = "Command sequence was cancelled.";
+            return result;
+        }
+        const int sliceMs = std::min(remainingMs, kDelayCancellationSliceMs);
+        context.sleepForMs(sliceMs);
+        remainingMs -= sliceMs;
+    }
+
+    if (cancelled(context)) {
+        result.status = CommandExecutionStatus::Cancelled;
+        result.message = "Command sequence was cancelled.";
+        return result;
+    }
+
+    result.status = CommandExecutionStatus::Completed;
     return result;
 }
 
@@ -347,6 +374,16 @@ core::modbus::ScanExecutionOptions modbusExecutionOptions(
     return options;
 }
 
+const core::modbus::ScanAttemptResult* lastScanAttempt(
+    const core::modbus::ScanExecutionResult& execution) {
+    for (auto block = execution.blocks.rbegin(); block != execution.blocks.rend(); ++block) {
+        if (!block->attempts.empty()) {
+            return &block->attempts.back();
+        }
+    }
+    return nullptr;
+}
+
 CommandStepExecutionResult runModbusRead(
     const CommandSequence& sequence,
     const CommandStep& step,
@@ -394,14 +431,13 @@ CommandStepExecutionResult runModbusRead(
     lastModbusResult = std::move(scanResult);
 
     const auto status = lastModbusResult->status;
+    const core::modbus::ScanAttemptResult* finalAttempt = lastScanAttempt(*lastModbusResult);
     if (status == core::modbus::ScanExecutionStatus::Completed) {
         result.status = CommandExecutionStatus::Completed;
         result.message.clear();
-    } else if (lastModbusResult->errorMessage == "Scan was cancelled.") {
+    } else if (status == core::modbus::ScanExecutionStatus::Cancelled) {
         result.status = CommandExecutionStatus::Cancelled;
-    } else if (!lastModbusResult->blocks.empty()
-        && !lastModbusResult->blocks.front().attempts.empty()
-        && lastModbusResult->blocks.front().attempts.front().status == core::modbus::ScanAttemptStatus::Timeout) {
+    } else if (finalAttempt && finalAttempt->status == core::modbus::ScanAttemptStatus::Timeout) {
         result.status = CommandExecutionStatus::Timeout;
     }
     return result;

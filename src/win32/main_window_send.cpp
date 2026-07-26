@@ -117,8 +117,8 @@ void NativeMainWindow::recordDangerousOperationAudit(
     event.timestampUtc = nativeUtcTimestampText();
     event.endpoint = "local://dangerous-operation";
     event.payload = auditPayloadBytes(audit);
-    if (store_.isOpen()) {
-        store_.appendRawEvent(event);
+    if (!store_.isOpen() || !store_.appendRawEvent(event)) {
+        reportStorageFailure(L"保存危险操作审计");
     }
 }
 

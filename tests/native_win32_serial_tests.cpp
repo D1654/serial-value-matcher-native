@@ -197,6 +197,22 @@ void validatesSerialOpenOptions() {
     options.portName = R"(\\.\COM12)";
     assert(svm::win32::validateSerialOpenOptions(options).ok);
 
+    for (const std::string& unsafePort : {
+             R"(\\.\PhysicalDrive0)",
+             R"(\\?\PhysicalDrive0)",
+             R"(\\.\pipe\serial-test)",
+             R"(\\?\GLOBALROOT\Device\HarddiskVolume1)",
+             "COM0",
+             "COM01",
+             "COM1suffix",
+         }) {
+        options.portName = unsafePort;
+        assert(!svm::win32::validateSerialOpenOptions(options).ok);
+    }
+
+    options.portName = R"(\\?\com12)";
+    assert(svm::win32::validateSerialOpenOptions(options).ok);
+
     options.baudRate = 0;
     const auto badBaud = svm::win32::validateSerialOpenOptions(options);
     assert(!badBaud.ok);
@@ -253,15 +269,19 @@ void normalizesComPortNamesAndDevicePaths() {
     assert(svm::win32::trimPortName("  COM10 \t") == "COM10");
     assert(svm::win32::normalizedComPortName(" com3 ") == "COM3");
     assert(svm::win32::normalizedComPortName(R"(\\.\com42)") == "COM42");
+    assert(svm::win32::normalizedComPortName(R"(\\?\com42)") == "COM42");
     assert(svm::win32::comPortNumber("COM1") == 1);
     assert(svm::win32::comPortNumber(R"(\\.\COM256)") == 256);
     assert(svm::win32::comPortNumber("COM0") == -1);
+    assert(svm::win32::comPortNumber("COM01") == -1);
     assert(svm::win32::comPortNumber("COM") == -1);
 
     assert(svm::win32::isLikelyComPortName("COM12"));
     assert(!svm::win32::isLikelyComPortName("ttyS0"));
-    assert(svm::win32::isWin32DevicePath(R"(\\.\COM12)"));
     assert(svm::win32::makeWin32DevicePath("COM10") == R"(\\.\COM10)");
+    assert(svm::win32::makeWin32DevicePath(R"(\\?\com10)") == R"(\\.\COM10)");
+    assert(svm::win32::makeWin32DevicePath(R"(\\.\PhysicalDrive0)").empty());
+    assert(svm::win32::makeWin32DevicePath(R"(\\.\pipe\serial-test)").empty());
     assert(svm::win32::stripWin32DevicePrefix(R"(\\.\COM10)") == "COM10");
 }
 
@@ -343,6 +363,53 @@ void narrowCapabilitiesPublishTypedClosedAndFaultedState() {
     assert(lifecycle.snapshot().generation == 0);
     assert(lifecycle.close().succeeded());
     assert(lifecycle.snapshot().state == svm::transport::SerialSessionState::Closed);
+}
+
+void nonClosedOpenIsRejectedWithoutMutatingTheSession() {
+    using Access = svm::win32::Win32SerialSessionTestAccess;
+    svm::win32::Win32SerialSession session;
+    Access::publishSyntheticOpen(session, 23, "COM23");
+    const auto admission = Access::enqueueWithoutWorker(session, {0x01, 0x02}, deadlineAfter(500));
+    assert(admission.accepted());
+    const auto beforeSession = session.snapshot();
+    const auto beforeQueue = session.writeQueueSnapshot();
+
+    svm::transport::SerialOpenOptions replacementOptions;
+    replacementOptions.portName = "COM24";
+    const auto rejected = session.open(replacementOptions);
+
+    assert(rejected.status == svm::transport::SerialOperationStatus::RejectedInvalid);
+    assert(rejected.error.category == svm::transport::SerialErrorCategory::InvalidInput);
+    assert(!rejected.operation.assigned());
+    assert(rejected.operation.generation == beforeSession.generation);
+    assert(rejected.endpoint == beforeSession.endpoint);
+    const auto afterSession = session.snapshot();
+    const auto afterQueue = session.writeQueueSnapshot();
+    assert(afterSession.state == beforeSession.state);
+    assert(afterSession.generation == beforeSession.generation);
+    assert(afterSession.endpoint == beforeSession.endpoint);
+    assert(afterQueue.generation == beforeQueue.generation);
+    assert(afterQueue.pendingCount == beforeQueue.pendingCount);
+    assert(afterQueue.pendingBytes == beforeQueue.pendingBytes);
+    assert(afterQueue.nextRequestId == beforeQueue.nextRequestId);
+    assert(session.takeCompletedWrites().empty());
+
+    assert(session.close().succeeded());
+    const auto settled = session.takeCompletedWrites();
+    assert(settled.size() == 1);
+    assert(settled.front().operation.requestId == admission.requestId);
+    assert(settled.front().operation.generation == beforeSession.generation);
+
+    svm::win32::Win32SerialSession faultedSession;
+    const auto failedOpen = faultedSession.open({});
+    assert(failedOpen.status == svm::transport::SerialOperationStatus::RejectedInvalid);
+    const auto beforeRetry = faultedSession.snapshot();
+    const auto rejectedRetry = faultedSession.open(replacementOptions);
+    assert(rejectedRetry.status == svm::transport::SerialOperationStatus::RejectedInvalid);
+    assert(rejectedRetry.error.category == svm::transport::SerialErrorCategory::InvalidInput);
+    assert(faultedSession.snapshot().state == beforeRetry.state);
+    assert(faultedSession.snapshot().generation == beforeRetry.generation);
+    assert(faultedSession.close().succeeded());
 }
 
 void nativeErrorClassificationUsesCodesInsteadOfLocalizedText() {
@@ -935,6 +1002,7 @@ int main() {
 #if defined(_WIN32)
     closedPortAsyncWriteFailsWithoutQueueing();
     narrowCapabilitiesPublishTypedClosedAndFaultedState();
+    nonClosedOpenIsRejectedWithoutMutatingTheSession();
     nativeErrorClassificationUsesCodesInsteadOfLocalizedText();
     expiredTypedWriteTimesOutBeforeNativeIo();
     typedEmptyWriteIsRejectedBeforeNativeIo();

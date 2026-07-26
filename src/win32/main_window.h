@@ -170,7 +170,13 @@ private:
     bool enqueueFileSerialWrite(std::vector<std::uint8_t> payload);
     void updateSerialWriteQueueStatus();
     void drainSerialWriteResults();
-    void clearPendingSerialWrites(bool emitUiEvidence);
+    void settleClosingSerialWrites(
+        svm::transport::SerialSessionGeneration closingGeneration,
+        bool emitUiEvidence);
+    void publishSuccessfulSerialWrite(
+        const svm::transport::SerialTerminalResult& result,
+        const NativePendingSerialWrite& pending,
+        bool emitUiEvidence);
     void sendQuickPayload(std::size_t index);
     void updateTimedSendTimer();
     void browseFileSend();
@@ -275,10 +281,11 @@ private:
     native_storage::RawIoEvent makeRawSerialEvent(
         const svm::transport::SerialOperationResult& result,
         const std::vector<std::uint8_t>& payload) const;
-    void saveRawEvent(
+    bool saveRawEvent(
         const svm::transport::SerialOperationResult& result,
         const std::vector<std::uint8_t>& payload);
     bool saveRawEvents(std::vector<native_storage::RawIoEvent> events);
+    void reportStorageFailure(std::wstring_view operation);
 
     HINSTANCE instance_ = nullptr;
     HWND window_ = nullptr;
@@ -427,6 +434,9 @@ private:
     std::uint64_t logRebuildPassCount_ = 0;
     std::uint64_t logQueuedLineCount_ = 0;
     bool uiPreferenceSaveFailureShown_ = false;
+    bool storageFailureReported_ = false;
+    bool shuttingDown_ = false;
+    bool shutdownStorageFailureShown_ = false;
     bool trackingWindowSizeMove_ = false;
     std::optional<native_storage::UiPreferences> lastSavedUiPreferences_;
     Win32SerialSession serialSession_;

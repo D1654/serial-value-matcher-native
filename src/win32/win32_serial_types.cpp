@@ -74,6 +74,9 @@ int comPortNumber(std::string_view portName) {
     }
 
     const std::string_view digits = std::string_view(normalized).substr(3);
+    if (digits.front() == '0') {
+        return -1;
+    }
     long long value = 0;
     for (char digit : digits) {
         value = value * 10 + (digit - '0');
@@ -85,22 +88,17 @@ int comPortNumber(std::string_view portName) {
     return value > 0 ? static_cast<int>(value) : -1;
 }
 
-bool isWin32DevicePath(std::string_view portName) {
-    const std::string trimmed = trimPortName(portName);
-    return startsWithIgnoreCase(trimmed, R"(\\.\)") || startsWithIgnoreCase(trimmed, R"(\\?\)");
-}
-
 bool isLikelyComPortName(std::string_view portName) {
     return comPortNumber(portName) > 0;
 }
 
 std::string makeWin32DevicePath(std::string_view portName) {
-    const std::string trimmed = trimPortName(portName);
-    if (trimmed.empty() || isWin32DevicePath(trimmed)) {
-        return trimmed;
+    const std::string normalized = normalizedComPortName(portName);
+    if (comPortNumber(normalized) <= 0) {
+        return {};
     }
 
-    return R"(\\.\)" + normalizedComPortName(trimmed);
+    return R"(\\.\)" + normalized;
 }
 
 std::string stripWin32DevicePrefix(std::string_view portName) {
@@ -157,8 +155,8 @@ SerialValidationResult validateSerialOpenOptions(const SerialOpenOptions& option
         return {false, "未选择串口，无法打开串口设备。"};
     }
 
-    if (!isWin32DevicePath(portName) && !isLikelyComPortName(portName)) {
-        return {false, "串口名格式不正确。Windows 原生后端需要 COM1、COM10 或 \\\\.\\COM10 这样的端口名。"};
+    if (!isLikelyComPortName(portName)) {
+        return {false, "串口名格式不正确。Windows 原生后端只接受 COM1、COM10、\\\\.\\COM10 或 \\\\?\\COM10 这样的端口名。"};
     }
 
     if (options.baudRate <= 0 || options.baudRate > 10000000) {

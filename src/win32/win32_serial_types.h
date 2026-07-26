@@ -26,7 +26,6 @@ struct SerialValidationResult {
 std::string trimPortName(std::string_view portName);
 std::string normalizedComPortName(std::string_view portName);
 int comPortNumber(std::string_view portName);
-bool isWin32DevicePath(std::string_view portName);
 bool isLikelyComPortName(std::string_view portName);
 std::string makeWin32DevicePath(std::string_view portName);
 std::string stripWin32DevicePrefix(std::string_view portName);

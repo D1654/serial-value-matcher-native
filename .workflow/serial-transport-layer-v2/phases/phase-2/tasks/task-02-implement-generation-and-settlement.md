@@ -1,7 +1,7 @@
 # Task 2: Implement Generation and Settlement
 
 > Phase: 2 — Win32 Session and Caller Migration
-> Status: pending
+> Status: Completed
 
 ---
 
@@ -90,11 +90,11 @@ Build the session and focused tests while the main window still uses the transit
 
 ## Verification
 
-- [ ] State transitions reject work in `closed`, `closing`, and `faulted` according to the contract.
-- [ ] Every accepted request has one terminal result with the original generation and request ID.
-- [ ] Reconnect increments generation and stale results cannot mutate the replacement session.
-- [ ] Deadline and native error classification do not inspect localized message text.
-- [ ] Close waits for worker settlement before releasing the handle or operation buffer.
+- [x] State transitions reject work in `closed`, `closing`, and `faulted` according to the contract.
+- [x] Every accepted request has one terminal result with the original generation and request ID.
+- [x] Reconnect increments generation and stale results cannot mutate the replacement session.
+- [x] Deadline and native error classification do not inspect localized message text.
+- [x] Close waits for worker settlement before releasing the handle or operation buffer.
 
 **Test command:**
 

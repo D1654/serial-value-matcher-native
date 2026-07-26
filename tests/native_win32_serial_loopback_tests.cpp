@@ -14,6 +14,7 @@
 namespace {
 
 constexpr int kFaultWaitMaxMs = svm::transport::kSerialTerminalResultTargetMs / 2;
+constexpr int kSkippedExitCode = 77;
 
 struct ModbusOracle {
     std::vector<std::uint8_t> request;
@@ -375,7 +376,7 @@ int main() {
     const char* portNameEnv = std::getenv("SVM_NATIVE_SERIAL_LOOPBACK_PORT");
     if (portNameEnv == nullptr || std::string(portNameEnv).empty()) {
         std::cout << "native_win32_serial_loopback_tests skipped: SVM_NATIVE_SERIAL_LOOPBACK_PORT is not set\n";
-        return 0;
+        return kSkippedExitCode;
     }
     const bool trace = std::getenv("SVM_NATIVE_SERIAL_LOOPBACK_TRACE") != nullptr;
     const char* scenarioEnv = std::getenv("SVM_NATIVE_SERIAL_LOOPBACK_SCENARIO");
@@ -383,10 +384,11 @@ int main() {
         ? "normal"
         : std::string(scenarioEnv);
     if (scenario != "normal" && scenario != "reopen" && scenario != "timeout"
-        && scenario != "cancel" && scenario != "close" && scenario != "stale"
+        && scenario != "cancel" && scenario != "close"
+        && scenario != "reopen-generation-isolation"
         && scenario != "stress") {
         std::cerr << "SVM_NATIVE_SERIAL_LOOPBACK_SCENARIO invalid: " << scenario
-                  << " valid=normal,reopen,timeout,cancel,close,stale,stress\n";
+                  << " valid=normal,reopen,timeout,cancel,close,reopen-generation-isolation,stress\n";
         return 6;
     }
 
@@ -395,13 +397,17 @@ int main() {
     int timeoutMs = 100;
     int cancelWaitMs = 250;
     int closeWaitMs = 250;
-    int staleWaitMs = 100;
+    int generationIsolationWaitMs = 100;
     if (!parsePositiveIntEnv("SVM_NATIVE_SERIAL_LOOPBACK_ITERATIONS", 1, 100000, iterations)
         || !parsePositiveIntEnv("SVM_NATIVE_SERIAL_LOOPBACK_REOPEN_COUNT", 1, 10000, reopenCount)
         || !parsePositiveIntEnv("SVM_NATIVE_SERIAL_LOOPBACK_TIMEOUT_MS", 100, 60000, timeoutMs)
         || !parsePositiveIntEnv("SVM_NATIVE_SERIAL_LOOPBACK_CANCEL_WAIT_MS", 250, kFaultWaitMaxMs, cancelWaitMs)
         || !parsePositiveIntEnv("SVM_NATIVE_SERIAL_LOOPBACK_CLOSE_WAIT_MS", 250, kFaultWaitMaxMs, closeWaitMs)
-        || !parsePositiveIntEnv("SVM_NATIVE_SERIAL_LOOPBACK_STALE_WAIT_MS", 100, 60000, staleWaitMs)) {
+        || !parsePositiveIntEnv(
+            "SVM_NATIVE_SERIAL_LOOPBACK_GENERATION_ISOLATION_WAIT_MS",
+            100,
+            60000,
+            generationIsolationWaitMs)) {
         return 6;
     }
 
@@ -582,32 +588,34 @@ int main() {
         return 0;
     }
 
-    if (scenario == "stale") {
+    if (scenario == "reopen-generation-isolation") {
         svm::win32::Win32SerialSession port;
         svm::transport::SerialSession& session = port;
         svm::transport::SerialSessionGeneration oldGeneration = 0;
         const auto oldOpen = session.open(options);
-        if (!validateFreshOpen(session, oldOpen, 0, 0, "stale", oldGeneration)) {
+        if (!validateFreshOpen(session, oldOpen, 0, 0, scenario.c_str(), oldGeneration)) {
             return 2;
         }
-        if (!transact(session, oracleFor(0), oldGeneration, "stale", 0, trace)) {
+        if (!transact(session, oracleFor(0), oldGeneration, scenario.c_str(), 0, trace)) {
             return 3;
         }
-        if (!closeSession(session, oldGeneration, "stale")) {
+        if (!closeSession(session, oldGeneration, scenario.c_str())) {
             return 5;
         }
         if (!session.writeScheduler().writeQueueSnapshot().empty()
             || !session.writeScheduler().takeCompletedWrites().empty()) {
-            std::cerr << "old generation retained queued work scenario=stale generation="
+            std::cerr << "closed generation retained work scenario=" << scenario << " generation="
                       << oldGeneration << '\n';
             return 7;
         }
 
-        const auto staleDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(staleWaitMs);
-        while (std::chrono::steady_clock::now() < staleDeadline) {
+        const auto isolationDeadline = std::chrono::steady_clock::now()
+            + std::chrono::milliseconds(generationIsolationWaitMs);
+        while (std::chrono::steady_clock::now() < isolationDeadline) {
             if (!session.writeScheduler().writeQueueSnapshot().empty()
                 || !session.writeScheduler().takeCompletedWrites().empty()) {
-                std::cerr << "old generation completion appeared scenario=stale generation="
+                std::cerr << "closed generation isolation violated scenario="
+                          << scenario << " generation="
                           << oldGeneration << '\n';
                 return 7;
             }
@@ -621,22 +629,23 @@ int main() {
                 replacementOpen,
                 oldGeneration,
                 1,
-                "stale",
+                scenario.c_str(),
                 replacementGeneration)) {
             return 2;
         }
-        if (!transact(session, oracleFor(1), replacementGeneration, "stale", 1, trace)) {
+        if (!transact(session, oracleFor(1), replacementGeneration, scenario.c_str(), 1, trace)) {
             return 3;
         }
-        if (!closeSession(session, replacementGeneration, "stale")
+        if (!closeSession(session, replacementGeneration, scenario.c_str())
             || !session.writeScheduler().writeQueueSnapshot().empty()
             || !session.writeScheduler().takeCompletedWrites().empty()) {
             return 5;
         }
-        std::cout << "native_win32_serial_loopback_tests passed scenario=stale port=" << portNameEnv
+        std::cout << "native_win32_serial_loopback_tests passed scenario=" << scenario
+                  << " port=" << portNameEnv
                   << " old-generation=" << oldGeneration
                   << " replacement-generation=" << replacementGeneration
-                  << " stale-wait-ms=" << staleWaitMs
+                  << " generation-isolation-wait-ms=" << generationIsolationWaitMs
                   << " transactions=2 tx=16 rx=18\n";
         return 0;
     }

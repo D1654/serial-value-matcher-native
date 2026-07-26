@@ -73,6 +73,9 @@ public:
         svm::transport::SerialDeadline deadline = {}) override {
         writes.push_back(std::move(payload));
         writeDeadlines.push_back(deadline);
+        if (onWrite) {
+            onWrite();
+        }
         assert(!writeResults.empty());
         auto result = std::move(writeResults.front());
         writeResults.pop_front();
@@ -101,6 +104,7 @@ public:
     std::vector<svm::transport::SerialDeadline> writeDeadlines;
     std::vector<std::size_t> readLimits;
     std::vector<svm::transport::SerialDeadline> readDeadlines;
+    std::function<void()> onWrite;
     std::function<void()> onRead;
 };
 
@@ -167,7 +171,7 @@ void succeedsWithTypedChunkedResponseAndSharedDeadline() {
     assert(serial.writeDeadlines.front().set());
     assert(serial.writeDeadlines.front().expiresAt == serial.readDeadlines[0].expiresAt);
     assert(serial.writeDeadlines.front().expiresAt == serial.readDeadlines[1].expiresAt);
-    assert(serial.readLimits == std::vector<std::size_t>({260, 260}));
+    assert(serial.readLimits == std::vector<std::size_t>({260, 257}));
     assert(frames.size() == 3);
     assert(frames[0].payload == request());
     assert(frames[0].operation.operation.kind == svm::transport::SerialOperationKind::Write);
@@ -189,6 +193,173 @@ void succeedsWithTypedChunkedResponseAndSharedDeadline() {
     assert(frames[2].operation.endpoint == kEndpoint);
     assert(!transport.serialFailed());
     assert(transport.serialFailure() == nullptr);
+}
+
+void usesResponseHeadersAndReturnsExactlyOneFrame() {
+    FakeSerialByteStream exceptionSerial;
+    exceptionSerial.writeResults.push_back(terminalResult(
+        svm::transport::SerialOperationKind::Write,
+        svm::transport::SerialOperationStatus::Succeeded,
+        kGeneration,
+        request().size()));
+    const svm::core::ByteBuffer exceptionBody{0x01, 0x83, 0x02};
+    const auto exceptionFrame = svm::core::modbus::appendCrc16Modbus(exceptionBody);
+    auto exceptionWithTrailing = exceptionFrame;
+    const auto trailingFrame = response();
+    exceptionWithTrailing.insert(exceptionWithTrailing.end(), trailingFrame.begin(), trailingFrame.end());
+    exceptionSerial.readResults.push_back(readResult(
+        svm::transport::SerialOperationStatus::Succeeded,
+        kGeneration,
+        exceptionWithTrailing));
+    auto exceptionGeneration = kGeneration;
+    svm::transport::SerialRtuTransport exceptionTransport(
+        exceptionSerial,
+        transportOptions(exceptionGeneration));
+
+    const auto exceptionExchange = exceptionTransport.exchange(request(), 100);
+
+    assert(exceptionExchange.status == svm::core::modbus::RtuTransportExchangeStatus::Success);
+    assert(exceptionExchange.responseFrame == exceptionFrame);
+    const auto parsedException = svm::core::modbus::parseReadResponse(
+        exceptionExchange.responseFrame,
+        1,
+        0x03,
+        0,
+        1);
+    assert(parsedException.isException);
+    assert(parsedException.exceptionCode == 0x02);
+
+    FakeSerialByteStream wrongFunctionSerial;
+    wrongFunctionSerial.writeResults.push_back(terminalResult(
+        svm::transport::SerialOperationKind::Write,
+        svm::transport::SerialOperationStatus::Succeeded,
+        kGeneration,
+        request().size()));
+    const svm::core::ByteBuffer wrongFunctionBody{0x01, 0x04, 0x02, 0x12, 0x34};
+    const auto wrongFunctionFrame = svm::core::modbus::appendCrc16Modbus(wrongFunctionBody);
+    wrongFunctionSerial.readResults.push_back(readResult(
+        svm::transport::SerialOperationStatus::Succeeded,
+        kGeneration,
+        wrongFunctionFrame));
+    auto wrongFunctionGeneration = kGeneration;
+    svm::transport::SerialRtuTransport wrongFunctionTransport(
+        wrongFunctionSerial,
+        transportOptions(wrongFunctionGeneration));
+
+    const auto wrongFunctionExchange = wrongFunctionTransport.exchange(request(), 100);
+
+    assert(wrongFunctionExchange.status == svm::core::modbus::RtuTransportExchangeStatus::Success);
+    assert(wrongFunctionExchange.responseFrame == wrongFunctionFrame);
+    const auto parsedWrongFunction = svm::core::modbus::parseReadResponse(
+        wrongFunctionExchange.responseFrame,
+        1,
+        0x03,
+        0,
+        1);
+    assert(!parsedWrongFunction.ok);
+    assert(parsedWrongFunction.errorMessage == "Response function code does not match expected function code.");
+
+    FakeSerialByteStream byteCountSerial;
+    byteCountSerial.writeResults.push_back(terminalResult(
+        svm::transport::SerialOperationKind::Write,
+        svm::transport::SerialOperationStatus::Succeeded,
+        kGeneration,
+        request().size()));
+    const svm::core::ByteBuffer byteCountBody{0x01, 0x03, 0x04, 0x12, 0x34, 0x56, 0x78};
+    const auto byteCountFrame = svm::core::modbus::appendCrc16Modbus(byteCountBody);
+    byteCountSerial.readResults.push_back(readResult(
+        svm::transport::SerialOperationStatus::Succeeded,
+        kGeneration,
+        {byteCountFrame.begin(), byteCountFrame.begin() + 7}));
+    byteCountSerial.readResults.push_back(readResult(
+        svm::transport::SerialOperationStatus::Succeeded,
+        kGeneration,
+        {byteCountFrame.begin() + 7, byteCountFrame.end()}));
+    auto byteCountGeneration = kGeneration;
+    svm::transport::SerialRtuTransport byteCountTransport(
+        byteCountSerial,
+        transportOptions(byteCountGeneration));
+
+    const auto byteCountExchange = byteCountTransport.exchange(request(), 100);
+
+    assert(byteCountExchange.status == svm::core::modbus::RtuTransportExchangeStatus::Success);
+    assert(byteCountExchange.responseFrame == byteCountFrame);
+    assert(byteCountSerial.readDeadlines.size() == 2);
+    const auto parsedByteCount = svm::core::modbus::parseReadResponse(
+        byteCountExchange.responseFrame,
+        1,
+        0x03,
+        0,
+        1);
+    assert(!parsedByteCount.ok);
+    assert(parsedByteCount.errorMessage == "Response register count does not match expected quantity.");
+}
+
+void capsUnknownFunctionResponsesAtOneRtuFrame() {
+    FakeSerialByteStream serial;
+    serial.writeResults.push_back(terminalResult(
+        svm::transport::SerialOperationKind::Write,
+        svm::transport::SerialOperationStatus::Succeeded,
+        kGeneration,
+        request().size()));
+
+    svm::core::ByteBuffer noise{0x01, 0x10};
+    while (noise.size() < 260) {
+        noise.push_back(0xA5);
+        if (noise.size() >= 5 && svm::core::modbus::validateRtuFrame(noise).ok) {
+            noise.back() ^= 0x01;
+        }
+        assert(!svm::core::modbus::validateRtuFrame(noise).ok);
+    }
+    serial.readResults.push_back(readResult(
+        svm::transport::SerialOperationStatus::Succeeded,
+        kGeneration,
+        {noise.begin(), noise.begin() + 130}));
+    serial.readResults.push_back(readResult(
+        svm::transport::SerialOperationStatus::Succeeded,
+        kGeneration,
+        {noise.begin() + 130, noise.end()}));
+    auto currentGeneration = kGeneration;
+    svm::transport::SerialRtuTransport transport(serial, transportOptions(currentGeneration));
+
+    const auto exchange = transport.exchange(request(), 100);
+
+    assert(exchange.status == svm::core::modbus::RtuTransportExchangeStatus::Success);
+    assert(exchange.responseFrame == noise);
+    assert(serial.readLimits == std::vector<std::size_t>({260, 130}));
+    assert(serial.readResults.empty());
+    assert(!transport.serialFailed());
+}
+
+void acceptsShortUnknownFunctionResponseAndTrimsTrailingBytes() {
+    FakeSerialByteStream serial;
+    serial.writeResults.push_back(terminalResult(
+        svm::transport::SerialOperationKind::Write,
+        svm::transport::SerialOperationStatus::Succeeded,
+        kGeneration,
+        request().size()));
+    const svm::core::ByteBuffer unknownBody{0x01, 0x10};
+    const svm::core::ByteBuffer unknownFrame =
+        svm::core::modbus::appendCrc16Modbus(unknownBody);
+    serial.readResults.push_back(readResult(
+        svm::transport::SerialOperationStatus::Succeeded,
+        kGeneration,
+        {unknownFrame.begin(), unknownFrame.begin() + 3}));
+    svm::core::ByteBuffer remainder{unknownFrame.begin() + 3, unknownFrame.end()};
+    const svm::core::ByteBuffer trailingFrame = response();
+    remainder.insert(remainder.end(), trailingFrame.begin(), trailingFrame.end());
+    serial.readResults.push_back(readResult(
+        svm::transport::SerialOperationStatus::Succeeded,
+        kGeneration,
+        std::move(remainder)));
+    auto currentGeneration = kGeneration;
+    svm::transport::SerialRtuTransport transport(serial, transportOptions(currentGeneration));
+
+    const auto exchange = transport.exchange(request(), 100);
+
+    assert(exchange.status == svm::core::modbus::RtuTransportExchangeStatus::Success);
+    assert(exchange.responseFrame == unknownFrame);
+    assert(serial.readLimits == std::vector<std::size_t>({260, 257}));
 }
 
 void reportsTypedWriteFailureAndShortWrite() {
@@ -365,6 +536,77 @@ void observesCancellationDuringReadLoop() {
     assert(serial.readDeadlines.size() == 1);
     assert(transport.cancelObserved());
     assert(!transport.serialFailed());
+}
+
+void cancellationDuringNativeIoWinsOverNativeFailure() {
+    FakeSerialByteStream writeSerial;
+    writeSerial.writeResults.push_back(terminalResult(
+        svm::transport::SerialOperationKind::Write,
+        svm::transport::SerialOperationStatus::Failed,
+        kGeneration,
+        0,
+        svm::transport::SerialErrorCategory::NativeFailure,
+        995));
+    bool writeCancelled = false;
+    writeSerial.onWrite = [&writeCancelled] { writeCancelled = true; };
+    auto writeGeneration = kGeneration;
+    std::vector<IoEvidence> writeEvidence;
+    auto writeOptions = transportOptions(writeGeneration);
+    writeOptions.shouldCancel = [&writeCancelled] { return writeCancelled; };
+    writeOptions.onIoEvidence = [&writeEvidence](
+                                    const svm::core::ByteBuffer& payload,
+                                    const svm::transport::SerialOperationResult& operation) {
+        writeEvidence.push_back({payload, operation});
+    };
+    svm::transport::SerialRtuTransport writeTransport(writeSerial, std::move(writeOptions));
+
+    const auto writeExchange = writeTransport.exchange(request(), 100);
+
+    assert(writeExchange.status == svm::core::modbus::RtuTransportExchangeStatus::TransportError);
+    assert(writeExchange.errorMessage == "扫描已取消。");
+    assert(writeTransport.cancelObserved());
+    assert(!writeTransport.serialFailed());
+    assert(writeTransport.serialFailure() == nullptr);
+    assert(writeEvidence.size() == 1);
+    assert(writeEvidence.front().payload.empty());
+    assert(writeEvidence.front().operation.error.nativeCode == 995);
+
+    FakeSerialByteStream readSerial;
+    readSerial.writeResults.push_back(terminalResult(
+        svm::transport::SerialOperationKind::Write,
+        svm::transport::SerialOperationStatus::Succeeded,
+        kGeneration,
+        request().size()));
+    readSerial.readResults.push_back(readResult(
+        svm::transport::SerialOperationStatus::Failed,
+        kGeneration,
+        {},
+        svm::transport::SerialErrorCategory::NativeFailure));
+    readSerial.readResults.front().operation.error.nativeCode = 995;
+    bool readCancelled = false;
+    readSerial.onRead = [&readCancelled] { readCancelled = true; };
+    auto readGeneration = kGeneration;
+    std::vector<IoEvidence> readEvidence;
+    auto readOptions = transportOptions(readGeneration);
+    readOptions.shouldCancel = [&readCancelled] { return readCancelled; };
+    readOptions.onIoEvidence = [&readEvidence](
+                                   const svm::core::ByteBuffer& payload,
+                                   const svm::transport::SerialOperationResult& operation) {
+        readEvidence.push_back({payload, operation});
+    };
+    svm::transport::SerialRtuTransport readTransport(readSerial, std::move(readOptions));
+
+    const auto readExchange = readTransport.exchange(request(), 100);
+
+    assert(readExchange.status == svm::core::modbus::RtuTransportExchangeStatus::TransportError);
+    assert(readExchange.errorMessage == "扫描已取消。");
+    assert(readTransport.cancelObserved());
+    assert(!readTransport.serialFailed());
+    assert(readTransport.serialFailure() == nullptr);
+    assert(readEvidence.size() == 2);
+    assert(readEvidence[0].payload == request());
+    assert(readEvidence[1].payload.empty());
+    assert(readEvidence[1].operation.error.nativeCode == 995);
 }
 
 void treatsTypedCancellationAsCancellation() {
@@ -562,10 +804,14 @@ void rejectsGenerationChangeBeforeFinalResponsePublication() {
 
 int main() {
     succeedsWithTypedChunkedResponseAndSharedDeadline();
+    usesResponseHeadersAndReturnsExactlyOneFrame();
+    capsUnknownFunctionResponsesAtOneRtuFrame();
+    acceptsShortUnknownFunctionResponseAndTrimsTrailingBytes();
     reportsTypedWriteFailureAndShortWrite();
     reportsTypedReadFailureEvidence();
     reportsTypedReadTimeout();
     observesCancellationDuringReadLoop();
+    cancellationDuringNativeIoWinsOverNativeFailure();
     treatsTypedCancellationAsCancellation();
     rejectsExpiredGenerationBeforeWrite();
     rejectsExpiredWriteResultGeneration();

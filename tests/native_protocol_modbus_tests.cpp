@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <functional>
 #include <initializer_list>
 #include <iostream>
 #include <string>
@@ -47,6 +48,9 @@ public:
             fallback.status = svm::core::modbus::RtuTransportExchangeStatus::TransportError;
             fallback.requestFrame = ByteBuffer(requestFrame.begin(), requestFrame.end());
             fallback.errorMessage = "no fake response";
+            if (onExchange) {
+                onExchange();
+            }
             return fallback;
         }
 
@@ -54,12 +58,16 @@ public:
         exchanges.erase(exchanges.begin());
         assert((queued.expectedRequest == ByteBuffer(requestFrame.begin(), requestFrame.end())));
         queued.exchange.requestFrame = ByteBuffer(requestFrame.begin(), requestFrame.end());
+        if (onExchange) {
+            onExchange();
+        }
         return queued.exchange;
     }
 
     std::vector<QueuedExchange> exchanges;
     std::vector<ByteBuffer> sentRequests;
     std::vector<int> timeoutValues;
+    std::function<void()> onExchange;
 };
 
 ByteBuffer normalReadResponse(int slaveId, int functionCode, std::initializer_list<std::uint16_t> values) {
@@ -270,11 +278,86 @@ void coreScanExecutorCancellationStopsBeforeSendingRequests() {
     svm::core::modbus::ScanExecutor executor(transport);
     const auto result = executor.execute(planResult.plan, executionOptions);
 
-    assert(result.status == svm::core::modbus::ScanExecutionStatus::Failed);
+    assert(result.status == svm::core::modbus::ScanExecutionStatus::Cancelled);
     assert(result.errorMessage == "Scan was cancelled.");
     assert(result.blocks.empty());
     assert(transport.sentRequests.empty());
     assert(progressPublished);
+}
+
+void coreScanExecutorCancellationDuringExchangeWins() {
+    svm::core::modbus::ScanPlanOptions planOptions;
+    planOptions.slaveId = 1;
+    planOptions.functionCode = 0x03;
+    planOptions.range = {0, 0};
+    planOptions.blockSize = 1;
+    const auto planResult = svm::core::modbus::buildScanPlan(planOptions);
+    assert(planResult.ok);
+
+    FakeCoreModbusTransport transport;
+    transport.enqueueTimeout(planResult.plan.blocks[0].requestFrame);
+    bool cancelRequested = false;
+    transport.onExchange = [&cancelRequested] {
+        cancelRequested = true;
+    };
+
+    svm::core::modbus::ScanExecutionOptions executionOptions;
+    executionOptions.shouldCancel = [&cancelRequested] {
+        return cancelRequested;
+    };
+    bool progressPublished = false;
+    executionOptions.onProgress = [&progressPublished](const svm::core::modbus::ScanExecutionProgress& progress) {
+        progressPublished = true;
+        assert(progress.completedBlocks == 1);
+        assert(progress.failedBlocks == 1);
+    };
+
+    svm::core::modbus::ScanExecutor executor(transport);
+    const auto result = executor.execute(planResult.plan, executionOptions);
+
+    assert(result.status == svm::core::modbus::ScanExecutionStatus::Cancelled);
+    assert(result.errorMessage == "Scan was cancelled.");
+    assert(result.blocks.size() == 1);
+    assert(result.blocks[0].attempts.size() == 1);
+    assert(result.blocks[0].attempts[0].status == svm::core::modbus::ScanAttemptStatus::Timeout);
+    assert(result.failedBlockCount == 1);
+    assert(transport.sentRequests.size() == 1);
+    assert(progressPublished);
+}
+
+void coreScanExecutorCompletedExchangeWinsOverLateCancellation() {
+    svm::core::modbus::ScanPlanOptions planOptions;
+    planOptions.slaveId = 1;
+    planOptions.functionCode = 0x03;
+    planOptions.range = {0, 0};
+    planOptions.blockSize = 1;
+    const auto planResult = svm::core::modbus::buildScanPlan(planOptions);
+    assert(planResult.ok);
+
+    FakeCoreModbusTransport transport;
+    transport.enqueueResponse(
+        planResult.plan.blocks[0].requestFrame,
+        normalReadResponse(1, 0x03, {42}));
+    bool cancelRequested = false;
+    transport.onExchange = [&cancelRequested] {
+        cancelRequested = true;
+    };
+
+    svm::core::modbus::ScanExecutionOptions executionOptions;
+    executionOptions.shouldCancel = [&cancelRequested] {
+        return cancelRequested;
+    };
+
+    svm::core::modbus::ScanExecutor executor(transport);
+    const auto result = executor.execute(planResult.plan, executionOptions);
+
+    assert(result.status == svm::core::modbus::ScanExecutionStatus::Completed);
+    assert(result.errorMessage.empty());
+    assert(result.blocks.size() == 1);
+    assert(result.blocks[0].attempts.size() == 1);
+    assert(result.blocks[0].attempts[0].status == svm::core::modbus::ScanAttemptStatus::Success);
+    assert(result.observations.size() == 1);
+    assert(result.observations[0].value == 42);
 }
 
 } // namespace
@@ -290,6 +373,8 @@ int main() {
     scanPlanRejectsUnsafeRangesAndRetrySettings();
     coreScanExecutorRetriesTimeoutThenUsesSuccessfulAttempt();
     coreScanExecutorCancellationStopsBeforeSendingRequests();
+    coreScanExecutorCancellationDuringExchangeWins();
+    coreScanExecutorCompletedExchangeWinsOverLateCancellation();
 
     std::cout << "native_protocol_modbus_tests passed\n";
     return 0;

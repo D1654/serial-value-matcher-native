@@ -26,8 +26,16 @@ ORACLES = (
     ),
 )
 CANCEL_PENDING_MARKER = bytes.fromhex("7E 43 41 4E 43 45 4C 7F")
-VALID_SCENARIOS = {"normal", "reopen", "timeout", "cancel", "stress", "close", "stale"}
-DEFAULT_SCENARIOS = "normal,reopen,timeout,cancel,stress,close,stale"
+VALID_SCENARIOS = {
+    "normal",
+    "reopen",
+    "timeout",
+    "cancel",
+    "stress",
+    "close",
+    "reopen-generation-isolation",
+}
+DEFAULT_SCENARIOS = "normal,reopen,timeout,cancel,stress,close,reopen-generation-isolation"
 COM_NAME_PATTERN = re.compile(r"COM([1-9][0-9]{0,2})", re.IGNORECASE)
 MAX_CAPTURE_BYTES = 512 * 1024
 MAX_FAULT_WAIT_MS = 500
@@ -44,7 +52,7 @@ class LoopbackControls:
     timeout_ms: int
     cancel_wait_ms: int
     close_wait_ms: int
-    stale_wait_ms: int
+    generation_isolation_wait_ms: int
     trace: bool
 
 
@@ -265,7 +273,9 @@ def launch_process(
     env["SVM_NATIVE_SERIAL_LOOPBACK_TIMEOUT_MS"] = str(controls.timeout_ms)
     env["SVM_NATIVE_SERIAL_LOOPBACK_CANCEL_WAIT_MS"] = str(controls.cancel_wait_ms)
     env["SVM_NATIVE_SERIAL_LOOPBACK_CLOSE_WAIT_MS"] = str(controls.close_wait_ms)
-    env["SVM_NATIVE_SERIAL_LOOPBACK_STALE_WAIT_MS"] = str(controls.stale_wait_ms)
+    env["SVM_NATIVE_SERIAL_LOOPBACK_GENERATION_ISOLATION_WAIT_MS"] = str(
+        controls.generation_isolation_wait_ms
+    )
     if controls.trace:
         env["SVM_NATIVE_SERIAL_LOOPBACK_TRACE"] = "1"
     process = subprocess.Popen(
@@ -407,7 +417,10 @@ def run_exchange_scenario(
             print_process_output(stdout, stderr)
             return 3, 0
 
-    child_timeout = max(10.0, 10.0 + transaction_count * 0.05 + controls.stale_wait_ms / 1000.0)
+    child_timeout = max(
+        10.0,
+        10.0 + transaction_count * 0.05 + controls.generation_isolation_wait_ms / 1000.0,
+    )
     returncode, stdout, stderr, timed_out = finish_process(process, child_timeout, scenario, com_name)
     print_process_output(stdout, stderr)
     if returncode != 0:
@@ -602,7 +615,9 @@ def main() -> int:
     timeout_ms = positive_int_env("SVM_SERIAL_LOOPBACK_TIMEOUT_MS", 100, 60000)
     cancel_wait_ms = positive_int_env("SVM_SERIAL_LOOPBACK_CANCEL_WAIT_MS", 250, MAX_FAULT_WAIT_MS)
     close_wait_ms = positive_int_env("SVM_SERIAL_LOOPBACK_CLOSE_WAIT_MS", 250, MAX_FAULT_WAIT_MS)
-    stale_wait_ms = positive_int_env("SVM_SERIAL_LOOPBACK_STALE_WAIT_MS", 100, 60000)
+    generation_isolation_wait_ms = positive_int_env(
+        "SVM_SERIAL_LOOPBACK_GENERATION_ISOLATION_WAIT_MS", 100, 60000
+    )
     wineboot_timeout = positive_int_env("SVM_SERIAL_LOOPBACK_WINEBOOT_TIMEOUT", 20, 300)
     if any(
         value is None
@@ -616,7 +631,7 @@ def main() -> int:
             timeout_ms,
             cancel_wait_ms,
             close_wait_ms,
-            stale_wait_ms,
+            generation_isolation_wait_ms,
             wineboot_timeout,
         )
     ):
@@ -626,7 +641,7 @@ def main() -> int:
         timeout_ms=timeout_ms,
         cancel_wait_ms=cancel_wait_ms,
         close_wait_ms=close_wait_ms,
-        stale_wait_ms=stale_wait_ms,
+        generation_isolation_wait_ms=generation_isolation_wait_ms,
         trace=trace,
     )
 
@@ -703,7 +718,7 @@ def main() -> int:
                             scenario_iterations = stress_iterations
                             scenario_reopen_count = stress_reopen_count
                             transaction_count = stress_iterations * stress_reopen_count
-                        elif scenario == "stale":
+                        elif scenario == "reopen-generation-isolation":
                             scenario_iterations = 1
                             scenario_reopen_count = 1
                             transaction_count = 2

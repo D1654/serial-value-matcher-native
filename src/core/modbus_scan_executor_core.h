@@ -41,6 +41,7 @@ enum class ScanAttemptStatus {
 enum class ScanExecutionStatus {
     Completed,
     CompletedWithErrors,
+    Cancelled,
     Failed
 };
 

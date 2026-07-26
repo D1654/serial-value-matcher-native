@@ -28,12 +28,19 @@ using store_io::writeRecord;
 using store_file_ops::ReplacementTarget;
 using store_file_ops::commitReplacementTargets;
 using store_file_ops::recoverReplacementArtifacts;
+using store_file_ops::recoverReplacementTransaction;
 using store_file_ops::recoveryOrphanPath;
 using store_file_ops::replaceFileWithTemp;
 using store_file_ops::replacementBackupPath;
 using store_file_ops::replacementTempPath;
 using namespace store_files;
 using namespace store_records;
+
+bool finishOutputFile(std::ofstream& output) {
+    output.flush();
+    output.close();
+    return static_cast<bool>(output);
+}
 
 std::size_t safeRecentLimit(int limit) {
     return static_cast<std::size_t>(std::max(1, limit));
@@ -102,6 +109,10 @@ bool NativeSessionStore::initializeSchema() {
         return false;
     }
 
+    if (!recoverReplacementTransaction(storeDirectory_, lastErrorText_)) {
+        return false;
+    }
+
     {
         std::ofstream schema(filePath(kSchemaFile), std::ios::binary | std::ios::trunc);
         if (!schema) {
@@ -112,6 +123,10 @@ bool NativeSessionStore::initializeSchema() {
         schema << "engine=length-prefixed-files\n";
         schema << "storage_choice=file-store-first-stage\n";
         schema << "id_counters=id_counters.svmr\n";
+        if (!finishOutputFile(schema)) {
+            lastErrorText_ = "初始化 native 存储失败：schema.txt 写入中断。";
+            return false;
+        }
     }
 
     for (std::string_view fileName : storeFiles()) {
@@ -131,6 +146,14 @@ bool NativeSessionStore::initializeSchema() {
             return false;
         }
         output << kHeader;
+        if (!finishOutputFile(output)) {
+            lastErrorText_ = "初始化 native 存储失败：无法完整创建 " + path.filename().string() + "。";
+            return false;
+        }
+    }
+
+    if (!recoverReplacementArtifacts(filePath(kIdCountersFile), lastErrorText_)) {
+        return false;
     }
 
     if (!loadPersistedCounters() && !reloadCounters()) {
@@ -384,17 +407,6 @@ bool NativeSessionStore::saveScanExecution(const ScanExecutionRecord& execution)
         return false;
     }
 
-    bool replacesExistingSession = false;
-    if (!visitRecords(kScanSessionsFile, [&](const Record& record) {
-        if (scanSessionFromRecord(record).sessionId == execution.session.sessionId) {
-            replacesExistingSession = true;
-            return false;
-        }
-        return true;
-    })) {
-        return false;
-    }
-
     std::vector<Record> attempts;
     attempts.reserve(execution.attempts.size());
     for (ScanAttemptRecord attempt : execution.attempts) {
@@ -420,12 +432,6 @@ bool NativeSessionStore::saveScanExecution(const ScanExecutionRecord& execution)
     }
 
     const std::vector<Record> sessionRecord = {recordFromScanSession(execution.session)};
-    if (!replacesExistingSession) {
-        return appendRecords(kScanAttemptsFile, attempts)
-            && appendRecords(kScanObservationsFile, observations)
-            && appendRecords(kScanSessionsFile, sessionRecord);
-    }
-
     const std::string sessionId = execution.session.sessionId;
     return rewriteRecordsFilteredTransaction({
         RewriteRequest{
@@ -499,17 +505,6 @@ bool NativeSessionStore::saveMatchRun(MatchRunRecord run, std::vector<MatchCandi
     }
     run.candidateCount = static_cast<int>(candidates.size());
 
-    bool replacesExistingRun = false;
-    if (!visitRecords(kMatchRunsFile, [&](const Record& record) {
-        if (matchRunFromRecord(record).runId == run.runId) {
-            replacesExistingRun = true;
-            return false;
-        }
-        return true;
-    })) {
-        return false;
-    }
-
     std::vector<Record> candidateRecords;
     candidateRecords.reserve(candidates.size());
     for (std::size_t index = 0; index < candidates.size(); ++index) {
@@ -525,11 +520,6 @@ bool NativeSessionStore::saveMatchRun(MatchRunRecord run, std::vector<MatchCandi
     }
 
     const std::vector<Record> runRecord = {recordFromMatchRun(run)};
-    if (!replacesExistingRun) {
-        return appendRecords(kMatchCandidatesFile, candidateRecords)
-            && appendRecords(kMatchRunsFile, runRecord);
-    }
-
     const std::string runId = run.runId;
     return rewriteRecordsFilteredTransaction({
         RewriteRequest{
@@ -648,17 +638,6 @@ bool NativeSessionStore::saveRuleVerificationRun(
         run.id = allocateId(kRuleVerificationRunsFile);
     }
 
-    bool replacesExistingRun = false;
-    if (!visitRecords(kRuleVerificationRunsFile, [&](const Record& record) {
-        if (verificationRunFromRecord(record).verificationRunId == run.verificationRunId) {
-            replacesExistingRun = true;
-            return false;
-        }
-        return true;
-    })) {
-        return false;
-    }
-
     std::vector<Record> resultRecords;
     resultRecords.reserve(results.size());
     for (RuleVerificationResultRecord result : results) {
@@ -672,11 +651,6 @@ bool NativeSessionStore::saveRuleVerificationRun(
     }
 
     const std::vector<Record> runRecord = {recordFromVerificationRun(run)};
-    if (!replacesExistingRun) {
-        return appendRecords(kRuleVerificationResultsFile, resultRecords)
-            && appendRecords(kRuleVerificationRunsFile, runRecord);
-    }
-
     const std::string verificationRunId = run.verificationRunId;
     return rewriteRecordsFilteredTransaction({
         RewriteRequest{
@@ -752,6 +726,10 @@ bool NativeSessionStore::appendRecords(std::string_view fileName, const std::vec
             lastErrorText_ = "写入 native 存储失败：记录写入中断。";
             return false;
         }
+    }
+    if (!finishOutputFile(output)) {
+        lastErrorText_ = "写入 native 存储失败：记录落盘中断。";
+        return false;
     }
     lastErrorText_.clear();
     invalidateCachesForFile(fileName);
@@ -995,6 +973,10 @@ bool NativeSessionStore::rewriteRecords(std::string_view fileName, const std::ve
                 }
             }
         }
+        if (!finishOutputFile(output) && !writeFailed) {
+            writeFailed = true;
+            writeErrorText = "重写 native 存储失败：临时文件落盘中断。";
+        }
     }
     if (writeFailed) {
         std::filesystem::remove(tempPath);
@@ -1059,6 +1041,10 @@ bool NativeSessionStore::rewriteRecordsFiltered(
                 }
             }
         }
+        if (!finishOutputFile(output) && !writeFailed) {
+            writeFailed = true;
+            writeErrorText = "重写 native 存储失败：临时文件落盘中断。";
+        }
     }
     if (visitFailed) {
         std::filesystem::remove(tempPath);
@@ -1082,6 +1068,10 @@ bool NativeSessionStore::rewriteRecordsFilteredTransaction(std::vector<RewriteRe
         return true;
     }
 
+    if (!recoverReplacementTransaction(storeDirectory_, lastErrorText_)) {
+        return false;
+    }
+
     for (const RewriteRequest& request : requests) {
         absorbRecordIds(request.fileName, request.appendedRecords);
     }
@@ -1092,6 +1082,13 @@ bool NativeSessionStore::rewriteRecordsFilteredTransaction(std::vector<RewriteRe
             [](const Record&) { return false; },
             counterRecords(),
         });
+    }
+
+    for (const RewriteRequest& request : requests) {
+        if (!recoverReplacementArtifacts(filePath(request.fileName), lastErrorText_)) {
+            return false;
+        }
+        invalidateCachesForFile(request.fileName);
     }
 
     std::vector<ReplacementTarget> targets;
@@ -1141,6 +1138,10 @@ bool NativeSessionStore::rewriteRecordsFilteredTransaction(std::vector<RewriteRe
                             }
                         }
                     }
+                    if (!finishOutputFile(output) && !requestWriteFailed) {
+                        requestWriteFailed = true;
+                        writeErrorText = "事务重写 native 存储失败：临时文件落盘中断。";
+                    }
                 }
             }
         }
@@ -1156,8 +1157,6 @@ bool NativeSessionStore::rewriteRecordsFilteredTransaction(std::vector<RewriteRe
             tempPath,
             path,
             replacementBackupPath(path),
-            false,
-            false,
             false,
         });
     }

@@ -1,7 +1,7 @@
 # Task 01: Define Session Model
 
 > Phase: 1 — Contract Foundation
-> Status: Planned
+> Status: Completed
 
 ---
 
@@ -66,10 +66,10 @@ Update the existing transport contract test's compile-time fake and assertions t
 
 ## Verification
 
-- [ ] The new session header contains no Win32, Qt, UI, or storage include.
-- [ ] Every structured result carries request identity and session generation where an operation can outlive its call site.
-- [ ] Capability declarations do not own a native handle or duplicate the old `SerialTransport` facade.
-- [ ] The focused fake contract test still builds and passes after the type migration.
+- [x] The new session header contains no Win32, Qt, UI, or storage include.
+- [x] Every structured result carries request identity and session generation where an operation can outlive its call site.
+- [x] Capability declarations do not own a native handle or duplicate the old `SerialTransport` facade.
+- [x] The focused fake contract test still builds and passes after the type migration.
 
 **Test command:**
 ```bash

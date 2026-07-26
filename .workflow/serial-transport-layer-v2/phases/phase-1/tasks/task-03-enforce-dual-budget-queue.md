@@ -1,7 +1,7 @@
 # Task 03: Enforce Dual-Budget Queue
 
 > Phase: 1 — Contract Foundation
-> Status: Planned
+> Status: Completed
 
 ---
 
@@ -72,11 +72,11 @@ Cover count-full, byte-full, active-inclusive limits, byte release after every t
 
 ## Verification
 
-- [ ] A 65th counted request is rejected when the default count budget is occupied.
-- [ ] A payload that would exceed 256 KiB is rejected immediately without removing existing work.
-- [ ] Pending plus active count/bytes never exceeds configured limits.
-- [ ] Every terminal path releases its reservation once and preserves FIFO/monotonic IDs.
-- [ ] File-send queue behavior remains accepted/sent for valid chunks.
+- [x] A 65th counted request is rejected when the default count budget is occupied.
+- [x] A payload that would exceed 256 KiB is rejected immediately without removing existing work.
+- [x] Pending plus active count/bytes never exceeds configured limits.
+- [x] Every terminal path releases its reservation once and preserves FIFO/monotonic IDs.
+- [x] File-send queue behavior remains accepted/sent for valid chunks.
 
 **Test command:**
 ```bash
