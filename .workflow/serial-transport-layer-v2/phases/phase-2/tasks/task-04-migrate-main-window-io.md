@@ -1,7 +1,7 @@
 # Task 4: Migrate Main-Window I/O
 
 > Phase: 2 — Win32 Session and Caller Migration
-> Status: pending
+> Status: Completed
 
 ---
 
@@ -90,11 +90,11 @@ Do not add `CloseHandle`, `PurgeComm`, worker joins, or reconnect policy to thes
 
 ## Verification
 
-- [ ] Pending writes match by `(generation, requestId)` and complete at most once.
-- [ ] Stale-generation results do not update status, file progress, history, raw evidence, or counters.
-- [ ] Manual send, timed send, file send, cancellation, receive polling, and queue display preserve current behavior.
-- [ ] UI files contain no direct Win32 serial API calls or native handle ownership.
-- [ ] Queue state tests cover active work, immediate rejection, and generation reset.
+- [x] Pending writes match by `(generation, requestId)` and complete at most once.
+- [x] Stale-generation results do not update status, file progress, history, raw evidence, or counters.
+- [x] Manual send, timed send, file send, cancellation, receive polling, and queue display preserve current behavior.
+- [x] UI files contain no direct Win32 serial API calls or native handle ownership.
+- [x] Queue state tests cover active work, immediate rejection, and generation reset.
 
 **Test command:**
 

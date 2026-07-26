@@ -267,20 +267,16 @@ Win32SerialSession::~Win32SerialSession() {
 svm::transport::SerialOperationResult Win32SerialSession::open(SerialOpenOptions options) {
     WriteLock lifecycleLock(lifecycleLock_);
     const std::string requestedEndpoint = options.portName;
-    if (snapshot().state != svm::transport::SerialSessionState::Closed) {
-        const svm::transport::SerialOperationResult closeResult = close();
-        if (!closeResult.succeeded()) {
-            return operationResult(
-                svm::transport::SerialOperationKind::Open,
-                failureOperationStatus(closeResult.error.category),
-                svm::transport::kUnassignedSerialSessionGeneration,
-                requestedEndpoint,
-                {},
-                0,
-                closeResult.error.category,
-                closeResult.error.nativeCode,
-                allocateOperationId());
-        }
+    const svm::transport::SerialSessionSnapshot currentSession = snapshot();
+    if (currentSession.state != svm::transport::SerialSessionState::Closed) {
+        return operationResult(
+            svm::transport::SerialOperationKind::Open,
+            svm::transport::SerialOperationStatus::RejectedInvalid,
+            currentSession.generation,
+            currentSession.endpoint,
+            {},
+            0,
+            svm::transport::SerialErrorCategory::InvalidInput);
     }
 
     const svm::transport::SerialOperationId operationId = allocateOperationId();

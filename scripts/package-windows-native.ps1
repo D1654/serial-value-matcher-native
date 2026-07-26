@@ -56,16 +56,16 @@ Write-Host "构建目录：$buildPath"
 Write-Host "输出目录：$packageRoot"
 
 if (-not $SkipBuild) {
-    Require-Command "cmake" "请先安装 CMake 并加入 PATH。" | Out-Null
-    cmake --build $buildPath --config $Config --target svm-native-win32 --parallel 1
+    $cmakePath = Require-Command "cmake" "请先安装 CMake 并加入 PATH。"
+    & $cmakePath --build $buildPath --config $Config --target svm-native-win32 --parallel 1
+    $buildExitCode = $LASTEXITCODE
+    if ($buildExitCode -ne 0) {
+        throw "Windows native 构建失败，退出码：$buildExitCode"
+    }
 }
 
-$exeCandidates = @(
-    (Join-Path $buildPath "$Config\svm-native-win32.exe"),
-    (Join-Path $buildPath "svm-native-win32.exe")
-)
-$exePath = $exeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-if (-not $exePath) {
+$exePath = Join-Path $buildPath "$Config\svm-native-win32.exe"
+if (-not (Test-Path -LiteralPath $exePath -PathType Leaf)) {
     throw "未找到 svm-native-win32.exe。请确认已完成 Windows native Release 构建。"
 }
 Write-Host "可执行文件：$exePath"

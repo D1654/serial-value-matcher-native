@@ -1,7 +1,7 @@
 # Task 01: Document Codec Boundary
 
 > Phase: 4 — Boundary and Release Closure
-> Status: Pending
+> Status: Completed
 
 ---
 
@@ -61,10 +61,10 @@ Update `docs/测试与验证.md` to list the session/queue/PTY/boundary gates an
 
 ## Verification
 
-- [ ] All documented source files, targets, scripts, and commands exist.
-- [ ] Documentation contains an explicit “not implemented” statement for Gray code.
-- [ ] Documentation describes codec/matcher dependencies as pointing toward byte results, never the reverse.
-- [ ] Documentation consistency and diff checks pass.
+- [x] All documented source files, targets, scripts, and commands exist.
+- [x] Documentation contains an explicit “not implemented” statement for Gray code.
+- [x] Documentation describes codec/matcher dependencies as pointing toward byte results, never the reverse.
+- [x] Documentation consistency and diff checks pass.
 
 **Test command:**
 

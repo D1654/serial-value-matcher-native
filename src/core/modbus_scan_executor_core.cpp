@@ -179,6 +179,8 @@ Text describeScanExecutionStatus(ScanExecutionStatus status) {
         return "completed";
     case ScanExecutionStatus::CompletedWithErrors:
         return "completed with errors";
+    case ScanExecutionStatus::Cancelled:
+        return "cancelled";
     case ScanExecutionStatus::Failed:
         return "failed";
     }
@@ -279,6 +281,10 @@ ScanExecutionResult ScanExecutor::execute(const ScanPlan& plan, const ScanExecut
             blockResult.finalErrorMessage = attempt.errorMessage;
             blockResult.attempts.push_back(std::move(attempt));
 
+            if (!success && isCancellationRequested(options)) {
+                markCancelled();
+                break;
+            }
             if (success || !retryAllowed) {
                 break;
             }
@@ -309,9 +315,7 @@ ScanExecutionResult ScanExecutor::execute(const ScanPlan& plan, const ScanExecut
     }
 
     if (cancelled) {
-        result.status = result.successBlockCount > 0
-            ? ScanExecutionStatus::CompletedWithErrors
-            : ScanExecutionStatus::Failed;
+        result.status = ScanExecutionStatus::Cancelled;
     } else if (result.failedBlockCount == 0) {
         result.status = ScanExecutionStatus::Completed;
         result.errorMessage.clear();

@@ -74,6 +74,18 @@ void setReplaceFailureInjection(const char* fileName) {
 #endif
 }
 
+void setTransactionInterruptionInjection(const char* phase) {
+#if defined(_WIN32)
+    _putenv_s("SVM_NATIVE_STORE_INTERRUPT_TRANSACTION", phase == nullptr ? "" : phase);
+#else
+    if (phase == nullptr) {
+        unsetenv("SVM_NATIVE_STORE_INTERRUPT_TRANSACTION");
+    } else {
+        setenv("SVM_NATIVE_STORE_INTERRUPT_TRANSACTION", phase, 1);
+    }
+#endif
+}
+
 void writeEmptyStoreFile(const std::filesystem::path& path) {
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     assert(output);
@@ -1064,6 +1076,187 @@ void failedScanReplacementRollsBackAllFiles() {
     std::filesystem::remove_all(path);
 }
 
+void uncommittedTransactionRollsBackEveryFileOnOpen() {
+    const auto path = temporaryStorePath();
+    auto store = openStore(path);
+
+    auto first = scanExecution("scan-crash-rollback", 1000, 2);
+    first.session.status = "old";
+    first.attempts[0].status = "old-attempt";
+    first.observations[0].value = 111;
+    assert(store.saveScanExecution(first));
+
+    auto replacement = scanExecution("scan-crash-rollback", 3000, 3);
+    replacement.session.status = "new";
+    replacement.attempts[0].status = "new-attempt";
+    replacement.observations[0].value = 999;
+
+    setTransactionInterruptionInjection("before_commit");
+    assert(!store.saveScanExecution(replacement));
+    setTransactionInterruptionInjection(nullptr);
+
+    assert(pathExists(path / ".svm-store-transaction.svmr"));
+    assert(!pathExists(path / ".svm-store-transaction.commit"));
+    assert(pathExists(path / "scan_sessions.svmr.bak"));
+    assert(pathExists(path / "scan_attempts.svmr.bak"));
+    assert(pathExists(path / "scan_observations.svmr.bak"));
+
+    auto reopened = openStore(path);
+    const auto session = reopened.scanSession("scan-crash-rollback");
+    assert(session.has_value());
+    assert(session->status == "old");
+    assert(session->startAddress == 1000);
+    const auto attempts = reopened.scanAttempts("scan-crash-rollback");
+    assert(attempts.size() == 1);
+    assert(attempts[0].status == "old-attempt");
+    assert(attempts[0].startAddress == 1000);
+    const auto observations = reopened.scanObservations("scan-crash-rollback");
+    assert(observations.size() == 2);
+    assert(observations[0].address == 1000);
+    assert(observations[0].value == 111);
+    assert(!pathExists(path / ".svm-store-transaction.svmr"));
+    assert(!pathExists(path / "scan_sessions.svmr.bak"));
+    assert(!pathExists(path / "scan_attempts.svmr.bak"));
+    assert(!pathExists(path / "scan_observations.svmr.bak"));
+
+    std::filesystem::remove_all(path);
+}
+
+void committedTransactionWithMixedBackupCleanupRollsForwardEveryFileOnOpen() {
+    const auto path = temporaryStorePath();
+    auto store = openStore(path);
+
+    auto first = scanExecution("scan-crash-commit", 1000, 2);
+    first.session.status = "old";
+    first.attempts[0].status = "old-attempt";
+    first.observations[0].value = 111;
+    assert(store.saveScanExecution(first));
+
+    auto replacement = scanExecution("scan-crash-commit", 3000, 3);
+    replacement.session.status = "new";
+    replacement.attempts[0].status = "new-attempt";
+    replacement.observations[0].value = 999;
+
+    setTransactionInterruptionInjection("during_cleanup");
+    assert(!store.saveScanExecution(replacement));
+    setTransactionInterruptionInjection(nullptr);
+
+    assert(pathExists(path / ".svm-store-transaction.svmr"));
+    assert(pathExists(path / ".svm-store-transaction.commit"));
+    assert(!pathExists(path / "scan_sessions.svmr.bak"));
+    assert(pathExists(path / "scan_attempts.svmr.bak"));
+    assert(pathExists(path / "scan_observations.svmr.bak"));
+
+    auto reopened = openStore(path);
+    const auto session = reopened.scanSession("scan-crash-commit");
+    assert(session.has_value());
+    assert(session->status == "new");
+    assert(session->startAddress == 3000);
+    const auto attempts = reopened.scanAttempts("scan-crash-commit");
+    assert(attempts.size() == 1);
+    assert(attempts[0].status == "new-attempt");
+    assert(attempts[0].startAddress == 3000);
+    const auto observations = reopened.scanObservations("scan-crash-commit");
+    assert(observations.size() == 3);
+    assert(observations[0].address == 3000);
+    assert(observations[0].value == 999);
+    assert(!pathExists(path / ".svm-store-transaction.svmr"));
+    assert(!pathExists(path / ".svm-store-transaction.commit"));
+    assert(!pathExists(path / "scan_attempts.svmr.bak"));
+    assert(!pathExists(path / "scan_observations.svmr.bak"));
+
+    std::filesystem::remove_all(path);
+}
+
+void failedInitialParentChildSavesAreAtomicForRetry() {
+    const auto path = temporaryStorePath();
+    auto store = openStore(path);
+
+    const auto scan = scanExecution("initial-scan-transaction", 5000, 3);
+    setReplaceFailureInjection("scan_attempts.svmr");
+    assert(!store.saveScanExecution(scan));
+    setReplaceFailureInjection(nullptr);
+    assert(!store.scanSession(scan.session.sessionId).has_value());
+    assert(store.saveScanExecution(scan));
+    assert(store.scanAttempts(scan.session.sessionId).size() == 1);
+    assert(store.scanObservations(scan.session.sessionId).size() == 3);
+
+    svm::native_storage::MatchRunRecord matchRun;
+    matchRun.runId = "initial-match-transaction";
+    matchRun.sourceScanSessionId = scan.session.sessionId;
+    matchRun.targetLabel = "temperature";
+    matchRun.targetValue = 12.34;
+    matchRun.createdAtUtc = "2026-06-12T12:00:00Z";
+    svm::native_storage::MatchCandidateRecord candidate;
+    candidate.candidateType = "UInt16";
+    candidate.sourceSessionId = scan.session.sessionId;
+    candidate.startAddress = 5000;
+    candidate.registerCount = 1;
+    candidate.rawRegisters = {1234};
+    candidate.engineeringValue = 12.34;
+
+    setReplaceFailureInjection("match_candidates.svmr");
+    assert(!store.saveMatchRun(matchRun, {candidate}));
+    setReplaceFailureInjection(nullptr);
+    assert(!store.matchRun(matchRun.runId).has_value());
+    assert(store.saveMatchRun(matchRun, {candidate}));
+    assert(store.matchCandidates(matchRun.runId).size() == 1);
+
+    svm::native_storage::RuleVerificationRunRecord verificationRun;
+    verificationRun.verificationRunId = "initial-verification-transaction";
+    verificationRun.sourceScanSessionId = scan.session.sessionId;
+    verificationRun.ruleCount = 1;
+    verificationRun.verifiedCount = 1;
+    verificationRun.createdAtUtc = "2026-06-12T12:10:00Z";
+    svm::native_storage::RuleVerificationResultRecord verificationResult;
+    verificationResult.ruleId = "rule-1";
+    verificationResult.fieldName = "temperature";
+    verificationResult.candidateType = "UInt16";
+    verificationResult.sourceScanSessionId = scan.session.sessionId;
+    verificationResult.verified = true;
+    verificationResult.statusText = "verified";
+    verificationResult.startAddress = 5000;
+    verificationResult.registerCount = 1;
+    verificationResult.rawRegisters = {1234};
+
+    setReplaceFailureInjection("rule_verification_results.svmr");
+    assert(!store.saveRuleVerificationRun(verificationRun, {verificationResult}));
+    setReplaceFailureInjection(nullptr);
+    assert(!store.ruleVerificationRun(verificationRun.verificationRunId).has_value());
+    assert(store.saveRuleVerificationRun(verificationRun, {verificationResult}));
+    assert(store.ruleVerificationResults(verificationRun.verificationRunId).size() == 1);
+
+    auto reopened = openStore(path);
+    assert(reopened.scanAttempts(scan.session.sessionId).size() == 1);
+    assert(reopened.scanObservations(scan.session.sessionId).size() == 3);
+    assert(reopened.matchCandidates(matchRun.runId).size() == 1);
+    assert(reopened.ruleVerificationResults(verificationRun.verificationRunId).size() == 1);
+
+    std::filesystem::remove_all(path);
+}
+
+void legacyBackupDoesNotBlockGroupedSaveInSameProcess() {
+    const auto path = temporaryStorePath();
+    auto store = openStore(path);
+    assert(store.saveScanExecution(scanExecution("legacy-backup-first", 100, 1)));
+
+    const auto countersPath = path / "id_counters.svmr";
+    const auto countersBackupPath = path / "id_counters.svmr.bak";
+    std::error_code error;
+    std::filesystem::copy_file(
+        countersPath,
+        countersBackupPath,
+        std::filesystem::copy_options::overwrite_existing,
+        error);
+    assert(!error);
+
+    assert(store.saveScanExecution(scanExecution("legacy-backup-second", 200, 1)));
+    assert(!pathExists(countersBackupPath));
+    assert(store.scanSession("legacy-backup-second").has_value());
+
+    std::filesystem::remove_all(path);
+}
+
 void orphanScanChildrenAreHiddenWhenSessionIsMissing() {
     const auto path = temporaryStorePath();
     {
@@ -1541,6 +1734,10 @@ int main() {
     runStorageTest("recentAndLatestReadsStayBoundedAcrossLargeHistory", recentAndLatestReadsStayBoundedAcrossLargeHistory);
     runStorageTest("scanExecutionWithSameSessionIdReplacesPreviousRecords", scanExecutionWithSameSessionIdReplacesPreviousRecords);
     runStorageTest("failedScanReplacementRollsBackAllFiles", failedScanReplacementRollsBackAllFiles);
+    runStorageTest("uncommittedTransactionRollsBackEveryFileOnOpen", uncommittedTransactionRollsBackEveryFileOnOpen);
+    runStorageTest("committedTransactionWithMixedBackupCleanupRollsForwardEveryFileOnOpen", committedTransactionWithMixedBackupCleanupRollsForwardEveryFileOnOpen);
+    runStorageTest("failedInitialParentChildSavesAreAtomicForRetry", failedInitialParentChildSavesAreAtomicForRetry);
+    runStorageTest("legacyBackupDoesNotBlockGroupedSaveInSameProcess", legacyBackupDoesNotBlockGroupedSaveInSameProcess);
     runStorageTest("orphanScanChildrenAreHiddenWhenSessionIsMissing", orphanScanChildrenAreHiddenWhenSessionIsMissing);
     runStorageTest("matchRunWithSameRunIdReplacesPreviousCandidates", matchRunWithSameRunIdReplacesPreviousCandidates);
     runStorageTest("failedMatchReplacementRollsBackAllFiles", failedMatchReplacementRollsBackAllFiles);

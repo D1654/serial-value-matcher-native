@@ -1,7 +1,7 @@
 # Task 6: Remove Broad Transport Facade
 
 > Phase: 2 — Win32 Session and Caller Migration
-> Status: pending
+> Status: Completed
 
 ---
 
@@ -97,12 +97,12 @@ Leave the tree with the old facade absent, the Win32 session as the sole concret
 
 ## Verification
 
-- [ ] `src/transport/serial_transport.h` is absent.
-- [ ] `rg -n "SerialTransport|Win32SerialPort|serialTransport_" src tests CMakeLists.txt` returns no output.
-- [ ] `rg -n "class SerialWriteQueue.*public|SerialWriteQueue.*override" src/transport/serial_write_queue.h` returns no output.
-- [ ] `rg -n "lastErrorText\(\)|lastErrorText_" src/transport src/win32` shows no transport decision API; UI text is derived from typed results.
-- [ ] No `using`, typedef, forwarding class, or temporary inheritance recreates the deleted facade.
-- [ ] Full portable CTest and MinGW/Wine native tests pass after a clean configure.
+- [x] `src/transport/serial_transport.h` is absent.
+- [x] `rg -n "SerialTransport|Win32SerialPort|serialTransport_" src tests CMakeLists.txt` returns no output.
+- [x] `rg -n "class SerialWriteQueue.*public|SerialWriteQueue.*override" src/transport/serial_write_queue.h` returns no output.
+- [x] `rg -n "lastErrorText\(\)|lastErrorText_" src/transport src/win32` shows no transport decision API; UI text is derived from typed results.
+- [x] No `using`, typedef, forwarding class, or temporary inheritance recreates the deleted facade.
+- [x] Full portable CTest and MinGW/Wine native tests pass after a clean configure.
 
 **Test command:**
 

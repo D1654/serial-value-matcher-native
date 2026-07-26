@@ -44,6 +44,18 @@ bool nativeSerialWriteCancellationMatches(
         && pending.matches(result.operation);
 }
 
+bool nativeSerialWriteShouldPublishOnClose(
+    const NativeSerialWriteKey& pending,
+    const svm::transport::SerialTerminalResult& result,
+    svm::transport::SerialSessionGeneration closingGeneration) noexcept {
+    return closingGeneration != svm::transport::kUnassignedSerialSessionGeneration
+        && pending.generation == closingGeneration
+        && result.terminal()
+        && result.status == svm::transport::SerialOperationStatus::Succeeded
+        && result.operation.kind == svm::transport::SerialOperationKind::Write
+        && pending.matches(result.operation);
+}
+
 NativeSerialWriteCompletionDecision nativeSerialWriteCompletionDecision(
     const NativeSerialWriteKey& pending,
     const svm::transport::SerialTerminalResult& result,
@@ -57,22 +69,24 @@ NativeSerialWriteCompletionDecision nativeSerialWriteCompletionDecision(
 
     const bool currentGeneration = currentSession.open()
         && currentSession.generation == result.operation.generation;
+    const bool matchingFaultGeneration =
+        currentSession.state == svm::transport::SerialSessionState::Faulted
+        && faultGeneration != svm::transport::kUnassignedSerialSessionGeneration
+        && result.operation.generation == faultGeneration;
     if (!currentGeneration) {
-        const bool currentFault = currentSession.state == svm::transport::SerialSessionState::Faulted
-            && faultGeneration != svm::transport::kUnassignedSerialSessionGeneration
-            && result.operation.generation == faultGeneration
+        const bool publishableFaultSuccess = matchingFaultGeneration
+            && result.status == svm::transport::SerialOperationStatus::Succeeded;
+        const bool currentFault = matchingFaultGeneration
             && result.status == svm::transport::SerialOperationStatus::Disconnected
             && result.error.category == svm::transport::SerialErrorCategory::Disconnected;
-        if (!currentFault) {
+        if (!publishableFaultSuccess && !currentFault) {
             return NativeSerialWriteCompletionDecision::Ignore;
         }
     }
 
     switch (result.status) {
     case svm::transport::SerialOperationStatus::Succeeded:
-        return currentGeneration
-            ? NativeSerialWriteCompletionDecision::Succeeded
-            : NativeSerialWriteCompletionDecision::Ignore;
+        return NativeSerialWriteCompletionDecision::Succeeded;
     case svm::transport::SerialOperationStatus::Cancelled:
         return NativeSerialWriteCompletionDecision::Cancelled;
     case svm::transport::SerialOperationStatus::Failed:

@@ -3,6 +3,7 @@
 #if defined(_WIN32)
 
 #include "win32/native_time_utils.h"
+#include "win32/utf8_win32.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -62,20 +63,37 @@ native_storage::RawIoEvent NativeMainWindow::makeRawSerialEvent(
     return event;
 }
 
-void NativeMainWindow::saveRawEvent(
+bool NativeMainWindow::saveRawEvent(
     const svm::transport::SerialOperationResult& result,
     const std::vector<std::uint8_t>& payload) {
-    if (!store_.isOpen()) {
-        return;
-    }
-    saveRawEvents({makeRawSerialEvent(result, payload)});
+    return saveRawEvents({makeRawSerialEvent(result, payload)});
 }
 
 bool NativeMainWindow::saveRawEvents(std::vector<native_storage::RawIoEvent> events) {
-    if (!store_.isOpen() || events.empty()) {
+    if (events.empty()) {
+        return true;
+    }
+    if (!store_.isOpen() || !store_.appendRawEvents(events)) {
+        reportStorageFailure(L"保存原始通信证据");
         return false;
     }
-    return store_.appendRawEvents(events);
+    return true;
+}
+
+void NativeMainWindow::reportStorageFailure(std::wstring_view operation) {
+    const std::wstring detail = utf8ToWide(store_.lastErrorText());
+    const std::wstring message = std::wstring(L"存储失败：")
+        + std::wstring(operation)
+        + (detail.empty() ? L"。" : L"：" + detail);
+    if (!storageFailureReported_) {
+        storageFailureReported_ = true;
+        appendLog(NativeLogKind::Error, message);
+    }
+    if (shuttingDown_ && !shutdownStorageFailureShown_) {
+        shutdownStorageFailureShown_ = true;
+        MessageBoxW(nullptr, message.c_str(), L"存储失败", MB_ICONERROR | MB_OK | MB_TASKMODAL);
+    }
+    setStatus(message);
 }
 
 } // namespace svm::win32

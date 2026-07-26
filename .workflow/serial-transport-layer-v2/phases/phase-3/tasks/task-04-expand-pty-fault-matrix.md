@@ -1,13 +1,17 @@
 # Task 04: Expand PTY Fault Matrix
 
 > Phase: 3 — Production Hardening
-> Status: pending
+> Status: Completed
 
 ---
 
 ## Objective
 
-Make close, cancellation, timeout, reopen, stale-generation, stress, and no-port behavior reproducible through the native loopback test and Linux/Wine PTY harness while preserving local-only release-candidate semantics.
+Make close, cancellation, timeout, reopen, reopen generation isolation, stress,
+and no-port behavior reproducible through the native loopback test and
+Linux/Wine PTY harness. Keep true stale-completion rejection in deterministic
+session/queue unit tests while preserving local-only release-candidate
+semantics.
 
 ## Files
 
@@ -46,9 +50,13 @@ Add a scenario that observes an in-flight request, closes the session, and requi
 
 Repeat open/close/reopen cycles and verify each new generation exchanges only its own request/response.
 
-### Step 4: Add stale-generation assertions
+### Step 4: Separate generation-isolation evidence
 
-Delay or retain an old completion and assert that it cannot update the replacement session or satisfy its response wait.
+Use `reopen-generation-isolation` to complete an exchange, close and reopen the
+session, verify that the generation changes, and complete a second exchange on
+the replacement session. Do not claim that this PTY scenario injects a late old
+response or completion. Verify real stale-completion rejection in the
+deterministic session/queue unit tests.
 
 ### Step 5: Keep timeout deterministic
 
@@ -72,7 +80,10 @@ Run the loopback executable without a COM endpoint and require a safe skip or pa
 
 ### Step 10: Extend harness controls
 
-Add validated environment controls for the new fault timings and scenario selection while retaining `normal,reopen,timeout,cancel,stress` defaults and bounded integer validation.
+Add validated environment controls for the new fault timings and scenario
+selection while retaining
+`normal,reopen,timeout,cancel,stress,close,reopen-generation-isolation` defaults
+and bounded integer validation.
 
 ### Step 11: Preserve summary semantics
 
@@ -88,11 +99,11 @@ Keep the harness and summary explicit that Windows GitHub Actions does not execu
 
 ## Verification
 
-- [ ] Focused native loopback/no-port and serial parameter tests pass.
-- [ ] MinGW builds every test executable before CTest; no-port safety remains green.
-- [ ] PTY normal/reopen/timeout/cancel/stress and new close/stale-generation paths pass.
-- [ ] Wine self-test/UI performance and package gates remain green.
-- [ ] Summary remains machine-readable and correctly classified as local-only.
+- [x] Focused native loopback/no-port and serial parameter tests pass.
+- [x] MinGW builds every test executable before CTest; no-port safety remains green.
+- [x] PTY `normal,reopen,timeout,cancel,stress,close,reopen-generation-isolation` paths pass, and deterministic session/queue tests reject real stale completions.
+- [x] Wine self-test/UI performance and package gates remain green.
+- [x] Summary remains machine-readable and correctly classified as local-only.
 
 **Focused command:**
 ```bash
@@ -122,7 +133,7 @@ native_win32_serial_loopback_tests ... passed or safely skipped without a port
 **PTY command:**
 ```bash
 SVM_MINGW_BUILD_DIR=build-windows-native-mingw \
-SVM_SERIAL_LOOPBACK_SCENARIOS=normal,reopen,timeout,cancel,stress \
+SVM_SERIAL_LOOPBACK_SCENARIOS=normal,reopen,timeout,cancel,stress,close,reopen-generation-isolation \
 SVM_SERIAL_LOOPBACK_REOPEN_COUNT=3 \
 SVM_SERIAL_LOOPBACK_STRESS_ITERATIONS=5000 \
 SVM_SERIAL_LOOPBACK_SUMMARY=artifacts/local/task-04-serial-pty-matrix-summary.txt \
@@ -136,6 +147,8 @@ python serial scenario ok scenario=reopen
 python serial scenario ok scenario=timeout
 python serial scenario ok scenario=cancel
 python serial scenario ok scenario=stress
+python serial scenario ok scenario=close
+python serial scenario ok scenario=reopen-generation-isolation
 python serial matrix summary gate-status=passed ...
 GateStatus=passed
 Classification=local-only-release-candidate-evidence

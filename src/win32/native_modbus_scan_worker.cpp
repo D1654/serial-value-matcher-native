@@ -276,7 +276,7 @@ DWORD WINAPI nativeModbusScanThreadProc(void* parameter) {
         };
 
         const core::modbus::ScanExecutionResult executionResult = executor.execute(context->plan, options);
-        result->cancelled = serialTransport.cancelObserved() || context->cancelRequested->load(std::memory_order_relaxed);
+        result->cancelled = executionResult.status == core::modbus::ScanExecutionStatus::Cancelled;
         result->serialFailed = serialTransport.serialFailed();
         applyExecutionResult(scanSessionId, endpoint, executionResult, result->execution);
         if (result->serialFailed) {
@@ -296,6 +296,9 @@ DWORD WINAPI nativeModbusScanThreadProc(void* parameter) {
                 break;
             case core::modbus::ScanExecutionStatus::CompletedWithErrors:
                 result->execution.session.status = result->execution.session.successBlockCount > 0 ? "partial" : "failed";
+                break;
+            case core::modbus::ScanExecutionStatus::Cancelled:
+                result->execution.session.status = "cancelled";
                 break;
             case core::modbus::ScanExecutionStatus::Failed:
                 result->execution.session.status = "failed";

@@ -1,7 +1,7 @@
 # Task 1: Harden Win32 Session Owner
 
 > Phase: 2 — Win32 Session and Caller Migration
-> Status: pending
+> Status: Completed
 
 ---
 
@@ -90,11 +90,11 @@ Leave the working tree with exactly one concrete session object in the main wind
 
 ## Verification
 
-- [ ] `rg -n "win32_serial_port|Win32SerialPort" CMakeLists.txt src tests` returns no active source or target reference.
-- [ ] `rg -n "Win32SerialSession" CMakeLists.txt src/win32 tests/native_win32_serial_tests.cpp` shows the owner, implementation, and test references.
-- [ ] `cmake --build build-windows-native-mingw --parallel 2` completes without duplicate backend symbols.
-- [ ] `native_win32_serial_tests` passes its no-port and queue assertions.
-- [ ] The session is non-copyable and no public method returns a native handle.
+- [x] `rg -n "win32_serial_port|Win32SerialPort" CMakeLists.txt src tests` returns no active source or target reference.
+- [x] `rg -n "Win32SerialSession" CMakeLists.txt src/win32 tests/native_win32_serial_tests.cpp` shows the owner, implementation, and test references.
+- [x] `cmake --build build-windows-native-mingw --parallel 2` completes without duplicate backend symbols.
+- [x] `native_win32_serial_tests` passes its no-port and queue assertions.
+- [x] The session is non-copyable and no public method returns a native handle.
 
 **Test command:**
 

@@ -1,7 +1,7 @@
 # Task 5: Migrate RTU and Modbus Borrowing
 
 > Phase: 2 — Win32 Session and Caller Migration
-> Status: pending
+> Status: Completed
 
 ---
 
@@ -91,11 +91,11 @@ Leave a planning note in the task result that malformed/late/stale RTU frame pol
 
 ## Verification
 
-- [ ] RTU adapter compiles against the byte capability without a Win32 include.
-- [ ] Modbus worker carries and checks generation, and stale results never update a replacement session.
-- [ ] Existing normal, chunked, timeout, cancellation, and write-failure tests pass.
-- [ ] RTU response assembly and callback ordering remain unchanged.
-- [ ] No Modbus/RTU file owns a handle, queue, reconnect policy, or UI state.
+- [x] RTU adapter compiles against the byte capability without a Win32 include.
+- [x] Modbus worker carries and checks generation, and stale results never update a replacement session.
+- [x] Existing normal, chunked, timeout, cancellation, and write-failure tests pass.
+- [x] RTU response assembly and callback ordering remain unchanged.
+- [x] No Modbus/RTU file owns a handle, queue, reconnect policy, or UI state.
 
 **Test command:**
 

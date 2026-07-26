@@ -1,7 +1,7 @@
 # Task 02: Enforce Transport Boundaries
 
 > Phase: 4 — Boundary and Release Closure
-> Status: Pending
+> Status: Completed
 
 ---
 
@@ -68,10 +68,10 @@ Configure a fresh host build, execute the boundary CTest and documentation consi
 
 ## Verification
 
-- [ ] Direct and self-test modes exit 0 on the valid repository.
-- [ ] The self-test proves each forbidden dependency category is rejected.
-- [ ] CTest lists and passes the boundary test.
-- [ ] Documentation consistency and the full host CTest suite pass.
+- [x] Direct and self-test modes exit 0 on the valid repository.
+- [x] The self-test proves each forbidden dependency category is rejected.
+- [x] CTest lists and passes the boundary test.
+- [x] Documentation consistency and the full host CTest suite pass.
 
 **Test command:**
 

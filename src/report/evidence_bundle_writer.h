@@ -52,6 +52,7 @@ struct EvidenceBundleRedactionOptions {
 };
 
 struct EvidenceBundleWriteOptions {
+    // Must name a new dedicated child of an existing parent directory.
     std::filesystem::path outputDirectory;
     EvidenceBundleRedactionOptions redaction;
     bool includeRawEvents = true;

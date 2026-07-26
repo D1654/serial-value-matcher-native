@@ -54,8 +54,20 @@ require_binary_env() {
     fi
 }
 
+require_package_name() {
+    local name="$1"
+    if [[ ! "$name" =~ ^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$ || "$name" == *".."* ]]; then
+        echo "SVM_MINGW_PACKAGE_NAME 仅接受不含路径或连续点号的 ASCII 文件名，当前值：$name" >&2
+        exit 2
+    fi
+}
+
 require_binary_env SVM_SKIP_WINE_TEST "$skip_wine"
 require_binary_env SVM_STRICT_WINE_TEST "$strict_wine"
+require_package_name "$package_name"
+
+mkdir -p "$package_root"
+package_root="$(cd "$package_root" && pwd -P)"
 
 if [[ "$skip_build" -eq 0 ]]; then
     "$repo_root/scripts/build-windows-native-mingw.sh"
@@ -106,15 +118,14 @@ zip_path="$package_root/$package_name.zip"
 hash_path="$zip_path.sha256.txt"
 summary_path="$package_root/$package_name.package-summary.txt"
 
-rm -rf "$stage_dir"
+rm -rf -- "$stage_dir"
 mkdir -p "$stage_dir/docs"
 cp "$exe_path" "$stage_dir/"
 x86_64-w64-mingw32-strip --strip-all "$stage_dir/svm-native-win32.exe"
 cp "$repo_root/README.md" "$stage_dir/"
 cp -R "$repo_root/docs/." "$stage_dir/docs/"
 
-rm -f "$zip_path" "$hash_path" "$summary_path"
-mkdir -p "$package_root"
+rm -f -- "$zip_path" "$hash_path" "$summary_path"
 (
     cd "$stage_dir"
     7z a -tzip "$zip_path" ./*

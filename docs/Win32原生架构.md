@@ -155,7 +155,7 @@ Win32 event
 - `native_win32_serial_tests` 覆盖串口参数和基础状态。
 - `serial_session_contract_tests` 覆盖串口会话生命周期、读写和队列语义。
 - `native_modbus_transport_adapter_tests` 覆盖 RTU adapter 的分块响应、超时、取消和失败分类。
-- `native_win32_serial_loopback_tests` 覆盖 normal、reopen、timeout、cancel、stress、close、stale 场景，需要 PTY 脚本提供端点。
+- `native_win32_serial_loopback_tests` 覆盖 normal、reopen、timeout、cancel、stress、close、reopen-generation-isolation 场景，需要 PTY 脚本提供端点；真实 stale completion 拒绝由确定性 session/queue 单元测试覆盖。
 
 ## 发送链路
 

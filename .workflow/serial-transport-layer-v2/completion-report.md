@@ -120,6 +120,13 @@ git diff --check
 - `WinePrefix=/root/.wine`
 - `CiExecutesPtyMatrix=no`
 
+This historical artifact is bound to implementation target `2f69480`, where the
+final scenario was labeled `stale` even though it completed the old exchange
+before close/reopen and did not inject a late old completion. Post-completion
+review renamed the current scenario to `reopen-generation-isolation`; current
+seven-scenario evidence is recorded in the bug-fixer review rather than
+rewriting this historical artifact identity.
+
 Evidence:
 
 - `artifacts/local/serial-transport-v2-final/serial-pty-matrix.log`

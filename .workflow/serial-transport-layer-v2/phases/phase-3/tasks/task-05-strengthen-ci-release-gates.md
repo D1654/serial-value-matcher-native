@@ -1,7 +1,7 @@
 # Task 05: Strengthen CI Release Gates
 
 > Phase: 3 — Production Hardening
-> Status: pending
+> Status: Completed
 
 ---
 
@@ -99,11 +99,11 @@ Inspect CMake target inventory, workflow evidence names, package summary terms, 
 
 ## Verification
 
-- [ ] Host and Windows/MinGW CMake graphs register all hardened session sources/tests.
-- [ ] Package workflow remains CI-blocking for CTest, self-test, UI perf, package audit, docs consistency, and evidence completeness.
-- [ ] PTY remains local-only evidence and is not misreported as Windows CI execution.
-- [ ] Existing package size/security/hash/runtime/documentation gates remain unchanged or stricter.
-- [ ] UI workflow still triggers for transport source/test changes.
+- [x] Host and Windows/MinGW CMake graphs register all hardened session sources/tests.
+- [x] Package workflow remains CI-blocking for CTest, self-test, UI perf, package audit, docs consistency, and evidence completeness.
+- [x] PTY remains local-only evidence and is not misreported as Windows CI execution.
+- [x] Existing package size/security/hash/runtime/documentation gates remain unchanged or stricter.
+- [x] UI workflow still triggers for transport source/test changes.
 
 **Focused command:**
 ```bash
@@ -134,7 +134,7 @@ ctest --test-dir build-windows-native-mingw --output-on-failure
 **PTY command:**
 ```bash
 SVM_MINGW_BUILD_DIR=build-windows-native-mingw \
-SVM_SERIAL_LOOPBACK_SCENARIOS=normal,reopen,timeout,cancel,stress \
+SVM_SERIAL_LOOPBACK_SCENARIOS=normal,reopen,timeout,cancel,stress,close,reopen-generation-isolation \
 SVM_SERIAL_LOOPBACK_SUMMARY=artifacts/local/task-05-serial-pty-matrix-summary.txt \
 python3 scripts/run-windows-native-serial-pty-loopback.py
 ```
@@ -143,7 +143,7 @@ python3 scripts/run-windows-native-serial-pty-loopback.py
 ```
 GateStatus=passed
 Classification=local-only-release-candidate-evidence
-ExpectedScenarios=normal,reopen,timeout,cancel,stress
+Scenarios=normal,reopen,timeout,cancel,stress,close,reopen-generation-isolation
 ```
 
 **Wine command:**

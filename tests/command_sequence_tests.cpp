@@ -3,6 +3,7 @@
 #include <cassert>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <optional>
@@ -37,6 +38,17 @@ ByteBuffer modbusReadResponse(int slaveId, Byte functionCode, int startAddress, 
 
 class FakeModbusTransport final : public svm::core::modbus::RtuTransport {
 public:
+    struct ScriptedResult {
+        svm::core::modbus::RtuTransportExchangeStatus status;
+        svm::core::Text errorMessage;
+    };
+
+    void enqueueResult(
+        svm::core::modbus::RtuTransportExchangeStatus status,
+        svm::core::Text errorMessage) {
+        scriptedResults.push_back({status, std::move(errorMessage)});
+    }
+
     svm::core::modbus::RtuTransportExchange exchange(svm::core::ByteSpan requestFrame, int responseTimeoutMs) override {
         timeoutValues.push_back(responseTimeoutMs);
         requests.emplace_back(requestFrame.begin(), requestFrame.end());
@@ -51,7 +63,22 @@ public:
         if (requestFrame.size() < 6) {
             result.status = svm::core::modbus::RtuTransportExchangeStatus::TransportError;
             result.errorMessage = "bad request";
+            if (onExchange) {
+                onExchange();
+            }
             return result;
+        }
+
+        if (nextScriptedResult < scriptedResults.size()) {
+            const ScriptedResult& scripted = scriptedResults[nextScriptedResult++];
+            result.status = scripted.status;
+            result.errorMessage = scripted.errorMessage;
+            if (scripted.status != svm::core::modbus::RtuTransportExchangeStatus::Success) {
+                if (onExchange) {
+                    onExchange();
+                }
+                return result;
+            }
         }
 
         const int slaveId = requestFrame[0];
@@ -59,11 +86,17 @@ public:
         const int startAddress = (static_cast<int>(requestFrame[2]) << 8) | static_cast<int>(requestFrame[3]);
         const int quantity = (static_cast<int>(requestFrame[4]) << 8) | static_cast<int>(requestFrame[5]);
         result.responseFrame = modbusReadResponse(slaveId, functionCode, startAddress, quantity);
+        if (onExchange) {
+            onExchange();
+        }
         return result;
     }
 
     std::vector<ByteBuffer> requests;
     std::vector<int> timeoutValues;
+    std::vector<ScriptedResult> scriptedResults;
+    std::size_t nextScriptedResult = 0;
+    std::function<void()> onExchange;
 };
 
 AssertionCommand serialAcceptedAssertion() {
@@ -95,6 +128,18 @@ ModbusReadCommand readRegisters(int startAddress, int quantity) {
     command.quantity = quantity;
     command.responseTimeoutMs = 250;
     return command;
+}
+
+CommandSequence modbusReadSequence(svm::core::Text id, int retryCount) {
+    ModbusReadCommand command = readRegisters(10, 1);
+    command.retryCount = retryCount;
+
+    CommandSequence sequence;
+    sequence.id = std::move(id);
+    sequence.steps = {
+        svm::command_sequence::makeModbusReadStep("read", command),
+    };
+    return sequence;
 }
 
 bool hasMetadataValue(
@@ -322,6 +367,166 @@ void cancellationStopsBeforeDispatchingBackendWork() {
     assert(scheduler.empty());
 }
 
+void modbusRetryClassificationUsesFinalTypedAttempt() {
+    {
+        FakeModbusTransport transport;
+        transport.enqueueResult(
+            svm::core::modbus::RtuTransportExchangeStatus::Timeout,
+            "first timeout text is not a status");
+        transport.enqueueResult(
+            svm::core::modbus::RtuTransportExchangeStatus::TransportError,
+            "final transport failure");
+
+        CommandSequenceExecutionContext context;
+        context.modbusTransport = &transport;
+        const auto result = svm::command_sequence::executeCommandSequence(
+            modbusReadSequence("seq-timeout-then-transport", 1),
+            context);
+
+        assert(result.status == CommandExecutionStatus::Failed);
+        assert(result.steps.size() == 1);
+        assert(result.steps[0].status == CommandExecutionStatus::Failed);
+        assert(result.message == "final transport failure");
+        assert(transport.requests.size() == 2);
+    }
+
+    {
+        FakeModbusTransport transport;
+        transport.enqueueResult(
+            svm::core::modbus::RtuTransportExchangeStatus::TransportError,
+            "first transport failure");
+        transport.enqueueResult(
+            svm::core::modbus::RtuTransportExchangeStatus::Timeout,
+            "final timeout text is not a status");
+
+        CommandSequenceExecutionContext context;
+        context.modbusTransport = &transport;
+        const auto result = svm::command_sequence::executeCommandSequence(
+            modbusReadSequence("seq-transport-then-timeout", 1),
+            context);
+
+        assert(result.status == CommandExecutionStatus::Timeout);
+        assert(result.steps.size() == 1);
+        assert(result.steps[0].status == CommandExecutionStatus::Timeout);
+        assert(result.message == "final timeout text is not a status");
+        assert(transport.requests.size() == 2);
+    }
+}
+
+void modbusCancellationDuringExchangeUsesTypedStatus() {
+    FakeModbusTransport transport;
+    transport.enqueueResult(
+        svm::core::modbus::RtuTransportExchangeStatus::TransportError,
+        "arbitrary transport text");
+    bool cancelRequested = false;
+    transport.onExchange = [&cancelRequested] {
+        cancelRequested = true;
+    };
+
+    CommandSequenceExecutionContext context;
+    context.modbusTransport = &transport;
+    context.shouldCancel = [&cancelRequested] {
+        return cancelRequested;
+    };
+
+    const auto result = svm::command_sequence::executeCommandSequence(
+        modbusReadSequence("seq-cancel-during-modbus", 0),
+        context);
+
+    assert(result.status == CommandExecutionStatus::Cancelled);
+    assert(result.steps.size() == 1);
+    assert(result.steps[0].status == CommandExecutionStatus::Cancelled);
+    assert(hasMetadataValue(result.steps[0].metadata, "modbus_status", "cancelled"));
+    assert(transport.requests.size() == 1);
+}
+
+void delayBackendAndCancellationContractIsFailClosed() {
+    {
+        CommandSequence sequence;
+        sequence.id = "seq-delay-no-backend";
+        sequence.steps = {svm::command_sequence::makeDelayStep("delay", 1)};
+
+        const auto result = svm::command_sequence::executeCommandSequence(sequence, {});
+        assert(result.status == CommandExecutionStatus::Failed);
+        assert(result.steps.size() == 1);
+        assert(result.steps[0].message == "Delay backend is not available.");
+        assert(result.evidence.size() == 1);
+        assert(result.evidence[0].status == CommandExecutionStatus::Failed);
+    }
+
+    {
+        CommandSequence sequence;
+        sequence.id = "seq-zero-delay";
+        sequence.steps = {svm::command_sequence::makeDelayStep("delay", 0)};
+
+        const auto result = svm::command_sequence::executeCommandSequence(sequence, {});
+        assert(result.status == CommandExecutionStatus::Completed);
+    }
+
+    {
+        CommandSequence sequence;
+        sequence.id = "seq-cancellable-delay";
+        sequence.steps = {svm::command_sequence::makeDelayStep("delay", 250)};
+        bool cancelRequested = false;
+        std::vector<int> sleepSlices;
+
+        CommandSequenceExecutionContext context;
+        context.shouldCancel = [&cancelRequested] {
+            return cancelRequested;
+        };
+        context.sleepForMs = [&](int durationMs) {
+            sleepSlices.push_back(durationMs);
+            cancelRequested = true;
+        };
+
+        const auto result = svm::command_sequence::executeCommandSequence(sequence, context);
+        assert(result.status == CommandExecutionStatus::Cancelled);
+        assert(result.steps.size() == 1);
+        assert(result.steps[0].status == CommandExecutionStatus::Cancelled);
+        assert(result.evidence[0].status == CommandExecutionStatus::Cancelled);
+        assert((sleepSlices == std::vector<int>{100}));
+    }
+
+    {
+        CommandSequence sequence;
+        sequence.id = "seq-final-slice-cancel";
+        sequence.steps = {svm::command_sequence::makeDelayStep("delay", 1)};
+        bool cancelRequested = false;
+
+        CommandSequenceExecutionContext context;
+        context.shouldCancel = [&cancelRequested] {
+            return cancelRequested;
+        };
+        context.sleepForMs = [&cancelRequested](int durationMs) {
+            assert(durationMs == 1);
+            cancelRequested = true;
+        };
+
+        const auto result = svm::command_sequence::executeCommandSequence(sequence, context);
+        assert(result.status == CommandExecutionStatus::Cancelled);
+        assert(result.steps[0].status == CommandExecutionStatus::Cancelled);
+    }
+
+    {
+        CommandSequence sequence;
+        sequence.id = "seq-complete-sliced-delay";
+        sequence.steps = {svm::command_sequence::makeDelayStep("delay", 250)};
+        std::vector<int> sleepSlices;
+
+        CommandSequenceExecutionContext context;
+        context.shouldCancel = [] {
+            return false;
+        };
+        context.sleepForMs = [&sleepSlices](int durationMs) {
+            sleepSlices.push_back(durationMs);
+        };
+
+        const auto result = svm::command_sequence::executeCommandSequence(sequence, context);
+        assert(result.status == CommandExecutionStatus::Completed);
+        assert((sleepSlices == std::vector<int>{100, 100, 50}));
+    }
+}
+
 void assertionFailureStopsSequenceAndRecordsResult() {
     CommandSequence sequence;
     sequence.id = "seq-assertion-fail";
@@ -391,6 +596,9 @@ int main() {
     validSequenceUsesExistingBackendsAndRecordsEvidence();
     waitForResponseTimeoutStopsSequence();
     cancellationStopsBeforeDispatchingBackendWork();
+    modbusRetryClassificationUsesFinalTypedAttempt();
+    modbusCancellationDuringExchangeUsesTypedStatus();
+    delayBackendAndCancellationContractIsFailClosed();
     assertionFailureStopsSequenceAndRecordsResult();
     unsafeCommandIsRejectedBeforeBackendWork();
     stableStatusNamesAreTokenLike();

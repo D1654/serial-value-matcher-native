@@ -224,12 +224,11 @@ add_test(
             "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-transport-boundaries.py"
             --self-test
 )
-set_tests_properties(
-    transport_boundary_tests
-    transport_boundary_self_tests
-    PROPERTIES TIMEOUT 10
+add_test(
+    NAME inspect_windows_package_tests
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/inspect_windows_package_tests.py"
 )
-
 if(MSVC)
     add_compile_options(/UNDEBUG)
 else()
@@ -670,4 +669,25 @@ if(SVM_BUILD_WIN32_APP)
             _UNICODE
     )
     add_test(NAME native_win32_analysis_workflow_tests COMMAND native_win32_analysis_workflow_tests)
+endif()
+
+get_property(svm_all_tests DIRECTORY PROPERTY TESTS)
+set_tests_properties(${svm_all_tests} PROPERTIES TIMEOUT 30)
+set_tests_properties(
+    transport_boundary_tests
+    transport_boundary_self_tests
+    PROPERTIES TIMEOUT 10
+)
+set_tests_properties(
+    serial_write_queue_tests
+    serial_session_contract_tests
+    native_modbus_transport_adapter_tests
+    native_win32_serial_tests
+    PROPERTIES TIMEOUT 60
+)
+if(WIN32)
+    set_tests_properties(native_win32_serial_loopback_tests PROPERTIES
+        TIMEOUT 120
+        SKIP_RETURN_CODE 77
+    )
 endif()

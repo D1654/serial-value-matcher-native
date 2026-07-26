@@ -1,7 +1,7 @@
 # Phase 1: Contract Foundation
 
 > Parent: [Project Plan](../../project-plan.md)
-> Status: Pending
+> Status: Completed
 
 ---
 
@@ -11,8 +11,8 @@ Define the smallest neutral session, capability, operation-result, and bounded-q
 
 ## Prerequisites
 
-- [ ] The approved project plan remains the source of truth.
-- [ ] Current host contract, queue, command-sequence, and RTU adapter tests pass before changes.
+- [x] The approved project plan remains the source of truth.
+- [x] Current host contract, queue, command-sequence, and RTU adapter tests pass before changes.
 
 ## Libraries & Dependencies
 
@@ -29,17 +29,17 @@ No external libraries. This phase uses only C++20 standard-library facilities an
 
 ## Deliverables
 
-- [ ] One neutral `serial_session.h` containing only meaningful session/capability contracts.
-- [ ] Structured session and operation result types with generation and native evidence fields.
-- [ ] A queue whose count and byte budgets are fully tested.
-- [ ] Command writes compiled against the narrow scheduler capability and a complete fake session contract suite.
+- [x] One neutral `serial_session.h` containing only meaningful session/capability contracts.
+- [x] Structured session and operation result types with generation and native evidence fields.
+- [x] A queue whose count and byte budgets are fully tested.
+- [x] Command writes compiled against the narrow scheduler capability and a complete fake session contract suite.
 
 ## Verification Checklist
 
-- [ ] Run focused host tests for transport contracts, queue, command sequence, and file send.
-- [ ] Run a fresh host build with `SVM_BUILD_WIN32_APP=OFF` and all host CTest targets.
-- [ ] Confirm no neutral transport header includes Win32 or UI headers.
-- [ ] Confirm queue rejection never removes older work and IDs remain monotonic.
+- [x] Run focused host tests for transport contracts, queue, command sequence, and file send.
+- [x] Run a fresh host build with `SVM_BUILD_WIN32_APP=OFF` and all host CTest targets.
+- [x] Confirm no neutral transport header includes Win32 or UI headers.
+- [x] Confirm queue rejection never removes older work and IDs remain monotonic.
 
 ## Phase-Specific Risks
 
